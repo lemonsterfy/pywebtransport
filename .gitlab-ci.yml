@@ -62,7 +62,9 @@ deploy:
   dependencies:
     - build
   before_script:
-    - apt-get update && apt-get install -y git
+    - apt-get update && apt-get install -y ca-certificates git
+    - cp $INTERNAL_CA_CERT /usr/local/share/ca-certificates/internal_ca.crt
+    - update-ca-certificates
     - python -m pip install --upgrade pip
     - pip install hatch
     - pip install .
