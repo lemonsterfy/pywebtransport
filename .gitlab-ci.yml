@@ -62,8 +62,10 @@ deploy:
   dependencies:
     - build
   before_script:
+    - apt-get update && apt-get install -y git
     - python -m pip install --upgrade pip
     - pip install hatch
+    - pip install .
   script:
     # Check if version already released
     - export VERSION=$(python -c "from src.pywebtransport.version import __version__; print(__version__)")
