@@ -1,0 +1,177 @@
+"""
+WebTransport session manager implementation.
+"""
+
+import asyncio
+from collections import defaultdict
+from types import TracebackType
+from typing import Any, Dict, List, Optional, Type
+
+from ..exceptions import SessionError
+from ..types import SessionId, SessionState
+from ..utils import get_logger
+from .session import WebTransportSession
+
+__all__ = ["SessionManager"]
+
+logger = get_logger("session.manager")
+
+
+class SessionManager:
+    """Manages multiple WebTransport sessions with concurrency safety."""
+
+    def __init__(
+        self,
+        *,
+        max_sessions: int = 1000,
+        cleanup_interval: float = 300.0,
+    ):
+        """Initialize the session manager."""
+        self._max_sessions = max_sessions
+        self._cleanup_interval = cleanup_interval
+        self._lock = asyncio.Lock()
+        self._sessions: Dict[SessionId, "WebTransportSession"] = {}
+        self._stats = {
+            "total_created": 0,
+            "total_closed": 0,
+            "current_count": 0,
+            "max_concurrent": 0,
+        }
+        self._cleanup_task: Optional[asyncio.Task[None]] = None
+
+    @classmethod
+    def create(cls, *, max_sessions: int = 1000, cleanup_interval: float = 300.0) -> "SessionManager":
+        """Factory method to create a new session manager instance."""
+        return cls(max_sessions=max_sessions, cleanup_interval=cleanup_interval)
+
+    async def __aenter__(self) -> "SessionManager":
+        """Enter async context, starting background tasks."""
+        self._start_cleanup_task()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Exit async context, shutting down the manager."""
+        await self.shutdown()
+
+    async def shutdown(self) -> None:
+        """Shut down the session manager and close all active sessions."""
+        logger.info("Shutting down session manager")
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+        await self.close_all_sessions()
+        logger.info("Session manager shutdown complete")
+
+    async def close_all_sessions(self) -> None:
+        """Close all currently managed sessions."""
+        async with self._lock:
+            sessions_to_close = list(self._sessions.values())
+            if not sessions_to_close:
+                return
+            logger.info(f"Closing {len(sessions_to_close)} sessions")
+
+        close_tasks = [session.close() for session in sessions_to_close]
+        await asyncio.gather(*close_tasks, return_exceptions=True)
+
+        async with self._lock:
+            self._sessions.clear()
+            self._update_stats_unsafe()
+        logger.info("All sessions closed")
+
+    async def add_session(self, session: "WebTransportSession") -> SessionId:
+        """Add a new session to the manager."""
+        async with self._lock:
+            if len(self._sessions) >= self._max_sessions:
+                raise SessionError(f"Maximum sessions ({self._max_sessions}) exceeded")
+            session_id = session.session_id
+            self._sessions[session_id] = session
+            self._stats["total_created"] += 1
+            self._update_stats_unsafe()
+            logger.debug(f"Added session {session_id} (total: {len(self._sessions)})")
+            return session_id
+
+    async def remove_session(self, session_id: SessionId) -> Optional["WebTransportSession"]:
+        """Remove a session from the manager by its ID."""
+        async with self._lock:
+            session = self._sessions.pop(session_id, None)
+            if session:
+                self._stats["total_closed"] += 1
+                self._update_stats_unsafe()
+                logger.debug(f"Removed session {session_id} (total: {len(self._sessions)})")
+            return session
+
+    async def get_session(self, session_id: SessionId) -> Optional["WebTransportSession"]:
+        """Retrieve a session by its ID."""
+        async with self._lock:
+            return self._sessions.get(session_id)
+
+    async def get_all_sessions(self) -> List["WebTransportSession"]:
+        """Retrieve a list of all current sessions."""
+        async with self._lock:
+            return list(self._sessions.values())
+
+    async def get_sessions_by_state(self, state: SessionState) -> List["WebTransportSession"]:
+        """Retrieve sessions that are in a specific state."""
+        async with self._lock:
+            return [session for session in self._sessions.values() if session.state == state]
+
+    async def cleanup_closed_sessions(self) -> int:
+        """Find and remove any sessions that are marked as closed."""
+        async with self._lock:
+            all_sessions = list(self._sessions.items())
+        closed_session_ids = [session_id for session_id, session in all_sessions if session.is_closed]
+
+        if not closed_session_ids:
+            return 0
+
+        logger.debug(f"Found {len(closed_session_ids)} closed sessions to clean up.")
+        for session_id in closed_session_ids:
+            await self.remove_session(session_id)
+        return len(closed_session_ids)
+
+    def get_session_count(self) -> int:
+        """Get the current number of active sessions (non-locking)."""
+        return len(self._sessions)
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get detailed statistics about the managed sessions."""
+        async with self._lock:
+            states: Dict[str, int] = defaultdict(int)
+            for session in self._sessions.values():
+                states[session.state.value] += 1
+            return {
+                **self._stats,
+                "active_sessions": len(self._sessions),
+                "states": dict(states),
+                "max_sessions": self._max_sessions,
+            }
+
+    def _start_cleanup_task(self) -> None:
+        """Start the background task for periodic cleanup if not running."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+
+    async def _periodic_cleanup(self) -> None:
+        """Periodically run the cleanup process."""
+        try:
+            while True:
+                await asyncio.sleep(self._cleanup_interval)
+                await self.cleanup_closed_sessions()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Session cleanup error: {e}")
+
+    def _update_stats_unsafe(self) -> None:
+        """Update internal statistics (must be called within a lock)."""
+        current_count = len(self._sessions)
+        self._stats["current_count"] = current_count
+        self._stats["max_concurrent"] = max(self._stats["max_concurrent"], current_count)

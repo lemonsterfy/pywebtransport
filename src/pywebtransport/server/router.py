@@ -1,0 +1,86 @@
+"""
+WebTransport Request Router.
+
+This module provides the RequestRouter class, which maps session paths
+to appropriate handlers using exact matches and regular expressions.
+"""
+
+import re
+from typing import Any, Dict, List, Optional, Pattern, Tuple
+
+from ..session import WebTransportSession
+from ..types import SessionHandler
+from ..utils import get_logger
+
+__all__ = ["RequestRouter"]
+
+logger = get_logger("server.router")
+
+
+class RequestRouter:
+    """Routes session requests to handlers based on path matching."""
+
+    def __init__(self) -> None:
+        """Initialize the request router."""
+        self._routes: Dict[str, SessionHandler] = {}
+        self._pattern_routes: List[Tuple[Pattern[str], SessionHandler]] = []
+        self._default_handler: Optional[SessionHandler] = None
+
+    def route_request(self, session: WebTransportSession) -> Optional[SessionHandler]:
+        """Route a request to the appropriate handler based on the session's path."""
+        path = session.path
+        handler: Optional[SessionHandler] = None
+
+        if path in self._routes:
+            handler = self._routes[path]
+        else:
+            for pattern, pattern_handler in self._pattern_routes:
+                match = pattern.match(path)
+                if match:
+                    setattr(session, "path_params", match.groups())
+                    handler = pattern_handler
+                    break
+
+        return handler or self._default_handler
+
+    def add_route(self, path: str, handler: SessionHandler) -> None:
+        """Add a route for an exact path match."""
+        self._routes[path] = handler
+        logger.debug(f"Added route: {path}")
+
+    def add_pattern_route(self, pattern: str, handler: SessionHandler) -> None:
+        """Add a route for a regular expression pattern."""
+        try:
+            compiled_pattern = re.compile(pattern)
+            self._pattern_routes.append((compiled_pattern, handler))
+            logger.debug(f"Added pattern route: {pattern}")
+        except re.error as e:
+            logger.error(f"Invalid regex pattern '{pattern}': {e}")
+            raise
+
+    def remove_route(self, path: str) -> None:
+        """Remove a route for an exact path match."""
+        if path in self._routes:
+            del self._routes[path]
+            logger.debug(f"Removed route: {path}")
+
+    def set_default_handler(self, handler: SessionHandler) -> None:
+        """Set a default handler for routes that are not matched."""
+        self._default_handler = handler
+        logger.debug("Set default handler")
+
+    def get_route_handler(self, path: str) -> Optional[SessionHandler]:
+        """Get the handler for a specific path (exact match only)."""
+        return self._routes.get(path)
+
+    def get_all_routes(self) -> Dict[str, SessionHandler]:
+        """Get a copy of all registered exact-match routes."""
+        return self._routes.copy()
+
+    def get_route_stats(self) -> Dict[str, Any]:
+        """Get statistics about the configured routes."""
+        return {
+            "exact_routes": len(self._routes),
+            "pattern_routes": len(self._pattern_routes),
+            "has_default_handler": self._default_handler is not None,
+        }
