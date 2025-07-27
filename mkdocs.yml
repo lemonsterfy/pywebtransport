@@ -1,0 +1,67 @@
+site_name: PyWebTransport
+site_description: Modern Python WebTransport library
+site_url: https://pywebtransport.readthedocs.io
+repo_url: https://github.com/lemonsterfy/pywebtransport
+repo_name: lemonsterfy/pywebtransport
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.tabs
+    - navigation.sections
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quick Start: quickstart.md
+  - User Guide:
+      - Client Development: user-guide/client.md
+      - Server Development: user-guide/server.md
+  - API Reference:
+      - Overview: api-reference/index.md
+      - Client: api-reference/client.md
+      - Server: api-reference/server.md
+      - Session: api-reference/session.md
+      - Stream: api-reference/stream.md
+      - Datagram: api-reference/datagram.md
+      - Connection: api-reference/connection.md
+      - Configuration: api-reference/config.md
+      - Events: api-reference/events.md
+      - Types: api-reference/types.md
+      - Constants: api-reference/constants.md
+      - Exceptions: api-reference/exceptions.md
+      - Protocol: api-reference/protocol.md
+      - Utils: api-reference/utils.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            docstring_style: google
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - admonition
+  - toc:
+      permalink: true
+
+copyright: Copyright &copy; 2025 lemonsterfy

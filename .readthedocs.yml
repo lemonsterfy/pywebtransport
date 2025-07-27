@@ -1,0 +1,18 @@
+# PyWebTransport Read the Docs Configuration
+
+version: 2
+
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "3.11"
+
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs
+
+mkdocs:
+  configuration: mkdocs.yml

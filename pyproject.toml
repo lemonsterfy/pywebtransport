@@ -1,0 +1,189 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pywebtransport"
+dynamic = ["version"] 
+description = "A high-performance, async-native WebTransport implementation for Python."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [
+    {name = "lemonsterfy", email = "lemonsterfy@gmail.com"},
+]
+keywords = ["webtransport", "http3", "quic", "async", "networking"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking",
+    "Framework :: AsyncIO",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "aioquic>=1.2.0,<2.0.0",
+    "cryptography>=45.0.4,<46.0.0",
+    "typing-extensions>=4.14.0,<5.0.0;python_version<'3.10'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=25.1.0,<26.0.0",
+    "flake8>=7.2.0,<8.0.0",
+    "mypy>=1.16.1,<2.0.0",
+    "isort>=6.0.1,<7.0.0",
+    "pre-commit>=4.2.0,<5.0.0",
+    "pytest>=8.4.1,<9.0.0",
+    "pytest-asyncio>=1.0.0,<2.0.0",
+    "pytest-cov>=6.2.1,<7.0.0",
+    "pytest-benchmark>=5.1.0,<6.0.0",
+    "pytest-mock>=3.14.1,<4.0.0",
+]
+test = [
+    "pytest>=8.4.1,<9.0.0",
+    "pytest-asyncio>=1.0.0,<2.0.0",
+    "pytest-cov>=6.2.1,<7.0.0",
+    "pytest-benchmark>=5.1.0,<6.0.0",
+    "pytest-mock>=3.14.1,<4.0.0",
+]
+docs = [
+    "mkdocs>=1.6.1,<2.0.0",
+    "mkdocs-material>=9.6.14,<10.0.0",
+    "mkdocstrings[python]>=0.29.1,<1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/lemonsterfy/pywebtransport"
+Documentation = "https://pywebtransport.readthedocs.io"
+Repository = "https://github.com/lemonsterfy/pywebtransport.git"
+Issues = "https://github.com/lemonsterfy/pywebtransport/issues"
+Changelog = "https://github.com/lemonsterfy/pywebtransport/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/pywebtransport/version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/py.typed",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pywebtransport"]
+
+[tool.black]
+line-length = 120
+target-version = ["py38"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+known_first_party = ["pywebtransport"]
+skip_glob = ["**/__init__.py"]
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "docs/source/conf.py",
+    "build",
+    "dist",
+    ".eggs",
+    "*.egg",
+    ".mypy_cache",
+]
+
+[tool.mypy]
+mypy_path = "src"
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "aioquic.*",
+    "cryptography.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+minversion = "8.4"
+addopts = "-ra -q --strict-markers --strict-config --ignore-glob='tests/e2e/test_0*.py'"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "performance: Performance tests",
+    "network: Tests requiring network access",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+parallel = true
+omit = [
+    "tests/*",
+    "src/pywebtransport/protocol/h3.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
+precision = 2

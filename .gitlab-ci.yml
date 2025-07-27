@@ -1,0 +1,92 @@
+# PyWebTransport CI/CD Pipeline
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_COLOR: "1"
+
+cache:
+  paths:
+    - .cache/pip
+
+# Test stage - runs on dev and main branches
+test:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -e ".[dev]"
+  script:
+    - black --check src tests
+    - flake8 src tests
+    - mypy src
+    - pytest --cov=pywebtransport --cov-report=term --cov-report=xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Build stage - only runs on main branch
+build:
+  stage: build
+  image: python:3.11-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install hatch
+  script:
+    - hatch build
+    - echo "Built packages:"
+    - ls -la dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Deploy stage - only runs on main branch
+deploy:
+  stage: deploy
+  image: python:3.11-slim
+  dependencies:
+    - build
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install hatch
+  script:
+    # Check if version already released
+    - export VERSION=$(python -c "from src.pywebtransport.version import __version__; print(__version__)")
+    - |
+      if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION"; then
+        echo "Version v$VERSION already released - skipping"
+        exit 0
+      fi
+
+    # Publish to PyPI
+    - hatch publish
+
+    # Create git tag
+    - git config user.name "GitLab CI"
+    - git config user.email "ci@gitlab.local"
+    - git tag "v$VERSION"
+    - git push origin "v$VERSION"
+
+    # Push to GitHub
+    - git remote add github https://$GITHUB_TOKEN@github.com/lemonsterfy/pywebtransport.git
+    - git push github $CI_COMMIT_BRANCH --tags || echo "GitHub sync failed (release still successful)"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  environment:
+    name: production
+    url: https://pypi.org/project/pywebtransport/
