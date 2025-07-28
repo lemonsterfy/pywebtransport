@@ -8,14 +8,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from pywebtransport import CertificateError, ClientConfig, ConfigurationError, ServerConfig
-from pywebtransport.config import ConfigBuilder
-from pywebtransport.config import __version__ as real_version
-from pywebtransport.config import _validate_port, _validate_timeout
-
-
-@pytest.fixture(autouse=True)
-def mock_import_time_defaults(mocker: MockerFixture) -> None:
-    mocker.patch("pywebtransport.config.__version__", "0.1.0-test")
+from pywebtransport import __version__ as real_version
+from pywebtransport.config import ConfigBuilder, _validate_port, _validate_timeout
 
 
 @pytest.fixture

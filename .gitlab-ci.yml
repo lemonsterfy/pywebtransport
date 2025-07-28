@@ -2,6 +2,7 @@
 
 stages:
   - test
+  - report
   - build
   - deploy
 
@@ -35,6 +36,18 @@ test:
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+codecov:
+  stage: report
+  image: python:3.11-slim
+  dependencies:
+    - test
+  script:
+    - wget https://uploader.codecov.io/latest/alpine/codecov
+    - chmod +x codecov
+    - ./codecov -t $CODECOV_TOKEN -f coverage.xml
+  rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
 # Build stage - only runs on main branch

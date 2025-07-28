@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-07-28
+
+### Changed
+
+- Refactored unit tests to be independent of hardcoded version strings, improving maintainability.
+
+### Added
+
+- A robust, end-to-end CI/CD pipeline for automated testing, coverage reporting, and deployment.
+- A public-facing CI workflow on GitHub Actions for pull request validation and build status badges.
+
 ## [0.1.0] - 2025-07-27
 
 ### Added
@@ -32,5 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/lemonsterfy/pywebtransport/releases/tag/v0.1.0

@@ -5,6 +5,7 @@ from enum import IntEnum
 import pytest
 from pytest_mock import MockerFixture
 
+from pywebtransport import __version__ as project_version
 from pywebtransport.constants import (
     DEFAULT_LOG_LEVEL,
     ORIGIN_HEADER,
@@ -54,7 +55,6 @@ class TestErrorCodes:
 
 class TestDefaults:
     def test_get_client_config(self, mocker: MockerFixture) -> None:
-        mock_version = "0.1.0-test"
         mocker.patch(
             "pywebtransport.constants._DEFAULT_CLIENT_CONFIG",
             {
@@ -68,13 +68,13 @@ class TestDefaults:
                 "http_version": "3",
                 "verify_mode": None,
                 "check_hostname": True,
-                "user_agent": f"pywebtransport/{mock_version}",
+                "user_agent": f"pywebtransport/{project_version}",
             },
         )
         config = Defaults.get_client_config()
         assert config["connect_timeout"] == 30.0
         assert config["max_streams"] == 100
-        assert config["user_agent"] == "pywebtransport/0.1.0-test"
+        assert config["user_agent"] == f"pywebtransport/{project_version}"
 
     def test_get_client_config_returns_copy(self) -> None:
         config1 = Defaults.get_client_config()
