@@ -43,6 +43,8 @@ codecov:
   image: python:3.11-slim
   dependencies:
     - test
+  before_script:
+    - apt-get update && apt-get install -y wget
   script:
     - wget https://uploader.codecov.io/latest/linux/codecov
     - chmod +x codecov
