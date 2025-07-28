@@ -3,6 +3,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
@@ -39,9 +41,3 @@ jobs:
       - name: Run tests
         run: |
           pytest --cov=pywebtransport --cov-report=term
-
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.11'
-        uses: codecov/codecov-action@v4
-        with:
-          fail_ci_if_error: false
