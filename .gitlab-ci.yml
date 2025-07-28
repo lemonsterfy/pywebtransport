@@ -44,7 +44,7 @@ codecov:
   dependencies:
     - test
   script:
-    - wget https://uploader.codecov.io/latest/alpine/codecov
+    - wget https://uploader.codecov.io/latest/linux/codecov
     - chmod +x codecov
     - ./codecov -t $CODECOV_TOKEN -f coverage.xml
   rules:
