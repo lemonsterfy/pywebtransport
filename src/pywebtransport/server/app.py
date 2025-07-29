@@ -1,23 +1,20 @@
 """
 WebTransport Application Framework.
-
-This module provides the ServerApp class, a high-level framework for building
-WebTransport applications with routing and middleware support.
 """
 
 import asyncio
 from types import TracebackType
 from typing import Any, Callable, List, Optional, Type, TypeVar
 
-from ..config import ServerConfig
-from ..connection import WebTransportConnection
-from ..events import Event
-from ..session import WebTransportSession
-from ..types import EventType, SessionHandler
-from ..utils import get_logger
-from .middleware import MiddlewareManager
-from .router import RequestRouter
-from .server import WebTransportServer
+from pywebtransport.config import ServerConfig
+from pywebtransport.connection import WebTransportConnection
+from pywebtransport.events import Event
+from pywebtransport.server.middleware import MiddlewareManager
+from pywebtransport.server.router import RequestRouter
+from pywebtransport.server.server import WebTransportServer
+from pywebtransport.session import WebTransportSession
+from pywebtransport.types import EventType, SessionHandler
+from pywebtransport.utils import get_logger
 
 __all__ = ["ServerApp"]
 

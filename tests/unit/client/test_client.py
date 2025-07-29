@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.client.client module."""
 
 import asyncio
-from typing import Any
+from typing import Any, Type
 
 import pytest
 from pytest_mock import MockerFixture
@@ -173,7 +173,7 @@ class TestWebTransportClient:
 
         await client.close()
         assert client.is_closed
-        mock_connection_manager.shutdown.assert_awaited_once()
+        mock_connection_manager.shutdown.assert_awaited_once()  # type: ignore[unreachable]
 
         await client.close()
         mock_connection_manager.shutdown.assert_awaited_once()
@@ -194,7 +194,7 @@ class TestWebTransportClient:
         mock_session.is_ready = False
         client = WebTransportClient()
 
-        session = await client.connect("https://example.com")
+        session: Any = await client.connect("https://example.com")
 
         mock_connection_manager.add_connection.assert_awaited_once_with(mock_webtransport_connection)
         mock_webtransport_connection.connect.assert_awaited_once_with(host="example.com", port=443, path="/")
@@ -229,11 +229,11 @@ class TestWebTransportClient:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("exception_to_raise", [asyncio.TimeoutError, ConnectionRefusedError])
     async def test_connect_fails_during_connection(
-        self, mock_webtransport_connection: Any, exception_to_raise: Exception
+        self, mock_webtransport_connection: Any, exception_to_raise: Type[Exception]
     ) -> None:
         mock_webtransport_connection.connect.side_effect = exception_to_raise
         client = WebTransportClient()
-        expected_exception = TimeoutError if exception_to_raise is asyncio.TimeoutError else ClientError
+        expected_exception = TimeoutError if exception_to_raise == asyncio.TimeoutError else ClientError
 
         with pytest.raises(expected_exception):
             await client.connect("https://example.com")

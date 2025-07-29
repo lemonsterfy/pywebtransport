@@ -1,8 +1,5 @@
 """
 WebTransport Client Monitor.
-
-This module provides the ClientMonitor class for collecting metrics and
-generating alerts for a WebTransportClient instance.
 """
 
 import asyncio
@@ -10,8 +7,8 @@ from collections import deque
 from types import TracebackType
 from typing import Any, Deque, Dict, Optional, Type
 
-from ..utils import get_logger, get_timestamp
-from .client import WebTransportClient
+from pywebtransport.client.client import WebTransportClient
+from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = ["ClientMonitor"]
 

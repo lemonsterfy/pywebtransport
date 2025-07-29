@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.server.router module."""
 
 import re
-from typing import Any
+from typing import Any, Optional
 
 import pytest
 from _pytest.logging import LogCaptureFixture
@@ -76,7 +76,7 @@ class TestRequestRouter:
         mock_session: Any,
         path: str,
         should_find: str,
-        expected_params: tuple | None,
+        expected_params: Optional[tuple],
         mocker: MockerFixture,
     ) -> None:
         handlers = {

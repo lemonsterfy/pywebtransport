@@ -1,18 +1,15 @@
 """
 WebTransport Browser Client.
-
-This module provides the WebTransportBrowser class, a high-level client
-that emulates browser-like navigation with session history.
 """
 
 import asyncio
 from types import TracebackType
 from typing import List, Optional, Type
 
-from ..config import ClientConfig
-from ..session import WebTransportSession
-from ..utils import get_logger
-from .client import WebTransportClient
+from pywebtransport.client.client import WebTransportClient
+from pywebtransport.config import ClientConfig
+from pywebtransport.session import WebTransportSession
+from pywebtransport.utils import get_logger
 
 __all__ = ["WebTransportBrowser"]
 

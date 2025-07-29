@@ -1,21 +1,18 @@
 """
 WebTransport Reconnecting Client.
-
-This module provides the ReconnectingClient class, which automatically
-manages a persistent connection to a server with exponential backoff.
 """
 
 import asyncio
 from types import TracebackType
 from typing import Optional, Type
 
-from ..config import ClientConfig
-from ..events import EventEmitter
-from ..exceptions import ClientError
-from ..session import WebTransportSession
-from ..types import URL
-from ..utils import get_logger
-from .client import WebTransportClient
+from pywebtransport.client.client import WebTransportClient
+from pywebtransport.config import ClientConfig
+from pywebtransport.events import EventEmitter
+from pywebtransport.exceptions import ClientError
+from pywebtransport.session import WebTransportSession
+from pywebtransport.types import URL
+from pywebtransport.utils import get_logger
 
 __all__ = ["ReconnectingClient"]
 

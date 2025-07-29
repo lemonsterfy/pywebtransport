@@ -1,8 +1,5 @@
 """
 WebTransport Server Monitor.
-
-This module provides the ServerMonitor class for collecting metrics,
-checking server health, and generating alerts.
 """
 
 import asyncio
@@ -10,8 +7,8 @@ from collections import deque
 from types import TracebackType
 from typing import Any, Deque, Dict, List, Optional, Type
 
-from ..utils import get_logger, get_timestamp
-from .server import WebTransportServer
+from pywebtransport.server.server import WebTransportServer
+from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = ["ServerMonitor"]
 

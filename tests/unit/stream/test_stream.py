@@ -2,7 +2,7 @@
 
 import asyncio
 from asyncio import IncompleteReadError
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -288,7 +288,7 @@ class TestWebTransportReceiveStream:
         stream = WebTransportReceiveStream(stream_id=TEST_STREAM_ID, session=mock_session)
         await stream._buffer.feed_data(b"original")
 
-        await stream._on_data_received(Event("test", None))
+        await stream._on_data_received(Event("test", 0.0))
 
         assert stream._buffer.size == 8
 
@@ -296,7 +296,7 @@ class TestWebTransportReceiveStream:
     async def test_on_stream_closed_handler(self, mock_session: Any) -> None:
         stream = WebTransportReceiveStream(stream_id=TEST_STREAM_ID, session=mock_session)
 
-        await stream._on_stream_closed(Event("test", None))
+        await stream._on_stream_closed(Event("test", 0.0))
 
         assert stream.state == StreamState.CLOSED
 
@@ -316,16 +316,16 @@ class TestWebTransportReceiveStream:
 
         stream._set_state(StreamState.HALF_CLOSED_REMOTE)
 
-        assert stream.state == StreamState.HALF_CLOSED_REMOTE
+        assert cast(StreamState, stream.state) == StreamState.HALF_CLOSED_REMOTE
 
     @pytest.mark.asyncio
     async def test_set_state_no_change(self, mock_session: Any, mocker: MockerFixture) -> None:
         stream = WebTransportReceiveStream(stream_id=TEST_STREAM_ID, session=mock_session)
-        stream._teardown = mocker.MagicMock()
+        mock_teardown = mocker.patch.object(stream, "_teardown")
 
         stream._set_state(StreamState.OPEN)
 
-        stream._teardown.assert_not_called()
+        mock_teardown.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_teardown(self, mock_session: Any, mocker: MockerFixture) -> None:
@@ -384,14 +384,14 @@ class TestWebTransportSendStream:
     async def test_write_all(self, mock_session: Any, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.stream.stream.WebTransportSendStream._ensure_writer_is_running")
         stream = WebTransportSendStream(stream_id=TEST_STREAM_ID, session=mock_session)
-        stream.write = mocker.AsyncMock()
-        stream.close = mocker.AsyncMock()
+        mock_write = mocker.patch.object(stream, "write", new_callable=mocker.AsyncMock)
+        mock_close = mocker.patch.object(stream, "close", new_callable=mocker.AsyncMock)
 
         await stream.write_all(b"all the data", chunk_size=5)
 
-        assert stream.write.call_count == 3
-        stream.write.assert_has_calls([mocker.call(b"all t"), mocker.call(b"he da"), mocker.call(b"ta")])
-        stream.close.assert_called_once()
+        assert mock_write.call_count == 3
+        mock_write.assert_has_calls([mocker.call(b"all t"), mocker.call(b"he da"), mocker.call(b"ta")])
+        mock_close.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_flush_empty_and_timeout(self, mock_session: Any, mocker: MockerFixture) -> None:
@@ -413,13 +413,13 @@ class TestWebTransportSendStream:
     async def test_write_all_error_handling(self, mock_session: Any, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.stream.stream.WebTransportSendStream._ensure_writer_is_running")
         stream = WebTransportSendStream(stream_id=TEST_STREAM_ID, session=mock_session)
-        stream.write = mocker.AsyncMock(side_effect=StreamError("send failed"))
-        stream.abort = mocker.AsyncMock()
+        mocker.patch.object(stream, "write", side_effect=StreamError("send failed"))
+        mock_abort = mocker.patch.object(stream, "abort", new_callable=mocker.AsyncMock)
 
         with pytest.raises(StreamError):
             await stream.write_all(b"some data")
 
-        stream.abort.assert_called_once_with(code=1)
+        mock_abort.assert_called_once_with(code=1)
 
     @pytest.mark.asyncio
     async def test_write_backpressure_timeout(self, mock_session: Any, mocker: MockerFixture) -> None:
@@ -472,17 +472,17 @@ class TestWebTransportSendStream:
     async def test_close_ignores_stream_error(self, mock_session: Any, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.stream.stream.WebTransportSendStream._ensure_writer_is_running")
         stream = WebTransportSendStream(stream_id=TEST_STREAM_ID, session=mock_session)
-        stream.write = mocker.AsyncMock(side_effect=StreamError("write failed"))
+        mock_write = mocker.patch.object(stream, "write", side_effect=StreamError("write failed"))
 
         await stream.close()
 
-        stream.write.assert_called_once_with(b"", end_stream=True)
+        mock_write.assert_called_once_with(b"", end_stream=True)
 
     @pytest.mark.asyncio
     async def test_writer_loop_integration(self, mock_session: Any) -> None:
         send_called_event = asyncio.Event()
 
-        def side_effect(*args, **kwargs):
+        def side_effect(*args: Any, **kwargs: Any) -> None:
             send_called_event.set()
 
         mock_session.protocol_handler.send_webtransport_stream_data.side_effect = side_effect
@@ -522,7 +522,7 @@ class TestWebTransportSendStream:
         sleep_called = asyncio.Event()
         original_sleep = asyncio.sleep
 
-        async def sleep_side_effect(delay):
+        async def sleep_side_effect(delay: float) -> None:
             sleep_called.set()
             await original_sleep(delay)
 

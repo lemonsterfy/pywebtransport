@@ -196,9 +196,9 @@ class TestStreamManager:
         sleep_called_event = asyncio.Event()
         original_sleep = asyncio.sleep
 
-        async def sleep_side_effect(*args, **kwargs):
+        async def sleep_side_effect(*args: Any, **kwargs: Any) -> None:
             sleep_called_event.set()
-            return await original_sleep(0)
+            await original_sleep(0)
 
         sleep_mock = mocker.patch("asyncio.sleep", side_effect=sleep_side_effect)
         manager = StreamManager(mock_session, cleanup_interval=0.01)
@@ -219,7 +219,7 @@ class TestStreamManager:
         mocker.patch.object(StreamManager, "cleanup_closed_streams", side_effect=ValueError("Cleanup failed"))
         error_logged_event = asyncio.Event()
 
-        def log_side_effect(*args, **kwargs):
+        def log_side_effect(*args: Any, **kwargs: Any) -> None:
             error_logged_event.set()
 
         mock_logger_error = mocker.patch("pywebtransport.stream.manager.logger.error", side_effect=log_side_effect)

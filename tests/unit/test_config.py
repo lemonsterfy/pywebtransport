@@ -13,14 +13,14 @@ from pywebtransport.config import ConfigBuilder, _validate_port, _validate_timeo
 
 
 @pytest.fixture
-def mock_path_exists(mocker: MockerFixture):
+def mock_path_exists(mocker: MockerFixture) -> Any:
     return mocker.patch.object(Path, "exists", return_value=True)
 
 
 class TestConfigHelpers:
     @pytest.mark.parametrize("value", [5, 10.5, None])
     def test_validate_timeout_valid(self, value: Any) -> None:
-        assert _validate_timeout(value) is None
+        _validate_timeout(value)
 
     @pytest.mark.parametrize("value", [0, -1, -10.5])
     def test_validate_timeout_invalid_value(self, value: Any) -> None:
@@ -29,11 +29,12 @@ class TestConfigHelpers:
 
     def test_validate_timeout_invalid_type(self) -> None:
         with pytest.raises(TypeError, match="must be a number or None"):
-            _validate_timeout("abc")
+            invalid_value: Any = "abc"
+            _validate_timeout(invalid_value)
 
     @pytest.mark.parametrize("value", [1, 80, 4433, 65535])
     def test_validate_port_valid(self, value: int) -> None:
-        assert _validate_port(value) is None
+        _validate_port(value)
 
     @pytest.mark.parametrize("value", [0, 65536, -1, "80", 80.5])
     def test_validate_port_invalid(self, value: Any) -> None:
@@ -66,7 +67,7 @@ class TestClientConfig:
         assert config.log_level == "DEBUG"
         assert config.verify_mode == ssl.CERT_NONE
 
-    def test_create_for_production_factory(self, mock_path_exists) -> None:
+    def test_create_for_production_factory(self, mock_path_exists: Any) -> None:
         config = ClientConfig.create_for_production(ca_certs="ca.pem")
         assert config.debug is False
         assert config.log_level == "INFO"
@@ -92,7 +93,10 @@ class TestClientConfig:
     def test_merge_method(self, mocker: MockerFixture) -> None:
         config1 = ClientConfig(read_timeout=10, max_retries=1)
         mocker.patch.object(ClientConfig, "validate", return_value=None)
-        config2 = ClientConfig(read_timeout=20, write_timeout=25, max_retries=None)
+
+        invalid_max_retries: Any = None
+        config2 = ClientConfig(read_timeout=20, write_timeout=25, max_retries=invalid_max_retries)
+
         mocker.stopall()
         merged_config = config1.merge(config2)
         assert merged_config.read_timeout == 20
@@ -104,7 +108,8 @@ class TestClientConfig:
         assert merged_from_dict.write_timeout == 35
 
         with pytest.raises(TypeError):
-            config1.merge(123)
+            invalid_value: Any = 123
+            config1.merge(invalid_value)
 
     def test_to_dict_method(self) -> None:
         config = ClientConfig(verify_mode=ssl.CERT_OPTIONAL, debug=True)
@@ -125,7 +130,7 @@ class TestClientConfig:
             ({"alpn_protocols": []}, "cannot be empty"),
         ],
     )
-    def test_validation_failures(self, invalid_attrs: Dict[str, Any], error_match: str, mock_path_exists) -> None:
+    def test_validation_failures(self, invalid_attrs: Dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
         with pytest.raises(ConfigurationError, match=error_match):
             ClientConfig(**invalid_attrs)
 
@@ -142,7 +147,7 @@ class TestClientConfig:
         with pytest.raises(ConfigurationError, match=error_match):
             ClientConfig(**invalid_attrs)
 
-    def test_validation_cert_not_found(self, mock_path_exists) -> None:
+    def test_validation_cert_not_found(self, mock_path_exists: Any) -> None:
         mock_path_exists.return_value = False
         with pytest.raises(CertificateError, match="Certificate file not found"):
             ClientConfig(certfile="nonexistent.pem", keyfile="nonexistent.key")
@@ -160,7 +165,7 @@ class TestServerConfig:
         assert config.backlog == 100
         assert config.debug is True
 
-    def test_create_for_development_factory(self, mock_path_exists) -> None:
+    def test_create_for_development_factory(self, mock_path_exists: Any) -> None:
         config = ServerConfig.create_for_development(host="devhost", certfile="c.pem", keyfile="k.pem")
         assert config.debug is True
         assert config.bind_host == "devhost"
@@ -171,7 +176,7 @@ class TestServerConfig:
         assert config.certfile == ""
         assert config.keyfile == ""
 
-    def test_create_for_production_factory(self, mock_path_exists) -> None:
+    def test_create_for_production_factory(self, mock_path_exists: Any) -> None:
         config = ServerConfig.create_for_production(
             host="prodhost", port=443, certfile="c.pem", keyfile="k.pem", ca_certs="ca.pem"
         )
@@ -208,13 +213,13 @@ class TestServerConfig:
             ({"backlog": 0}, "must be positive"),
         ],
     )
-    def test_validation_failures(self, invalid_attrs: Dict[str, Any], error_match: str, mock_path_exists) -> None:
+    def test_validation_failures(self, invalid_attrs: Dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
         with pytest.raises(ConfigurationError, match=error_match):
             ServerConfig(**invalid_attrs)
 
 
 class TestConfigBuilder:
-    def test_client_build_flow(self, mock_path_exists) -> None:
+    def test_client_build_flow(self, mock_path_exists: Any) -> None:
         builder = ConfigBuilder(config_type="client")
         config = (
             builder.debug(log_level="INFO")
@@ -228,7 +233,7 @@ class TestConfigBuilder:
         assert config.connect_timeout == 15
         assert config.max_streams == 50
 
-    def test_server_build_flow(self, mock_path_exists) -> None:
+    def test_server_build_flow(self, mock_path_exists: Any) -> None:
         builder = ConfigBuilder(config_type="server")
         config = (
             builder.bind("0.0.0.0", 8000)

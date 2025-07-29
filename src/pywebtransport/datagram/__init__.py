@@ -1,8 +1,5 @@
 """
 WebTransport Datagram Subpackage.
-
-Provides the core datagram stream and advanced components for
-broadcasting, monitoring, and adding reliability.
 """
 
 from .broadcaster import DatagramBroadcaster

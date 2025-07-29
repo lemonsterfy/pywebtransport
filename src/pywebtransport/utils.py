@@ -20,15 +20,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from .constants import (
+from pywebtransport.constants import (
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
     SECURE_SCHEMES,
     WEBTRANSPORT_SCHEMES,
     WebTransportConstants,
 )
-from .exceptions import CertificateError, ConfigurationError, TimeoutError, certificate_not_found
-from .types import URL, Address, Data, Timeout, URLParts
+from pywebtransport.exceptions import CertificateError, ConfigurationError, TimeoutError, certificate_not_found
+from pywebtransport.types import URL, Address, Data, Timeout, URLParts
 
 __all__ = [
     "Timer",

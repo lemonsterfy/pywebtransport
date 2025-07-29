@@ -1,8 +1,5 @@
 """
 WebTransport stream management and orchestration.
-
-This module provides a manager for handling all streams within a single
-WebTransport session, including creation, cleanup, and concurrency limits.
 """
 
 import asyncio
@@ -10,12 +7,12 @@ from collections import defaultdict
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Type, Union
 
-from ..types import StreamId
-from ..utils import get_logger
-from .stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from pywebtransport.stream.stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from pywebtransport.types import StreamId
+from pywebtransport.utils import get_logger
 
 if TYPE_CHECKING:
-    from ..session import WebTransportSession
+    from pywebtransport.session import WebTransportSession
 
 
 __all__ = ["StreamManager"]

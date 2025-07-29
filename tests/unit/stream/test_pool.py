@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.stream.pool module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Callable, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -68,11 +68,11 @@ class TestStreamPoolLifecycle:
         mocker.patch.object(pool, "_fill_pool", wraps=pool._fill_pool)
 
         await pool._initialize_pool()
-        assert pool._fill_pool.call_count == 1
+        assert cast(Any, pool._fill_pool).call_count == 1
         assert pool._total_managed_streams == 2
 
         await pool._initialize_pool()
-        assert pool._fill_pool.call_count == 1
+        assert cast(Any, pool._fill_pool).call_count == 1
         assert pool._total_managed_streams == 2
 
     async def test_close_all_on_uninitialized_pool(self, mock_session: Any) -> None:
@@ -118,7 +118,8 @@ class TestStreamPoolLifecycle:
         mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
         await pool._initialize_pool()
         task = pool._maintenance_task
-        assert task is not None and not task.done()
+        assert task is not None
+        assert not task.done()
 
         await pool.close_all()
 
@@ -138,6 +139,7 @@ class TestStreamPoolLifecycle:
 
         await pool.close_all()
 
+        assert pool._maintenance_task is not None
         assert pool._maintenance_task.done()
 
 

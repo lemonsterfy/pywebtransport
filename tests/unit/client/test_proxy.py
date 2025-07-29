@@ -91,7 +91,12 @@ class TestWebTransportProxy:
         mock_tunnel_stream.read.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_connect_reuses_proxy_session(self, mock_proxy_session: Any, mock_tunnel_stream: Any) -> None:
+    async def test_connect_reuses_proxy_session(
+        self,
+        mock_underlying_client: Any,
+        mock_proxy_session: Any,
+        mock_tunnel_stream: Any,
+    ) -> None:
         mock_proxy_session.create_bidirectional_stream.return_value = mock_tunnel_stream
         mock_tunnel_stream.read.return_value = b"HTTP/1.1 200 OK\r\n\r\n"
         proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
@@ -99,7 +104,7 @@ class TestWebTransportProxy:
 
         await proxy.connect_through_proxy(self.TARGET_URL)
 
-        proxy._client.connect.assert_not_awaited()
+        mock_underlying_client.connect.assert_not_awaited()
         mock_proxy_session.create_bidirectional_stream.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -180,11 +185,11 @@ class TestWebTransportProxy:
         mock_proxy_session = mocker.MagicMock(spec=WebTransportSession, is_ready=True)
         first_call_done = asyncio.Event()
 
-        async def first_call():
+        async def first_call() -> None:
             await proxy._ensure_proxy_session(headers=None, timeout=10.0)
             first_call_done.set()
 
-        async def second_call():
+        async def second_call() -> None:
             await first_call_done.wait()
             await proxy._ensure_proxy_session(headers=None, timeout=10.0)
 

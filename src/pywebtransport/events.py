@@ -8,8 +8,8 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple, TypeVar, Union
 
-from .types import EventData, EventHandler, EventType, Timeout
-from .utils import get_logger, get_timestamp
+from pywebtransport.types import EventData, EventHandler, EventType, Timeout
+from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = [
     "Event",

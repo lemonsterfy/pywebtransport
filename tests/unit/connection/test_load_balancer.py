@@ -270,7 +270,7 @@ class TestConnectionLoadBalancer:
     async def test_shutdown(self, lb: ConnectionLoadBalancer, mocker: MockerFixture) -> None:
         close_all_mock = mocker.patch.object(lb, "close_all_connections", new_callable=mocker.AsyncMock)
 
-        async def dummy_coro():
+        async def dummy_coro() -> None:
             await asyncio.sleep(10)
 
         lb._health_check_task = asyncio.create_task(dummy_coro())
@@ -315,12 +315,14 @@ class TestConnectionLoadBalancer:
         lb._failed_targets.add(target_key)
 
         mock_test_conn = mocker.patch(
-            "pywebtransport.connection.utils.test_tcp_connection", new_callable=mocker.AsyncMock, return_value=True
+            "pywebtransport.connection.load_balancer.test_tcp_connection",
+            new_callable=mocker.AsyncMock,
+            return_value=True,
         )
         cycle_done = asyncio.Event()
         original_sleep = asyncio.sleep
 
-        async def controlled_sleep(delay: float):
+        async def controlled_sleep(delay: float) -> None:
             cycle_done.set()
             await original_sleep(0)
 
@@ -346,7 +348,7 @@ class TestConnectionLoadBalancer:
         cycle_done = asyncio.Event()
         original_sleep = asyncio.sleep
 
-        async def controlled_sleep(delay: float):
+        async def controlled_sleep(delay: float) -> None:
             cycle_done.set()
             await original_sleep(0)
 
@@ -371,7 +373,7 @@ class TestConnectionLoadBalancer:
         cycle_done = asyncio.Event()
         original_sleep = asyncio.sleep
 
-        async def controlled_sleep(delay: float):
+        async def controlled_sleep(delay: float) -> None:
             cycle_done.set()
             await original_sleep(0)
 
@@ -389,7 +391,7 @@ class TestConnectionLoadBalancer:
         original_sleep = asyncio.sleep
         sleep_calls = 0
 
-        async def failing_sleep(delay: float):
+        async def failing_sleep(delay: float) -> None:
             nonlocal sleep_calls
             sleep_calls += 1
             if sleep_calls == 1:

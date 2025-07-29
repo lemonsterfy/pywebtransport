@@ -1,9 +1,10 @@
 """Unit tests for the pywebtransport.datagram.broadcaster module."""
 
 import asyncio
-from typing import Any
+from typing import Any, List, cast
 
 import pytest
+from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ConnectionError, WebTransportDatagramDuplexStream
@@ -101,7 +102,11 @@ class TestDatagramBroadcaster:
 
     @pytest.mark.asyncio
     async def test_broadcast_with_send_failure(
-        self, broadcaster: DatagramBroadcaster, mock_stream: Any, mocker: MockerFixture, caplog
+        self,
+        broadcaster: DatagramBroadcaster,
+        mock_stream: Any,
+        mocker: MockerFixture,
+        caplog: LogCaptureFixture,
     ) -> None:
         healthy_stream = mock_stream
         failing_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
@@ -149,9 +154,9 @@ class TestDatagramBroadcaster:
         assert await broadcaster.get_stream_count() == 1
         original_gather = asyncio.gather
 
-        async def gather_side_effect(*tasks, **kwargs):
+        async def gather_side_effect(*tasks: Any, **kwargs: Any) -> List[Any]:
             await broadcaster.remove_stream(stream_to_remove)
-            return await original_gather(*tasks, **kwargs)
+            return cast(List[Any], await original_gather(*tasks, **kwargs))
 
         mocker.patch("asyncio.gather", side_effect=gather_side_effect)
         sent_count = await broadcaster.broadcast(b"data")

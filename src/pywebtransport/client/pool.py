@@ -1,19 +1,16 @@
 """
 WebTransport Client Pool.
-
-This module provides the ClientPool class for managing the lifecycle
-of multiple WebTransportClient instances concurrently.
 """
 
 import asyncio
 from types import TracebackType
 from typing import List, Optional, Type
 
-from ..config import ClientConfig
-from ..exceptions import ClientError
-from ..session import WebTransportSession
-from ..utils import get_logger
-from .client import WebTransportClient
+from pywebtransport.client.client import WebTransportClient
+from pywebtransport.config import ClientConfig
+from pywebtransport.exceptions import ClientError
+from pywebtransport.session import WebTransportSession
+from pywebtransport.utils import get_logger
 
 __all__ = ["ClientPool"]
 

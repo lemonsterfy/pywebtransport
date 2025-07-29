@@ -1,17 +1,14 @@
 """
 WebTransport Server Cluster.
-
-This module provides the ServerCluster class for managing the lifecycle
-and aggregation of multiple WebTransportServer instances.
 """
 
 import asyncio
 from types import TracebackType
 from typing import Any, Dict, List, Optional, Type
 
-from ..config import ServerConfig
-from ..utils import get_logger
-from .server import WebTransportServer
+from pywebtransport.config import ServerConfig
+from pywebtransport.server.server import WebTransportServer
+from pywebtransport.utils import get_logger
 
 __all__ = ["ServerCluster"]
 

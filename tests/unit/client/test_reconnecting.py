@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.client.reconnecting module."""
 
 import asyncio
-from typing import Any
+from typing import Any, Coroutine
 
 import pytest
 from pytest_mock import MockerFixture
@@ -46,7 +46,7 @@ class TestReconnectingClient:
         created_task: asyncio.Task[None]
         original_create_task = asyncio.create_task
 
-        def spy_and_capture(coro):
+        def spy_and_capture(coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
             nonlocal created_task
             task = original_create_task(coro)
             created_task = task
@@ -95,7 +95,7 @@ class TestReconnectingClient:
     async def test_get_session_waits_for_connection(self, mocker: MockerFixture, mock_session: Any) -> None:
         client = ReconnectingClient(self.URL)
 
-        async def sleep_side_effect(*args, **kwargs):
+        async def sleep_side_effect(*args: Any, **kwargs: Any) -> None:
             if mock_sleep.call_count == 3:
                 client._session = mock_session
 
