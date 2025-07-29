@@ -1,9 +1,10 @@
 """Unit tests for the pywebtransport.datagram.monitor module."""
 
 import asyncio
-from typing import Any, List
+from typing import Any, Coroutine, Dict, List, NoReturn
 
 import pytest
+from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import WebTransportDatagramDuplexStream
@@ -52,9 +53,9 @@ class TestDatagramMonitor:
         assert not monitor.is_monitoring
         async with monitor:
             assert monitor.is_monitoring
-            create_task_spy.assert_called_once()
+            create_task_spy.assert_called_once()  # type: ignore[unreachable]
 
-        real_task = create_task_spy.spy_return
+        real_task = create_task_spy.spy_return  # type: ignore[unreachable]
         assert not monitor.is_monitoring
         assert real_task.cancelled()
 
@@ -75,8 +76,10 @@ class TestDatagramMonitor:
         assert monitor._monitor_task is None
 
     @pytest.mark.asyncio
-    async def test_aenter_handles_runtime_error(self, monitor: DatagramMonitor, mocker: MockerFixture, caplog) -> None:
-        def mock_create_task_with_error(coro):
+    async def test_aenter_handles_runtime_error(
+        self, monitor: DatagramMonitor, mocker: MockerFixture, caplog: LogCaptureFixture
+    ) -> None:
+        def mock_create_task_with_error(coro: Coroutine[Any, Any, Any]) -> NoReturn:
             coro.close()
             raise RuntimeError("no loop")
 
@@ -101,7 +104,7 @@ class TestDatagramMonitor:
     async def test_monitor_loop_collects_samples(self, monitor: DatagramMonitor, mocker: MockerFixture) -> None:
         mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
 
-        async def sleep_side_effect(*args, **kwargs):
+        async def sleep_side_effect(*args: Any, **kwargs: Any) -> None:
             if mock_sleep.await_count > 1:
                 raise asyncio.CancelledError
 
@@ -116,7 +119,7 @@ class TestDatagramMonitor:
 
     @pytest.mark.asyncio
     async def test_monitor_loop_handles_exception(
-        self, monitor: DatagramMonitor, mocker: MockerFixture, caplog
+        self, monitor: DatagramMonitor, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
         mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock, side_effect=ValueError("Test Exception"))
         await monitor._monitor_loop()
@@ -125,7 +128,12 @@ class TestDatagramMonitor:
     @pytest.mark.asyncio
     async def test_check_alerts_high_queue_size(self, monitor: DatagramMonitor, mock_stream: Any) -> None:
         mock_stream.get_queue_stats.return_value = {"outgoing": {"size": 95}}
-        sample = {"outgoing_queue_size": 95, "send_success_rate": 1.0, "timestamp": 123, "avg_send_time": 0.01}
+        sample: Dict[str, Any] = {
+            "outgoing_queue_size": 95,
+            "send_success_rate": 1.0,
+            "timestamp": 123,
+            "avg_send_time": 0.01,
+        }
 
         await monitor._check_alerts(sample)
 
@@ -136,7 +144,12 @@ class TestDatagramMonitor:
 
     @pytest.mark.asyncio
     async def test_check_alerts_low_success_rate(self, monitor: DatagramMonitor) -> None:
-        sample = {"outgoing_queue_size": 10, "send_success_rate": 0.7, "timestamp": 123, "avg_send_time": 0.01}
+        sample: Dict[str, Any] = {
+            "outgoing_queue_size": 10,
+            "send_success_rate": 0.7,
+            "timestamp": 123,
+            "avg_send_time": 0.01,
+        }
 
         await monitor._check_alerts(sample)
 
@@ -150,7 +163,12 @@ class TestDatagramMonitor:
         monitor._samples.extend(
             [{"avg_send_time": 0.01} for _ in range(5)] + [{"avg_send_time": 0.05} for _ in range(5)]
         )
-        sample = {"outgoing_queue_size": 10, "send_success_rate": 1.0, "avg_send_time": 0.05, "timestamp": 123}
+        sample: Dict[str, Any] = {
+            "outgoing_queue_size": 10,
+            "send_success_rate": 1.0,
+            "avg_send_time": 0.05,
+            "timestamp": 123,
+        }
 
         await monitor._check_alerts(sample)
 
@@ -161,7 +179,12 @@ class TestDatagramMonitor:
 
     @pytest.mark.asyncio
     async def test_check_alerts_no_issues(self, monitor: DatagramMonitor) -> None:
-        sample = {"outgoing_queue_size": 10, "send_success_rate": 0.99, "timestamp": 123, "avg_send_time": 0.01}
+        sample: Dict[str, Any] = {
+            "outgoing_queue_size": 10,
+            "send_success_rate": 0.99,
+            "timestamp": 123,
+            "avg_send_time": 0.01,
+        }
         await monitor._check_alerts(sample)
         assert len(monitor.get_alerts()) == 0
 

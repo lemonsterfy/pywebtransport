@@ -1,16 +1,13 @@
 """
 WebTransport Client Utilities.
-
-This module provides a collection of utility functions for creating,
-testing, and debugging WebTransportClient instances and its variants.
 """
 
 import asyncio
 from typing import Any, Dict, Optional
 
-from ..config import ClientConfig
-from ..utils import get_logger, get_timestamp
-from .client import WebTransportClient
+from pywebtransport.client.client import WebTransportClient
+from pywebtransport.config import ClientConfig
+from pywebtransport.utils import get_logger, get_timestamp
 
 logger = get_logger("client.utils")
 

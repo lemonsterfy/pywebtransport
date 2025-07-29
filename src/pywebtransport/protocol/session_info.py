@@ -1,15 +1,12 @@
 """
 WebTransport Session and Stream Information Data Classes.
-
-This module defines the dataclasses used by the protocol handler to store
-state and information about active sessions and streams.
 """
 
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
-from ..types import Headers, SessionId, SessionState, StreamDirection, StreamId, StreamState
-from ..utils import get_timestamp
+from pywebtransport.types import Headers, SessionId, SessionState, StreamDirection, StreamId, StreamState
+from pywebtransport.utils import get_timestamp
 
 __all__ = ["StreamInfo", "WebTransportSessionInfo"]
 

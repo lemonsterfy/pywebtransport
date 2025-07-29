@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.server.app module."""
 
 import asyncio
-from typing import Any
+from typing import Any, Coroutine, NoReturn, Optional, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -43,7 +43,7 @@ class TestServerApp:
     def mock_session(self, mocker: MockerFixture) -> Any:
         session_instance = mocker.create_autospec(WebTransportSession, instance=True)
 
-        async def successful_ready():
+        async def successful_ready() -> None:
             pass
 
         session_instance.ready = mocker.AsyncMock(side_effect=successful_ready)
@@ -62,13 +62,13 @@ class TestServerApp:
 
     def test_init(self, app: ServerApp, mock_server: Any) -> None:
         assert app.server is mock_server
-        mock_server.on.assert_called_once_with(EventType.SESSION_REQUEST, app._handle_session_request)
+        cast(Any, app.server).on.assert_called_once_with(EventType.SESSION_REQUEST, app._handle_session_request)
 
     def test_run(self, app: ServerApp, mocker: MockerFixture) -> None:
         mock_serve = mocker.patch.object(app, "serve", new_callable=mocker.AsyncMock)
         mock_asyncio_run = mocker.patch("asyncio.run")
 
-        def run_on_test_loop(coro):
+        def run_on_test_loop(coro: Coroutine[Any, Any, None]) -> None:
             asyncio.get_event_loop().run_until_complete(coro)
 
         mock_asyncio_run.side_effect = run_on_test_loop
@@ -76,7 +76,7 @@ class TestServerApp:
         mock_asyncio_run.assert_called_once()
         mock_serve.assert_awaited_once_with(host="localhost", port=1234)
 
-        def consume_coro_and_raise(coro):
+        def consume_coro_and_raise(coro: Coroutine[Any, Any, None]) -> NoReturn:
             coro.close()
             raise KeyboardInterrupt
 
@@ -97,14 +97,14 @@ class TestServerApp:
             """handler2"""
             ...
 
-        app._router.add_route.assert_called_once_with("/test", handler1)
-        app._router.add_pattern_route.assert_called_once_with("/other/.*", handler2)
+        cast(Any, app._router).add_route.assert_called_once_with("/test", handler1)
+        cast(Any, app._router).add_pattern_route.assert_called_once_with("/other/.*", handler2)
 
         @app.middleware
         async def middleware(session: WebTransportSession) -> bool:
             return True
 
-        app._middleware_manager.add_middleware.assert_called_once_with(middleware)
+        cast(Any, app._middleware_manager).add_middleware.assert_called_once_with(middleware)
 
         @app.on_startup
         def startup_handler() -> None:
@@ -122,14 +122,14 @@ class TestServerApp:
     @pytest.mark.asyncio
     async def test_serve(self, app: ServerApp) -> None:
         await app.serve(host="localhost", port=8080)
-        app.server.listen.assert_awaited_once_with(host="localhost", port=8080)
-        app.server.serve_forever.assert_awaited_once()
+        cast(Any, app.server).listen.assert_awaited_once_with(host="localhost", port=8080)
+        cast(Any, app.server).serve_forever.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_serve_with_default_host_port(self, app: ServerApp) -> None:
         await app.serve()
-        app.server.listen.assert_awaited_once_with(host="0.0.0.0", port=4433)
-        app.server.serve_forever.assert_awaited_once()
+        cast(Any, app.server).listen.assert_awaited_once_with(host="0.0.0.0", port=4433)
+        cast(Any, app.server).serve_forever.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_async_context_manager(self, app: ServerApp, mocker: MockerFixture) -> None:
@@ -138,11 +138,11 @@ class TestServerApp:
 
         async with app as a:
             assert a is app
-            app.server.__aenter__.assert_awaited_once()
+            cast(Any, app.server).__aenter__.assert_awaited_once()
             mock_startup.assert_awaited_once()
 
         mock_shutdown.assert_awaited_once()
-        app.server.close.assert_awaited_once()
+        cast(Any, app.server).close.assert_awaited_once()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("is_async", [True, False])
@@ -180,9 +180,9 @@ class TestServerApp:
         mock_router.route_request.return_value = mock_handler
         mock_session_info = mocker.MagicMock(path="/", headers=[])
         mock_conn.protocol_handler.get_session_info.return_value = mock_session_info
-        captured_coro = None
+        captured_coro: Any = None
 
-        def capture_arg(coro):
+        def capture_arg(coro: Coroutine[Any, Any, None]) -> Any:
             nonlocal captured_coro
             captured_coro = coro
             return mocker.create_autospec(asyncio.Task, instance=True)
@@ -217,8 +217,8 @@ class TestServerApp:
         mock_session: Any,
         mocker: MockerFixture,
         rejection_case: str,
-        event_data,
-        expected_code: int,
+        event_data: Any,
+        expected_code: Optional[int],
     ) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = True
@@ -228,14 +228,14 @@ class TestServerApp:
             event_data["connection"] = mock_conn
 
         if rejection_case == "middleware":
-            app._middleware_manager.process_request.return_value = False
+            cast(Any, app._middleware_manager).process_request.return_value = False
         if rejection_case == "no_route":
             mock_router.route_request.return_value = None
         else:
             mock_router.route_request.return_value = mocker.AsyncMock()
         if rejection_case == "timeout":
 
-            async def wait_and_timeout(coro, timeout):
+            async def wait_and_timeout(coro: Coroutine[Any, Any, None], timeout: float) -> NoReturn:
                 task = asyncio.create_task(coro)
                 await asyncio.sleep(0)
                 task.cancel()
@@ -255,14 +255,14 @@ class TestServerApp:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("conn_value", [None, "not_a_connection_object"])
-    async def test_handle_session_request_invalid_connection(self, app: ServerApp, conn_value) -> None:
+    async def test_handle_session_request_invalid_connection(self, app: ServerApp, conn_value: Any) -> None:
         event = Event(
             type=EventType.SESSION_REQUEST, data={"connection": conn_value, "session_id": "s1", "stream_id": 1}
         )
 
         await app._handle_session_request(event)
 
-        app._middleware_manager.process_request.assert_not_called()
+        cast(Any, app._middleware_manager).process_request.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_handle_session_request_disconnected(self, app: ServerApp, mocker: MockerFixture) -> None:
@@ -274,7 +274,7 @@ class TestServerApp:
 
         await app._handle_session_request(event)
 
-        app._middleware_manager.process_request.assert_not_called()
+        cast(Any, app._middleware_manager).process_request.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_handle_session_request_no_session_info(self, app: ServerApp, mocker: MockerFixture) -> None:
@@ -287,7 +287,7 @@ class TestServerApp:
 
         await app._handle_session_request(event)
 
-        app._middleware_manager.process_request.assert_not_called()
+        cast(Any, app._middleware_manager).process_request.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_handle_session_request_general_exception(self, app: ServerApp, mocker: MockerFixture) -> None:
@@ -314,9 +314,9 @@ class TestServerApp:
         mock_router.route_request.return_value = handler_mock
         mock_session_info = mocker.MagicMock(path="/", headers=[])
         mock_conn.protocol_handler.get_session_info.return_value = mock_session_info
-        captured_coro = None
+        captured_coro: Any = None
 
-        def capture_arg(coro):
+        def capture_arg(coro: Coroutine[Any, Any, None]) -> Any:
             nonlocal captured_coro
             captured_coro = coro
             return mocker.create_autospec(asyncio.Task, instance=True)
@@ -343,9 +343,9 @@ class TestServerApp:
         mock_session.return_value.is_closed = True
         mock_session_info = mocker.MagicMock(path="/", headers=[])
         mock_conn.protocol_handler.get_session_info.return_value = mock_session_info
-        captured_coro = None
+        captured_coro: Any = None
 
-        def capture_arg(coro):
+        def capture_arg(coro: Coroutine[Any, Any, None]) -> Any:
             nonlocal captured_coro
             captured_coro = coro
             return mocker.create_autospec(asyncio.Task, instance=True)

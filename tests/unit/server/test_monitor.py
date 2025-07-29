@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import deque
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -50,7 +50,7 @@ class TestServerMonitor:
         monitor._monitor_task = mock_task
         assert monitor.is_monitoring
 
-        mock_task.done.return_value = True
+        mock_task.done.return_value = True  # type: ignore[unreachable]
         assert not monitor.is_monitoring
 
     @pytest.mark.asyncio
@@ -65,7 +65,7 @@ class TestServerMonitor:
 
         real_task = create_task_spy.spy_return
         assert not monitor.is_monitoring
-        assert real_task.cancelled()
+        assert real_task.cancelled()  # type: ignore[unreachable]
         mock_logger.info.assert_any_call("Server monitoring stopped.")
 
     @pytest.mark.asyncio
@@ -116,8 +116,8 @@ class TestServerMonitor:
 
         await monitor._monitor_loop()
 
-        monitor._collect_metrics.assert_awaited_once()
-        monitor._check_for_alerts.assert_awaited_once()
+        cast(Any, monitor._collect_metrics).assert_awaited_once()
+        cast(Any, monitor._check_for_alerts).assert_awaited_once()
         mock_sleep.assert_awaited_once_with(0.01)
         mock_logger.info.assert_called_with("Server monitor loop has been cancelled.")
 

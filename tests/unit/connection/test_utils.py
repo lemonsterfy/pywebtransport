@@ -21,13 +21,12 @@ def mock_client_config(mocker: MockerFixture) -> Any:
 def mock_connection(mocker: MockerFixture) -> Any:
     connection = mocker.create_autospec(WebTransportConnection, instance=True)
     connection.is_connected = True
-    connection.close = mocker.AsyncMock()
     return connection
 
 
 class TestConnectionUtils:
     async def test_connect_with_retry_success_first_try(
-        self, mock_client_config: ClientConfig, mock_connection: WebTransportConnection, mocker: MockerFixture
+        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
         mock_create = mocker.patch.object(WebTransportConnection, "create_client", return_value=mock_connection)
         mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
@@ -39,7 +38,7 @@ class TestConnectionUtils:
         mock_sleep.assert_not_awaited()
 
     async def test_connect_with_retry_success_after_retries(
-        self, mock_client_config: ClientConfig, mock_connection: WebTransportConnection, mocker: MockerFixture
+        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
         mock_create = mocker.patch.object(
             WebTransportConnection,
@@ -71,16 +70,16 @@ class TestConnectionUtils:
         assert mock_create.await_count == 4
 
     async def test_ensure_connection_already_connected(
-        self, mock_client_config: ClientConfig, mock_connection: WebTransportConnection
+        self, mock_client_config: ClientConfig, mock_connection: Any
     ) -> None:
         conn = await connection_utils.ensure_connection(mock_connection, mock_client_config, host="h", port=1)
         assert conn is mock_connection
         mock_connection.close.assert_not_awaited()
 
     async def test_ensure_connection_reconnects(
-        self, mock_client_config: ClientConfig, mock_connection: WebTransportConnection, mocker: MockerFixture
+        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
-        mock_connection.is_connected = False
+        mock_connection.configure_mock(is_connected=False)
         new_mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_create = mocker.patch.object(WebTransportConnection, "create_client", return_value=new_mock_connection)
 
@@ -91,16 +90,16 @@ class TestConnectionUtils:
         mock_create.assert_awaited_once_with(config=mock_client_config, host="h", port=1, path="/")
 
     async def test_ensure_connection_reconnect_disabled(
-        self, mock_client_config: ClientConfig, mock_connection: WebTransportConnection
+        self, mock_client_config: ClientConfig, mock_connection: Any
     ) -> None:
-        mock_connection.is_connected = False
+        mock_connection.configure_mock(is_connected=False)
         with pytest.raises(ConnectionError, match="Connection not active and reconnect disabled"):
             await connection_utils.ensure_connection(
                 mock_connection, mock_client_config, host="h", port=1, reconnect=False
             )
 
     async def test_create_multiple_connections_all_succeed(
-        self, mock_client_config: ClientConfig, mock_connection: WebTransportConnection, mocker: MockerFixture
+        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
         targets = [("h1", 1), ("h2", 2)]
         mocker.patch.object(WebTransportConnection, "create_client", return_value=mock_connection)
@@ -113,7 +112,7 @@ class TestConnectionUtils:
         assert connections["h1:1"] is mock_connection
 
     async def test_create_multiple_connections_some_fail(
-        self, mock_client_config: ClientConfig, mock_connection: WebTransportConnection, mocker: MockerFixture
+        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
         targets = [("h1", 1), ("h2", 2)]
         mocker.patch.object(

@@ -1,17 +1,14 @@
 """
 WebTransport connection utility functions.
-
-This module provides a collection of helper functions for common tasks
-involving WebTransport connections, such as creation, monitoring, and diagnosis.
 """
 
 import asyncio
 from typing import Dict, List, Optional, Tuple
 
-from ..config import ClientConfig
-from ..exceptions import ConnectionError, HandshakeError
-from ..utils import get_logger
-from .connection import WebTransportConnection
+from pywebtransport.config import ClientConfig
+from pywebtransport.connection.connection import WebTransportConnection
+from pywebtransport.exceptions import ConnectionError, HandshakeError
+from pywebtransport.utils import get_logger
 
 __all__ = [
     "connect_with_retry",

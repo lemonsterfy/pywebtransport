@@ -1,8 +1,5 @@
 """
 WebTransport Client Subpackage.
-
-This module exposes the public API for the client sub-package, including
-the core WebTransportClient, high-level abstractions, and utilities.
 """
 
 from .browser import WebTransportBrowser
@@ -18,17 +15,14 @@ from .utils import (
 )
 
 __all__ = [
-    # Core Client
-    "ClientStats",
-    "WebTransportClient",
-    # High-level Client Abstractions
     "ClientMonitor",
     "ClientPool",
+    "ClientStats",
     "PooledClient",
     "ReconnectingClient",
     "WebTransportBrowser",
+    "WebTransportClient",
     "WebTransportProxy",
-    # Testing and Diagnostic Utilities
     "benchmark_client_performance",
     "test_client_connectivity",
 ]

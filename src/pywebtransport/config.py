@@ -8,11 +8,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from .constants import Defaults, WebTransportConstants
-from .exceptions import ConfigurationError, certificate_not_found, invalid_config
-from .types import Address, Headers
-from .utils import normalize_headers
-from .version import __version__
+from pywebtransport.constants import Defaults, WebTransportConstants
+from pywebtransport.exceptions import ConfigurationError, certificate_not_found, invalid_config
+from pywebtransport.types import Address, Headers
+from pywebtransport.utils import normalize_headers
+from pywebtransport.version import __version__
 
 __all__ = [
     "ClientConfig",

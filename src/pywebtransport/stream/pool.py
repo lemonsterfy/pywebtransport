@@ -1,20 +1,17 @@
 """
 WebTransport stream pooling for efficient stream reuse.
-
-This module provides a StreamPool class that manages a collection of reusable
-WebTransport streams to reduce the latency of creating new streams.
 """
 
 import asyncio
 from types import TracebackType
 from typing import TYPE_CHECKING, List, Optional, Type
 
-from ..exceptions import StreamError
-from ..utils import get_logger
-from .stream import WebTransportStream
+from pywebtransport.exceptions import StreamError
+from pywebtransport.stream.stream import WebTransportStream
+from pywebtransport.utils import get_logger
 
 if TYPE_CHECKING:
-    from ..session import WebTransportSession
+    from pywebtransport.session import WebTransportSession
 
 
 __all__ = ["StreamPool"]

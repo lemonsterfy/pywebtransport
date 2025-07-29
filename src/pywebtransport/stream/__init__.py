@@ -1,7 +1,5 @@
 """
 WebTransport Stream Subpackage.
-
-Provides core stream classes, management, and pooling facilities.
 """
 
 from .manager import StreamManager

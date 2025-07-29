@@ -11,7 +11,7 @@ from pywebtransport.events import EventBus, create_event_bus, create_event_emitt
 
 
 @pytest.fixture
-def mock_logger(mocker: MockerFixture):
+def mock_logger(mocker: MockerFixture) -> Any:
     return mocker.patch("pywebtransport.events.logger")
 
 
@@ -72,6 +72,7 @@ class TestEvent:
 
         error = CustomError("A custom error occurred")
         event = Event.for_error(error)
+        assert event.data
         assert event.data["error_details"] == {"code": 123, "reason": "custom"}
 
     @pytest.mark.parametrize(
@@ -197,7 +198,7 @@ class TestEventEmitter:
         wait_task = asyncio.create_task(
             emitter.wait_for(
                 EventType.STREAM_DATA_RECEIVED,
-                condition=lambda e: e.data and e.data["stream_id"] == 3,
+                condition=lambda e: bool(e.data and e.data["stream_id"] == 3),
             )
         )
         await asyncio.sleep(0.01)
@@ -205,6 +206,7 @@ class TestEventEmitter:
         assert not wait_task.done()
         await emitter.emit(EventType.STREAM_DATA_RECEIVED, data={"stream_id": 3})
         result = await asyncio.wait_for(wait_task, timeout=1)
+        assert result.data
         assert result.data["stream_id"] == 3
 
     async def test_wait_for_condition_raises_exception(self, emitter: EventEmitter) -> None:
@@ -239,7 +241,9 @@ class TestEventEmitter:
         emitter.clear_history()
         assert len(emitter.get_event_history()) == 0
 
-    async def test_handler_raises_exception(self, emitter: EventEmitter, mocker: MockerFixture, mock_logger) -> None:
+    async def test_handler_raises_exception(
+        self, emitter: EventEmitter, mocker: MockerFixture, mock_logger: Any
+    ) -> None:
         handler1 = mocker.AsyncMock(side_effect=ValueError("Handler failed"))
         handler2 = mocker.AsyncMock()
         emitter.on(EventType.SESSION_READY, handler1)
@@ -251,7 +255,7 @@ class TestEventEmitter:
         handler1.assert_awaited_once()
         handler2.assert_awaited_once()
 
-    async def test_max_listeners_warning(self, emitter: EventEmitter, mocker: MockerFixture, mock_logger) -> None:
+    async def test_max_listeners_warning(self, emitter: EventEmitter, mocker: MockerFixture, mock_logger: Any) -> None:
         emitter.set_max_listeners(1)
         emitter.on(EventType.SESSION_READY, mocker.AsyncMock())
         emitter.on(EventType.SESSION_READY, mocker.AsyncMock())
@@ -259,7 +263,7 @@ class TestEventEmitter:
         mock_logger.warning.assert_called_once()
 
     async def test_registering_same_handler_twice_warning(
-        self, emitter: EventEmitter, mocker: MockerFixture, mock_logger
+        self, emitter: EventEmitter, mocker: MockerFixture, mock_logger: Any
     ) -> None:
         handler = mocker.AsyncMock()
         emitter.on(EventType.SESSION_READY, handler)
@@ -306,7 +310,7 @@ class TestEventBusAndHelpers:
         await bus.close()
 
     @pytest.mark.asyncio
-    async def test_unsubscribe_nonexistent_id(self, mocker: MockerFixture, mock_logger) -> None:
+    async def test_unsubscribe_nonexistent_id(self, mocker: MockerFixture, mock_logger: Any) -> None:
         mocker.patch("pywebtransport.events.EventBus._instance", None)
         bus = await create_event_bus()
         bus.unsubscribe("sub_fake_id")

@@ -9,14 +9,17 @@ from collections import deque
 from types import TracebackType
 from typing import TYPE_CHECKING, Deque, Dict, List, Optional, Type
 
-from ..events import EventType
-from ..exceptions import DatagramError, TimeoutError
-from ..types import Data
-from ..utils import ensure_bytes, get_logger, get_timestamp
-from .transport import DatagramMessage, WebTransportDatagramDuplexStream
+from pywebtransport.datagram.transport import (
+    DatagramMessage,
+    WebTransportDatagramDuplexStream,
+)
+from pywebtransport.events import EventType
+from pywebtransport.exceptions import DatagramError, TimeoutError
+from pywebtransport.types import Data
+from pywebtransport.utils import ensure_bytes, get_logger, get_timestamp
 
 if TYPE_CHECKING:
-    from ..events import Event
+    from pywebtransport.events import Event
 
 
 __all__ = ["DatagramReliabilityLayer"]
@@ -122,15 +125,8 @@ class DatagramReliabilityLayer:
         except asyncio.TimeoutError:
             raise TimeoutError(f"Receive timeout after {timeout}s") from None
 
-    def _get_stream(self) -> "WebTransportDatagramDuplexStream":
-        """Get the underlying stream or raise an error if it's gone or closed."""
-        stream = self._stream()
-        if self._closed or not stream or stream.is_closed:
-            raise DatagramError("Reliability layer or underlying stream is closed.")
-        return stream
-
     def _start_background_tasks(self) -> None:
-        """Start the background retry task if it's not already running."""
+        """Start the background retry task if it is not already running."""
         if self._retry_task is None:
             try:
                 self._retry_task = asyncio.create_task(self._retry_loop())
@@ -230,3 +226,10 @@ class DatagramReliabilityLayer:
 
         self._received_sequences.append(seq)
         await self._incoming_queue.put(data)
+
+    def _get_stream(self) -> "WebTransportDatagramDuplexStream":
+        """Get the underlying stream or raise an error if it is gone or closed."""
+        stream = self._stream()
+        if self._closed or not stream or stream.is_closed:
+            raise DatagramError("Reliability layer or underlying stream is closed.")
+        return stream

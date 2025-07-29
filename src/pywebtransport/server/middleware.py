@@ -1,16 +1,13 @@
 """
 WebTransport Middleware Framework.
-
-This module provides the MiddlewareManager for handling middleware chains
-and a collection of common, built-in middleware implementations.
 """
 
 import asyncio
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from ..session import WebTransportSession
-from ..types import Headers
-from ..utils import get_logger, get_timestamp
+from pywebtransport.session import WebTransportSession
+from pywebtransport.types import Headers
+from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = [
     "MiddlewareManager",

@@ -1,8 +1,5 @@
 """
 WebTransport stream base classes and core functionality.
-
-This module defines the fundamental building blocks for WebTransport streams,
-including statistics, buffers, and base classes for uni- and bi-directional streams.
 """
 
 import asyncio
@@ -12,14 +9,14 @@ from collections import deque
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator, Deque, Dict, List, Optional
 
-from ..constants import WebTransportConstants
-from ..events import Event, EventEmitter
-from ..exceptions import StreamError, TimeoutError
-from ..types import Data, StreamDirection, StreamId, StreamState
-from ..utils import ensure_bytes, format_duration, get_logger, get_timestamp
+from pywebtransport.constants import WebTransportConstants
+from pywebtransport.events import Event, EventEmitter
+from pywebtransport.exceptions import StreamError, TimeoutError
+from pywebtransport.types import Data, StreamDirection, StreamId, StreamState
+from pywebtransport.utils import ensure_bytes, format_duration, get_logger, get_timestamp
 
 if TYPE_CHECKING:
-    from ..session import WebTransportSession
+    from pywebtransport.session import WebTransportSession
 
 __all__ = [
     "StreamBuffer",

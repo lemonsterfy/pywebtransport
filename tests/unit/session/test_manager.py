@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.session.manager module."""
 
 import asyncio
-from typing import List
+from typing import Any, List
 
 import pytest
 from pytest_mock import MockerFixture
@@ -28,7 +28,7 @@ def manager() -> SessionManager:
 
 
 class TestSessionManager:
-    def test_initialization(self, manager: SessionManager):
+    def test_initialization(self, manager: SessionManager) -> None:
         assert manager.get_session_count() == 0
         assert manager._max_sessions == 1000
         stats = manager._stats
@@ -37,14 +37,14 @@ class TestSessionManager:
         assert stats["current_count"] == 0
         assert stats["max_concurrent"] == 0
 
-    def test_create_factory(self):
+    def test_create_factory(self) -> None:
         mgr = SessionManager.create(max_sessions=50, cleanup_interval=10.0)
         assert isinstance(mgr, SessionManager)
         assert mgr._max_sessions == 50
         assert mgr._cleanup_interval == 10.0
 
     @pytest.mark.asyncio
-    async def test_async_context_manager(self, mocker: MockerFixture):
+    async def test_async_context_manager(self, mocker: MockerFixture) -> None:
         mock_start = mocker.patch.object(SessionManager, "_start_cleanup_task")
         mock_shutdown = mocker.patch.object(SessionManager, "shutdown", new_callable=mocker.AsyncMock)
 
@@ -54,7 +54,7 @@ class TestSessionManager:
         mock_shutdown.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_add_session_success(self, manager: SessionManager, mock_session: WebTransportSession):
+    async def test_add_session_success(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
         session_id = await manager.add_session(mock_session)
         assert session_id == "session-1"
         assert manager.get_session_count() == 1
@@ -66,7 +66,7 @@ class TestSessionManager:
         assert await manager.get_session("session-1") is mock_session
 
     @pytest.mark.asyncio
-    async def test_get_session(self, manager: SessionManager, mock_session: WebTransportSession):
+    async def test_get_session(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
         await manager.add_session(mock_session)
         retrieved = await manager.get_session("session-1")
         assert retrieved is mock_session
@@ -75,7 +75,7 @@ class TestSessionManager:
         assert not_found is None
 
     @pytest.mark.asyncio
-    async def test_remove_session(self, manager: SessionManager, mock_session: WebTransportSession):
+    async def test_remove_session(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
         await manager.add_session(mock_session)
         assert manager.get_session_count() == 1
 
@@ -89,7 +89,7 @@ class TestSessionManager:
         assert stats["current_count"] == 0
 
     @pytest.mark.asyncio
-    async def test_get_all_and_by_state(self, manager: SessionManager, mocker: MockerFixture):
+    async def test_get_all_and_by_state(self, manager: SessionManager, mocker: MockerFixture) -> None:
         sessions: List[WebTransportSession] = []
         for i, state in enumerate([SessionState.CONNECTED, SessionState.CLOSED, SessionState.CONNECTED]):
             session = mocker.create_autospec(WebTransportSession, instance=True)
@@ -112,7 +112,7 @@ class TestSessionManager:
         assert closed_sessions[0].state == SessionState.CLOSED
 
     @pytest.mark.asyncio
-    async def test_get_stats(self, manager: SessionManager, mock_session: WebTransportSession):
+    async def test_get_stats(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
         await manager.add_session(mock_session)
         stats = await manager.get_stats()
 
@@ -125,7 +125,7 @@ class TestSessionManager:
         assert stats["max_sessions"] == 1000
 
     @pytest.mark.asyncio
-    async def test_add_session_limit_exceeded(self, mock_session: WebTransportSession, mocker: MockerFixture):
+    async def test_add_session_limit_exceeded(self, mock_session: WebTransportSession, mocker: MockerFixture) -> None:
         manager = SessionManager(max_sessions=1)
         await manager.add_session(mock_session)
 
@@ -134,14 +134,14 @@ class TestSessionManager:
             await manager.add_session(another_session)
 
     @pytest.mark.asyncio
-    async def test_remove_non_existent_session(self, manager: SessionManager):
+    async def test_remove_non_existent_session(self, manager: SessionManager) -> None:
         removed = await manager.remove_session("non-existent-id")
         assert removed is None
         stats = await manager.get_stats()
         assert stats["total_closed"] == 0
 
     @pytest.mark.asyncio
-    async def test_cleanup_closed_sessions(self, manager: SessionManager, mocker: MockerFixture):
+    async def test_cleanup_closed_sessions(self, manager: SessionManager, mocker: MockerFixture) -> None:
         open_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="open-1")
         open_session.is_closed = False
         closed_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="closed-1")
@@ -160,7 +160,7 @@ class TestSessionManager:
         assert stats["total_closed"] == 1
 
     @pytest.mark.asyncio
-    async def test_periodic_cleanup_task(self, mocker: MockerFixture):
+    async def test_periodic_cleanup_task(self, mocker: MockerFixture) -> None:
         manager = SessionManager(cleanup_interval=0.001)
         mock_cleanup = mocker.patch.object(manager, "cleanup_closed_sessions", new_callable=mocker.AsyncMock)
 
@@ -170,7 +170,7 @@ class TestSessionManager:
         mock_cleanup.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_periodic_cleanup_handles_exception(self, mocker: MockerFixture):
+    async def test_periodic_cleanup_handles_exception(self, mocker: MockerFixture) -> None:
         manager = SessionManager(cleanup_interval=0.001)
         mock_logger = mocker.patch("pywebtransport.session.manager.logger")
         mock_cleanup = mocker.patch.object(manager, "cleanup_closed_sessions", new_callable=mocker.AsyncMock)
@@ -183,7 +183,7 @@ class TestSessionManager:
         mock_cleanup.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_shutdown(self, manager: SessionManager, mock_session: WebTransportSession, mocker: MockerFixture):
+    async def test_shutdown(self, manager: SessionManager, mock_session: Any, mocker: MockerFixture) -> None:
         manager._start_cleanup_task()
         assert manager._cleanup_task is not None
         assert isinstance(manager._cleanup_task, asyncio.Task)

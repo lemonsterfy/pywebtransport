@@ -456,8 +456,8 @@ class TestWebTransportConnection:
 
     @pytest.mark.asyncio
     async def test_get_rtt_unavailable(self, connection: WebTransportConnection, mocker: MockerFixture) -> None:
-        connection._quic_connection = mocker.MagicMock()
-        del connection._quic_connection._rtt_smoother
+        mock_quic = mocker.MagicMock(spec=object())
+        connection._quic_connection = mock_quic
         with pytest.raises(ConnectionError, match="RTT is not available"):
             await connection._get_rtt()
 

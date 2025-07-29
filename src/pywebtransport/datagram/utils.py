@@ -1,17 +1,14 @@
 """
 WebTransport Datagram Utilities.
-
-This module provides helper functions for handling, diagnosing,
-and testing WebTransport datagram streams.
 """
 
 import asyncio
 from typing import TYPE_CHECKING, Any, Dict
 
-from ..utils import get_logger, get_timestamp
+from pywebtransport.utils import get_logger, get_timestamp
 
 if TYPE_CHECKING:
-    from .transport import WebTransportDatagramDuplexStream
+    from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
 
 
 __all__ = [

@@ -19,8 +19,8 @@ __all__ = [
     "is_stable",
 ]
 
-__version__ = "0.1.1"
-__version_info__ = (0, 1, 1)
+__version__ = "0.1.2"
+__version_info__ = (0, 1, 2)
 __author__ = "lemonsterfy"
 __email__ = "lemonsterfy@gmail.com"
 __license__ = "MIT"
