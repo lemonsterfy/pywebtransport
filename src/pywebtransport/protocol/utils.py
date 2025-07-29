@@ -1,26 +1,14 @@
 """
 WebTransport Protocol Utility Functions.
-
-This module provides helper functions for protocol-level operations,
-such as creating configurations, managing sessions, and diagnosing state.
 """
 
 from typing import Any
 
 from aioquic.quic.configuration import QuicConfiguration
 
-from ..constants import WebTransportConstants
-from ..types import (
-    TYPE_CHECKING,
-    ConnectionState,
-    SessionState,
-    StreamDirection,
-    StreamId,
-)
-from ..utils import get_logger, validate_stream_id
-
-if TYPE_CHECKING:
-    pass
+from pywebtransport.constants import WebTransportConstants
+from pywebtransport.types import ConnectionState, SessionState, StreamDirection, StreamId
+from pywebtransport.utils import get_logger, validate_stream_id
 
 __all__ = [
     "can_receive_data",

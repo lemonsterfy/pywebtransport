@@ -10,25 +10,15 @@ import weakref
 from collections import deque
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Deque,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple, Type, cast
 
-from ..events import Event, EventEmitter, EventType
-from ..exceptions import DatagramError, TimeoutError, datagram_too_large
-from ..types import Data, SessionId
-from ..utils import calculate_checksum, ensure_bytes, get_logger, get_timestamp
+from pywebtransport.events import Event, EventEmitter, EventType
+from pywebtransport.exceptions import DatagramError, TimeoutError, datagram_too_large
+from pywebtransport.types import Data, SessionId
+from pywebtransport.utils import calculate_checksum, ensure_bytes, get_logger, get_timestamp
 
 if TYPE_CHECKING:
-    from ..session import WebTransportSession
+    from pywebtransport.session import WebTransportSession
 
 
 __all__ = [

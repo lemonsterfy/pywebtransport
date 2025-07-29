@@ -1,8 +1,5 @@
 """
 Load balancer for WebTransport connections.
-
-This module provides a ConnectionLoadBalancer class for distributing
-connection requests across a set of target servers with health checking.
 """
 
 import asyncio
@@ -11,10 +8,11 @@ import time
 from types import TracebackType
 from typing import Any, Dict, List, Optional, Set, Tuple, Type
 
-from ..config import ClientConfig
-from ..exceptions import ConnectionError
-from ..utils import get_logger
-from .connection import WebTransportConnection
+from pywebtransport.config import ClientConfig
+from pywebtransport.connection.connection import WebTransportConnection
+from pywebtransport.connection.utils import test_tcp_connection
+from pywebtransport.exceptions import ConnectionError
+from pywebtransport.utils import get_logger
 
 __all__ = ["ConnectionLoadBalancer"]
 
@@ -205,8 +203,6 @@ class ConnectionLoadBalancer:
 
     async def _health_check_loop(self) -> None:
         """Periodically check the health of failed targets."""
-        from .utils import test_tcp_connection
-
         while True:
             try:
                 await asyncio.sleep(self._health_check_interval)

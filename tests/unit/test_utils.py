@@ -243,7 +243,7 @@ class TestAsyncUtils:
         assert result == "done"
 
     async def test_create_task_with_timeout_fails(self, mocker: MockerFixture) -> None:
-        def close_and_raise(coro: Coroutine, timeout: float) -> None:
+        def close_and_raise(coro: Coroutine[Any, Any, Any], timeout: float) -> None:
             coro.close()
             raise asyncio.TimeoutError()
 
@@ -263,7 +263,7 @@ class TestAsyncUtils:
         result = await run_with_timeout(sample_coro(), timeout=1, default_value="fail")
         assert result == "ok"
 
-        def close_and_raise(coro: Coroutine, timeout: float) -> None:
+        def close_and_raise(coro: Coroutine[Any, Any, Any], timeout: float) -> None:
             coro.close()
             raise asyncio.TimeoutError()
 
@@ -352,6 +352,7 @@ class TestValidationFunctions:
         if is_valid:
             validate_error_code(value)
         else:
+            assert exc_type is not None
             with pytest.raises(exc_type):
                 validate_error_code(value)
 
@@ -370,6 +371,7 @@ class TestValidationFunctions:
         if is_valid:
             validate_session_id(value)
         else:
+            assert exc_type is not None
             with pytest.raises(exc_type):
                 validate_session_id(value)
 
@@ -414,7 +416,7 @@ class TestMiscUtils:
             list(chunked_read(b"abc", chunk_size=0))
 
     def test_merge_configs(self) -> None:
-        base = {"a": 1, "b": {"c": 2, "d": 3}}
+        base: Dict[str, Any] = {"a": 1, "b": {"c": 2, "d": 3}}
         override = {"b": {"d": 4, "e": 5}, "f": 6}
         expected = {"a": 1, "b": {"c": 2, "d": 4, "e": 5}, "f": 6}
         result = merge_configs(base, override)

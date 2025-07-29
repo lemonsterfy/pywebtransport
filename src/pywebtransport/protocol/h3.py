@@ -48,9 +48,6 @@
 
 """
 HTTP/3 Protocol Implementation with WebTransport Extensions.
-
-This module provides a low-level HTTP/3 connection object, adapted from
-aioquic to include support for the WebTransport protocol.
 """
 
 import logging

@@ -1,8 +1,5 @@
 """
 WebTransport connection pooling implementation.
-
-This module provides a ConnectionPool class for managing and reusing
-WebTransport connections to reduce connection setup latency.
 """
 
 import asyncio
@@ -10,9 +7,9 @@ import time
 from types import TracebackType
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from ..config import ClientConfig
-from ..utils import get_logger
-from .connection import WebTransportConnection
+from pywebtransport.config import ClientConfig
+from pywebtransport.connection.connection import WebTransportConnection
+from pywebtransport.utils import get_logger
 
 __all__ = ["ConnectionPool"]
 

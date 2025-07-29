@@ -123,7 +123,7 @@ class TestClientMonitor:
     @pytest.mark.asyncio
     async def test_aenter_and_aexit(self, mocker: MockerFixture, mock_client: Any) -> None:
         mocker.patch("pywebtransport.client.monitor.ClientMonitor._monitor_loop", new_callable=mocker.MagicMock)
-        mock_task = asyncio.Future()
+        mock_task: asyncio.Future[Any] = asyncio.Future()
         mock_create_task = mocker.patch("asyncio.create_task", return_value=mock_task)
         monitor = ClientMonitor(mock_client)
 
@@ -150,7 +150,7 @@ class TestClientMonitor:
     @pytest.mark.asyncio
     async def test_aexit_handles_cancelled_error(self, mocker: MockerFixture, mock_client: Any) -> None:
         mocker.patch("pywebtransport.client.monitor.ClientMonitor._monitor_loop", new_callable=mocker.MagicMock)
-        mock_task = asyncio.Future()
+        mock_task: asyncio.Future[Any] = asyncio.Future()
         mocker.patch("asyncio.create_task", return_value=mock_task)
         monitor = ClientMonitor(mock_client)
 

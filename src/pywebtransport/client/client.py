@@ -7,13 +7,13 @@ from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any, Dict, List, Optional, Type
 
-from ..config import ClientConfig
-from ..connection import ConnectionManager, WebTransportConnection
-from ..events import EventEmitter
-from ..exceptions import ClientError, TimeoutError
-from ..session import WebTransportSession
-from ..types import URL, Headers
-from ..utils import Timer, format_duration, get_logger, get_timestamp, parse_webtransport_url, validate_url
+from pywebtransport.config import ClientConfig
+from pywebtransport.connection import ConnectionManager, WebTransportConnection
+from pywebtransport.events import EventEmitter
+from pywebtransport.exceptions import ClientError, TimeoutError
+from pywebtransport.session import WebTransportSession
+from pywebtransport.types import URL, Headers
+from pywebtransport.utils import Timer, format_duration, get_logger, get_timestamp, parse_webtransport_url, validate_url
 
 __all__ = ["ClientStats", "WebTransportClient"]
 

@@ -15,13 +15,13 @@ from aioquic.asyncio.server import QuicServer
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import QuicEvent
 
-from ..config import ServerConfig
-from ..connection import ConnectionManager, WebTransportConnection
-from ..events import Event, EventEmitter
-from ..exceptions import ServerError
-from ..session import SessionManager
-from ..types import Address, EventType
-from ..utils import get_logger, get_timestamp
+from pywebtransport.config import ServerConfig
+from pywebtransport.connection import ConnectionManager, WebTransportConnection
+from pywebtransport.events import Event, EventEmitter
+from pywebtransport.exceptions import ServerError
+from pywebtransport.session import SessionManager
+from pywebtransport.types import Address, EventType
+from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = [
     "ServerStats",

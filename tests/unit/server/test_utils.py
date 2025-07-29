@@ -50,7 +50,7 @@ class TestAppFactories:
         expect_generation: bool,
     ) -> None:
         mocker.patch("pathlib.Path.exists", return_value=certs_exist)
-        mock_generate_cert = mocker.patch("pywebtransport.utils.generate_self_signed_cert")
+        mock_generate_cert = mocker.patch("pywebtransport.server.utils.generate_self_signed_cert")
         mock_server_config = mocker.patch("pywebtransport.config.ServerConfig.create_for_development")
         mock_app = mocker.patch("pywebtransport.server.utils.ServerApp")
         host, port = "test.local", 1234
@@ -205,7 +205,7 @@ class TestEchoHelpers:
 
         async def cancelled_generator() -> AsyncGenerator[Any, None]:
             raise asyncio.CancelledError
-            yield
+            yield  # type: ignore[unreachable]
 
         mock_session.incoming_streams.return_value = cancelled_generator()
 

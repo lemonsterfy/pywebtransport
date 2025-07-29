@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2025-07-30
+
+### Added
+
+- Introduced a `DeprecationWarning` for Python versions below 3.11, signaling the planned removal of support in v0.2.0.
+- Integrated `tox` and `pyenv` configurations to streamline the development and testing workflow for contributors.
+
+### Changed
+
+- Refactored internal module imports to use absolute paths, improving code structure and maintainability.
+- Enhanced code quality by resolving all MyPy warnings within the test suite.
+
+### Fixed
+
+- Corrected an issue in the CI pipeline that prevented code coverage reports from being displayed correctly.
+
 ## [0.1.1] - 2025-07-28
 
 ### Changed
@@ -43,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/lemonsterfy/pywebtransport/releases/tag/v0.1.0

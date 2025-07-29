@@ -1,8 +1,5 @@
 """
 WebTransport Pooled Client.
-
-This module provides the PooledClient class, which manages pools
-of reusable WebTransportSession objects to reduce connection latency.
 """
 
 import asyncio
@@ -10,11 +7,11 @@ from collections import defaultdict
 from types import TracebackType
 from typing import Dict, List, Optional, Type
 
-from ..config import ClientConfig
-from ..session import WebTransportSession
-from ..types import URL
-from ..utils import get_logger, parse_webtransport_url
-from .client import WebTransportClient
+from pywebtransport.client.client import WebTransportClient
+from pywebtransport.config import ClientConfig
+from pywebtransport.session import WebTransportSession
+from pywebtransport.types import URL
+from pywebtransport.utils import get_logger, parse_webtransport_url
 
 __all__ = ["PooledClient"]
 

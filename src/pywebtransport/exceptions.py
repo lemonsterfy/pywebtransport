@@ -4,8 +4,8 @@ WebTransport Exceptions.
 
 from typing import Any, Dict, Optional, Tuple, Type
 
-from .constants import ErrorCodes
-from .types import SessionState, StreamState
+from pywebtransport.constants import ErrorCodes
+from pywebtransport.types import SessionState, StreamState
 
 __all__ = [
     "AuthenticationError",

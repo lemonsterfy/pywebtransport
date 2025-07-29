@@ -1,8 +1,5 @@
 """
 WebTransport Protocol Handler.
-
-This module provides the core implementation that orchestrates WebTransport
-protocol logic on top of an aioquic connection.
 """
 
 import asyncio
@@ -12,9 +9,19 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 from aioquic.quic.connection import QuicConnection, QuicConnectionState
 from aioquic.quic.events import QuicEvent
 
-from ..events import Event, EventEmitter
-from ..exceptions import ConnectionError, ProtocolError, TimeoutError
-from ..types import (
+from pywebtransport.events import Event, EventEmitter
+from pywebtransport.exceptions import ConnectionError, ProtocolError, TimeoutError
+from pywebtransport.protocol import utils as protocol_utils
+from pywebtransport.protocol.h3 import (
+    DatagramReceived,
+    DataReceived,
+    H3Connection,
+    H3Event,
+    HeadersReceived,
+    WebTransportStreamDataReceived,
+)
+from pywebtransport.protocol.session_info import StreamInfo, WebTransportSessionInfo
+from pywebtransport.types import (
     ConnectionState,
     Data,
     EventType,
@@ -25,7 +32,7 @@ from ..types import (
     StreamId,
     StreamState,
 )
-from ..utils import (
+from pywebtransport.utils import (
     Timer,
     ensure_bytes,
     generate_session_id,
@@ -34,12 +41,9 @@ from ..utils import (
     validate_session_id,
     validate_stream_id,
 )
-from . import utils as protocol_utils
-from .h3 import DatagramReceived, DataReceived, H3Connection, H3Event, HeadersReceived, WebTransportStreamDataReceived
-from .session_info import StreamInfo, WebTransportSessionInfo
 
 if TYPE_CHECKING:
-    from ..connection import WebTransportConnection
+    from pywebtransport.connection import WebTransportConnection
 
 
 __all__ = ["WebTransportProtocolHandler"]

@@ -1,8 +1,5 @@
 """
 WebTransport Datagram Performance Monitor.
-
-This module provides the DatagramMonitor class, a utility for monitoring the
-performance of a WebTransportDatagramDuplexStream, tracking metrics and alerts.
 """
 
 import asyncio
@@ -10,10 +7,10 @@ from collections import deque
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Type
 
-from ..utils import get_logger, get_timestamp
+from pywebtransport.utils import get_logger, get_timestamp
 
 if TYPE_CHECKING:
-    from .transport import WebTransportDatagramDuplexStream
+    from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
 
 
 __all__ = ["DatagramMonitor"]

@@ -5,11 +5,11 @@ WebTransport Datagram Broadcaster.
 import asyncio
 from typing import TYPE_CHECKING, List, Optional
 
-from ..types import Data
-from ..utils import get_logger
+from pywebtransport.types import Data
+from pywebtransport.utils import get_logger
 
 if TYPE_CHECKING:
-    from .transport import WebTransportDatagramDuplexStream
+    from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
 
 
 __all__ = ["DatagramBroadcaster"]

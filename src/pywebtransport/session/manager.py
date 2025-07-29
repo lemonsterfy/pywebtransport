@@ -7,10 +7,10 @@ from collections import defaultdict
 from types import TracebackType
 from typing import Any, Dict, List, Optional, Type
 
-from ..exceptions import SessionError
-from ..types import SessionId, SessionState
-from ..utils import get_logger
-from .session import WebTransportSession
+from pywebtransport.exceptions import SessionError
+from pywebtransport.session.session import WebTransportSession
+from pywebtransport.types import SessionId, SessionState
+from pywebtransport.utils import get_logger
 
 __all__ = ["SessionManager"]
 

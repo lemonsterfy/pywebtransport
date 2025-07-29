@@ -1,13 +1,14 @@
 """Unit tests for the pywebtransport.protocol.utils module."""
 
 import pytest
+from pytest_mock import MockerFixture
 
 from pywebtransport import ConnectionState, SessionState, StreamDirection
 from pywebtransport.constants import WebTransportConstants
 from pywebtransport.protocol import utils as protocol_utils
 
 
-def test_create_quic_configuration(mocker):
+def test_create_quic_configuration(mocker: MockerFixture) -> None:
     mock_quic_config = mocker.patch("pywebtransport.protocol.utils.QuicConfiguration")
 
     protocol_utils.create_quic_configuration(is_client=True)
@@ -44,7 +45,7 @@ def test_stream_id_properties(
     is_server_initiated: bool,
     is_bidi: bool,
     is_uni: bool,
-):
+) -> None:
     assert protocol_utils.is_client_initiated_stream(stream_id) == is_client_initiated
     assert protocol_utils.is_server_initiated_stream(stream_id) == is_server_initiated
     assert protocol_utils.is_bidirectional_stream(stream_id) == is_bidi
@@ -60,7 +61,7 @@ def test_stream_id_properties(
         (ConnectionState.CLOSED, SessionState.CLOSED, False),
     ],
 )
-def test_can_send_data(connection_state: ConnectionState, session_state: SessionState, expected: bool):
+def test_can_send_data(connection_state: ConnectionState, session_state: SessionState, expected: bool) -> None:
     assert protocol_utils.can_send_data(connection_state, session_state) == expected
 
 
@@ -74,7 +75,7 @@ def test_can_send_data(connection_state: ConnectionState, session_state: Session
         (ConnectionState.CLOSED, SessionState.CLOSED, False),
     ],
 )
-def test_can_receive_data(connection_state: ConnectionState, session_state: SessionState, expected: bool):
+def test_can_receive_data(connection_state: ConnectionState, session_state: SessionState, expected: bool) -> None:
     assert protocol_utils.can_receive_data(connection_state, session_state) == expected
 
 
@@ -91,7 +92,7 @@ def test_can_receive_data(connection_state: ConnectionState, session_state: Sess
         (3, False, True),
     ],
 )
-def test_can_send_data_on_stream(stream_id: int, is_client: bool, expected: bool):
+def test_can_send_data_on_stream(stream_id: int, is_client: bool, expected: bool) -> None:
     assert protocol_utils.can_send_data_on_stream(stream_id, is_client=is_client) == expected
 
 
@@ -108,7 +109,7 @@ def test_can_send_data_on_stream(stream_id: int, is_client: bool, expected: bool
         (3, False, False),
     ],
 )
-def test_can_receive_data_on_stream(stream_id: int, is_client: bool, expected: bool):
+def test_can_receive_data_on_stream(stream_id: int, is_client: bool, expected: bool) -> None:
     assert protocol_utils.can_receive_data_on_stream(stream_id, is_client=is_client) == expected
 
 
@@ -125,7 +126,9 @@ def test_can_receive_data_on_stream(stream_id: int, is_client: bool, expected: b
         (3, False, StreamDirection.SEND_ONLY),
     ],
 )
-def test_get_stream_direction_from_id(mocker, stream_id: int, is_client: bool, expected_direction: StreamDirection):
+def test_get_stream_direction_from_id(
+    mocker: MockerFixture, stream_id: int, is_client: bool, expected_direction: StreamDirection
+) -> None:
     mock_validate = mocker.patch("pywebtransport.protocol.utils.validate_stream_id")
 
     direction = protocol_utils.get_stream_direction_from_id(stream_id, is_client=is_client)

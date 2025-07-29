@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.client.browser module."""
 
 import asyncio
-from typing import Any
+from typing import Any, Coroutine, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -137,9 +137,9 @@ class TestWebTransportBrowser:
     ) -> None:
         background_tasks = []
 
-        def capture_task(coro):
+        def capture_task(coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
             background_tasks.append(coro)
-            return mocker.MagicMock(spec=asyncio.Task)
+            return cast(asyncio.Task[Any], mocker.MagicMock(spec=asyncio.Task))
 
         mocker.patch("asyncio.create_task", side_effect=capture_task)
         old_session = mocker.create_autospec(WebTransportSession, instance=True)

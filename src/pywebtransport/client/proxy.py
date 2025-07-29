@@ -1,21 +1,18 @@
 """
 WebTransport Proxy Client.
-
-This module provides the WebTransportProxy class for tunneling WebTransport
-connections through an HTTP proxy supporting the CONNECT method.
 """
 
 import asyncio
 from types import TracebackType
 from typing import Optional, Type
 
-from ..config import ClientConfig
-from ..exceptions import ClientError, ConnectionError, SessionError, TimeoutError
-from ..session import WebTransportSession
-from ..stream import WebTransportStream
-from ..types import URL, Headers
-from ..utils import get_logger
-from .client import WebTransportClient
+from pywebtransport.client.client import WebTransportClient
+from pywebtransport.config import ClientConfig
+from pywebtransport.exceptions import ClientError, ConnectionError, SessionError, TimeoutError
+from pywebtransport.session import WebTransportSession
+from pywebtransport.stream import WebTransportStream
+from pywebtransport.types import URL, Headers
+from pywebtransport.utils import get_logger
 
 __all__ = ["WebTransportProxy"]
 

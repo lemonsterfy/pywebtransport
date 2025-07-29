@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import Any, List
 
 import pytest
 from _pytest.logging import LogCaptureFixture
@@ -20,7 +21,7 @@ from pywebtransport.session import WebTransportSession
 
 class TestMiddlewareManager:
     @pytest.fixture
-    def mock_session(self, mocker: MockerFixture) -> WebTransportSession:
+    def mock_session(self, mocker: MockerFixture) -> Any:
         return mocker.create_autospec(WebTransportSession, instance=True)
 
     @pytest.mark.asyncio
@@ -41,7 +42,7 @@ class TestMiddlewareManager:
         assert manager.get_middleware_count() == 0
 
     @pytest.mark.asyncio
-    async def test_process_request_all_pass(self, mock_session: WebTransportSession, mocker: MockerFixture) -> None:
+    async def test_process_request_all_pass(self, mock_session: Any, mocker: MockerFixture) -> None:
         manager = MiddlewareManager()
         middleware1 = mocker.AsyncMock(return_value=True)
         middleware2 = mocker.AsyncMock(return_value=True)
@@ -55,7 +56,7 @@ class TestMiddlewareManager:
         middleware2.assert_awaited_once_with(mock_session)
 
     @pytest.mark.asyncio
-    async def test_process_request_one_fails(self, mock_session: WebTransportSession, mocker: MockerFixture) -> None:
+    async def test_process_request_one_fails(self, mock_session: Any, mocker: MockerFixture) -> None:
         manager = MiddlewareManager()
         middleware1 = mocker.AsyncMock(return_value=True)
         middleware2 = mocker.AsyncMock(return_value=False)
@@ -73,7 +74,7 @@ class TestMiddlewareManager:
 
     @pytest.mark.asyncio
     async def test_process_request_exception(
-        self, mock_session: WebTransportSession, mocker: MockerFixture, caplog: LogCaptureFixture
+        self, mock_session: Any, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
         manager = MiddlewareManager()
         middleware1 = mocker.AsyncMock(side_effect=ValueError("Middleware error"))
@@ -87,7 +88,7 @@ class TestMiddlewareManager:
 
 class TestMiddlewareFactories:
     @pytest.fixture
-    def mock_session(self, mocker: MockerFixture) -> WebTransportSession:
+    def mock_session(self, mocker: MockerFixture) -> Any:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.path = "/test"
         session.headers = {"origin": "https://example.com", "x-auth": "good-token"}
@@ -102,9 +103,7 @@ class TestMiddlewareFactories:
         assert limiter._window_seconds == 30
 
     @pytest.mark.asyncio
-    async def test_create_logging_middleware(
-        self, mock_session: WebTransportSession, caplog: LogCaptureFixture
-    ) -> None:
+    async def test_create_logging_middleware(self, mock_session: Any, caplog: LogCaptureFixture) -> None:
         caplog.set_level(logging.INFO)
         logging_middleware = create_logging_middleware()
 
@@ -129,9 +128,7 @@ class TestMiddlewareFactories:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("auth_result", [True, False])
-    async def test_create_auth_middleware(
-        self, mock_session: WebTransportSession, auth_result: bool, mocker: MockerFixture
-    ) -> None:
+    async def test_create_auth_middleware(self, mock_session: Any, auth_result: bool, mocker: MockerFixture) -> None:
         auth_handler = mocker.AsyncMock(return_value=auth_result)
         auth_middleware = create_auth_middleware(auth_handler=auth_handler)
 
@@ -141,9 +138,7 @@ class TestMiddlewareFactories:
         auth_handler.assert_awaited_once_with(mock_session.headers)
 
     @pytest.mark.asyncio
-    async def test_create_auth_middleware_handler_exception(
-        self, mock_session: WebTransportSession, mocker: MockerFixture
-    ) -> None:
+    async def test_create_auth_middleware_handler_exception(self, mock_session: Any, mocker: MockerFixture) -> None:
         auth_handler = mocker.AsyncMock(side_effect=ValueError("Auth error"))
         auth_middleware = create_auth_middleware(auth_handler=auth_handler)
 
@@ -162,7 +157,7 @@ class TestMiddlewareFactories:
         ],
     )
     async def test_create_cors_middleware(
-        self, mock_session: WebTransportSession, origin: str, allowed_origins: list, expected_result: bool
+        self, mock_session: Any, origin: Any, allowed_origins: List[str], expected_result: bool
     ) -> None:
         mock_session.headers = {"origin": origin} if origin else {}
         cors_middleware = create_cors_middleware(allowed_origins=allowed_origins)
@@ -174,14 +169,14 @@ class TestMiddlewareFactories:
 
 class TestRateLimiter:
     @pytest.fixture
-    def mock_session(self, mocker: MockerFixture) -> WebTransportSession:
+    def mock_session(self, mocker: MockerFixture) -> Any:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.connection.remote_address = ("1.2.3.4", 12345)
         return session
 
     @pytest.mark.asyncio
     async def test_rate_limiting_logic(
-        self, mock_session: WebTransportSession, mocker: MockerFixture, caplog: LogCaptureFixture
+        self, mock_session: Any, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
         mock_timestamp = mocker.patch("pywebtransport.server.middleware.get_timestamp")
         rate_limiter = RateLimiter(max_requests=2, window_seconds=10)

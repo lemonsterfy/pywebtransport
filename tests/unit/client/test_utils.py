@@ -1,6 +1,6 @@
 """Unit tests for the pywebtransport.client.utils module."""
 
-from typing import Any
+from typing import Any, Awaitable, NoReturn, Union, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -113,9 +113,9 @@ class TestClientUtils:
     async def test_connectivity_success(self, mocker: MockerFixture, mock_client: Any, mock_session: Any) -> None:
         mocker.patch("pywebtransport.client.utils.get_timestamp", side_effect=[1000.0, 1001.5])
 
-        async def wait_for_side_effect(coro, timeout):
+        async def wait_for_side_effect(coro: Awaitable[Any], timeout: Union[float, None]) -> WebTransportSession:
             await coro
-            return mock_session
+            return cast(WebTransportSession, mock_session)
 
         mocker.patch("asyncio.wait_for", side_effect=wait_for_side_effect)
 
@@ -129,7 +129,7 @@ class TestClientUtils:
     async def test_connectivity_failure(self, mocker: MockerFixture, mock_client: Any) -> None:
         mocker.patch("pywebtransport.client.utils.get_timestamp")
 
-        async def wait_for_side_effect(coro, timeout):
+        async def wait_for_side_effect(coro: Awaitable[Any], timeout: Union[float, None]) -> NoReturn:
             await coro
             raise ConnectionError("Failed to connect")
 

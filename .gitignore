@@ -11,7 +11,8 @@ dist/
 
 # Testing
 .pytest_cache/
-.coverage
+.cache/
+.coverage*
 htmlcov/
 .tox/
 

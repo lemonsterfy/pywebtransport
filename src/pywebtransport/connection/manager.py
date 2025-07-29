@@ -1,8 +1,5 @@
 """
 WebTransport connection manager implementation.
-
-This module provides a manager for handling multiple WebTransport connections
-with concurrency safety and automatic cleanup features.
 """
 
 import asyncio
@@ -10,10 +7,10 @@ from collections import defaultdict
 from types import TracebackType
 from typing import Any, Dict, List, Optional, Type
 
-from ..exceptions import ConnectionError
-from ..types import ConnectionId
-from ..utils import get_logger
-from .connection import WebTransportConnection
+from pywebtransport.connection.connection import WebTransportConnection
+from pywebtransport.exceptions import ConnectionError
+from pywebtransport.types import ConnectionId
+from pywebtransport.utils import get_logger
 
 __all__ = ["ConnectionManager"]
 

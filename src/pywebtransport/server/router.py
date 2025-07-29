@@ -1,16 +1,13 @@
 """
 WebTransport Request Router.
-
-This module provides the RequestRouter class, which maps session paths
-to appropriate handlers using exact matches and regular expressions.
 """
 
 import re
 from typing import Any, Dict, List, Optional, Pattern, Tuple
 
-from ..session import WebTransportSession
-from ..types import SessionHandler
-from ..utils import get_logger
+from pywebtransport.session import WebTransportSession
+from pywebtransport.types import SessionHandler
+from pywebtransport.utils import get_logger
 
 __all__ = ["RequestRouter"]
 

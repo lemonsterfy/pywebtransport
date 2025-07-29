@@ -2,9 +2,9 @@
 WebTransport stream utility functions.
 """
 
-from ..exceptions import StreamError
-from ..utils import get_logger
-from .stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from pywebtransport.exceptions import StreamError
+from pywebtransport.stream.stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from pywebtransport.utils import get_logger
 
 __all__ = [
     "copy_stream_data",

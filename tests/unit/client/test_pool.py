@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.client.pool module."""
 
 import asyncio
-from typing import Any
+from typing import Any, List, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -59,13 +59,13 @@ class TestClientPool:
         )
         original_gather = asyncio.gather
 
-        async def stateful_gather_mock(*tasks, **kwargs):
+        async def stateful_gather_mock(*tasks: Any, **kwargs: Any) -> List[Any]:
             call_count = getattr(stateful_gather_mock, "call_count", 0)
             setattr(stateful_gather_mock, "call_count", call_count + 1)
             if call_count == 0:
                 await original_gather(*tasks)
                 raise ValueError("Activation failed")
-            return await original_gather(*tasks, **kwargs)
+            return cast(List[Any], await original_gather(*tasks, **kwargs))
 
         mocker.patch("pywebtransport.client.pool.asyncio.gather", side_effect=stateful_gather_mock)
         pool = ClientPool.create(num_clients=2)

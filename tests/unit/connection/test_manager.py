@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.connection.manager module."""
 
 import asyncio
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, List
 
 import pytest
 from pytest_mock import MockerFixture
@@ -184,7 +184,7 @@ class TestBulkOperationsAndQueries:
     async def test_close_all_connections(self, manager: ConnectionManager, mocker: MockerFixture) -> None:
         original_gather = asyncio.gather
 
-        async def await_all(*tasks, return_exceptions):
+        async def await_all(*tasks: Any, return_exceptions: bool) -> List[Any]:
             return await original_gather(*tasks, return_exceptions=return_exceptions)
 
         mock_gather = mocker.patch("asyncio.gather", new_callable=mocker.AsyncMock)
@@ -228,14 +228,19 @@ class TestManagerLifecycleAndCleanup:
         manager = ConnectionManager()
         mock_close_all = mocker.patch.object(manager, "close_all_connections", new_callable=mocker.AsyncMock)
 
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
-        manager._cleanup_task = future
+        real_task = asyncio.create_task(asyncio.sleep(3600))
+        cancel_spy = mocker.spy(real_task, "cancel")
+        manager._cleanup_task = real_task
 
         await manager.shutdown()
 
-        assert future.cancelled()
+        cancel_spy.assert_called_once()
         mock_close_all.assert_awaited_once()
+
+        try:
+            await real_task
+        except asyncio.CancelledError:
+            pass
 
     async def test_cleanup_closed_connections(self, manager: ConnectionManager, mocker: MockerFixture) -> None:
         conn_open = mocker.create_autospec(WebTransportConnection, instance=True)

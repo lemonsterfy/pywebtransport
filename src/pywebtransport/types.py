@@ -25,10 +25,10 @@ from typing import (
 from typing_extensions import TypeAlias
 
 if TYPE_CHECKING:
-    from .connection import WebTransportConnection
-    from .events import Event
-    from .session import WebTransportSession
-    from .stream import WebTransportReceiveStream, WebTransportStream
+    from pywebtransport.connection import WebTransportConnection
+    from pywebtransport.events import Event
+    from pywebtransport.session import WebTransportSession
+    from pywebtransport.stream import WebTransportReceiveStream, WebTransportStream
 
 __all__ = [
     "Address",

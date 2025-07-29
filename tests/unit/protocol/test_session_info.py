@@ -1,13 +1,16 @@
 """Unit tests for the pywebtransport.protocol.session_info module."""
 
+from typing import Optional
+
 import pytest
+from pytest_mock import MockerFixture
 
 from pywebtransport import SessionState, StreamDirection, StreamState
 from pywebtransport.protocol import StreamInfo, WebTransportSessionInfo
 
 
 class TestStreamInfo:
-    def test_initialization_with_required_fields(self):
+    def test_initialization_with_required_fields(self) -> None:
         stream_info = StreamInfo(
             stream_id=4,
             session_id="test-session",
@@ -26,7 +29,7 @@ class TestStreamInfo:
         assert stream_info.close_code is None
         assert stream_info.close_reason is None
 
-    def test_str_representation_active(self, mocker):
+    def test_str_representation_active(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.protocol.session_info.get_timestamp", return_value=1010.5)
         stream_info = StreamInfo(
             stream_id=8,
@@ -40,7 +43,7 @@ class TestStreamInfo:
         expected_str = "Stream 8 [open] direction=send_only session=s1 sent=100b recv=50b (active: 10.50s)"
         assert str(stream_info) == expected_str
 
-    def test_str_representation_closed(self):
+    def test_str_representation_closed(self) -> None:
         stream_info = StreamInfo(
             stream_id=8,
             session_id="s1",
@@ -52,7 +55,7 @@ class TestStreamInfo:
         expected_str = "Stream 8 [closed] direction=send_only session=s1 sent=0b recv=0b (duration: 5.25s)"
         assert str(stream_info) == expected_str
 
-    def test_to_dict_conversion(self):
+    def test_to_dict_conversion(self) -> None:
         stream_info = StreamInfo(
             stream_id=4,
             session_id="test-session",
@@ -72,7 +75,7 @@ class TestStreamInfo:
 
 
 class TestWebTransportSessionInfo:
-    def test_initialization_defaults(self):
+    def test_initialization_defaults(self) -> None:
         session_info = WebTransportSessionInfo(
             session_id="test-session",
             stream_id=0,
@@ -94,7 +97,14 @@ class TestWebTransportSessionInfo:
             (2010.0, 2030.75, 0, " (duration: 20.75s)"),
         ],
     )
-    def test_str_representation_scenarios(self, mocker, ready_at, closed_at, timestamp, expected_duration_str):
+    def test_str_representation_scenarios(
+        self,
+        mocker: MockerFixture,
+        ready_at: Optional[float],
+        closed_at: Optional[float],
+        timestamp: float,
+        expected_duration_str: str,
+    ) -> None:
         if timestamp > 0:
             mocker.patch("pywebtransport.protocol.session_info.get_timestamp", return_value=timestamp)
 
@@ -110,7 +120,7 @@ class TestWebTransportSessionInfo:
         expected_str = f"Session s1 [connected] path=/live stream=0{expected_duration_str}"
         assert str(session_info) == expected_str
 
-    def test_to_dict_conversion(self):
+    def test_to_dict_conversion(self) -> None:
         headers = {"user-agent": "test-client"}
         session_info = WebTransportSessionInfo(
             session_id="test-session",

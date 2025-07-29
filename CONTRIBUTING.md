@@ -10,77 +10,101 @@ This project adheres to a [Code of Conduct](CODE_OF_CONDUCT.md). By participatin
 
 ### Prerequisites
 
-- Python 3.8 or higher
-- Git
-- Virtual environment tool (venv, virtualenv, or conda)
+To contribute to this project, your development environment will need the following tools:
+
+- **Git**: For version control.
+- **pyenv**: For managing multiple Python versions. This is crucial for local testing.
+- **tox**: For automating tests across all supported Python versions.
+
+We recommend installing `tox` using `pipx` for a clean, isolated installation:
+
+```bash
+pipx install tox
+```
 
 ### Development Setup
 
-1. **Fork and clone the repository**:
+1.  **Fork and clone the repository**:
+    First, fork the project on GitHub. Then, clone your fork locally:
 
-   ```bash
-   git clone https://github.com/lemonsterfy/pywebtransport.git
-   cd pywebtransport
-   ```
+    ```bash
+    git clone https://github.com/lemonsterfy/pywebtransport.git
+    cd pywebtransport
+    ```
 
-2. **Create a virtual environment**:
+2.  **Install required Python versions**:
+    This project is tested across multiple Python versions. Use `pyenv` to install them. You can find the list of supported versions in the `tox.ini` file.
 
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+    ```bash
+    # Example for installing a specific version
+    pyenv install 3.11.13
+    ```
 
-3. **Install development dependencies**:
+3.  **Create your primary development environment**:
+    For day-to-day development, we recommend using a recent, stable version of Python (e.g., 3.11).
 
-   ```bash
-   pip install -e ".[dev]"
-   ```
+    ```bash
+    # Set the Python version for this project directory
+    pyenv local 3.11.13
 
-4. **Install pre-commit hooks**:
+    # Create and activate a virtual environment named .venv
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    ```
 
-   ```bash
-   pre-commit install
-   ```
+4.  **Install development dependencies**:
+    This command will install the project in editable mode along with all tools needed for testing and quality checks.
 
-5. **Verify installation**:
-   ```bash
-   python -c "import pywebtransport; print('Installation successful')"
-   pytest --version
-   ```
+    ```bash
+    pip install -e ".[dev]"
+    ```
+
+5.  **Install pre-commit hooks**:
+    This will run automated checks before each commit.
+    ```bash
+    pre-commit install
+    ```
 
 ## Development Workflow
 
 ### Making Changes
 
-1. **Create a feature branch**:
+1.  **Create a feature branch**:
+    Create a new branch from `main` for your changes.
 
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
+    ```bash
+    git checkout -b feature/your-feature-name
+    ```
 
-2. **Make your changes** following the coding standards below
+2.  **Make your changes**, following the coding standards below.
 
-3. **Write or update tests** for your changes
+3.  **Write or update tests** for your changes.
 
-4. **Run the test suite**:
+4.  **Run checks and tests**:
+    While developing, you can run tests quickly against your primary environment:
 
-   ```bash
-   pytest
-   ```
+    ```bash
+    # Run code quality checks
+    black src tests
+    flake8 src tests
+    mypy src
 
-5. **Run code formatting and linting**:
+    # Run the test suite with pytest
+    pytest
+    ```
 
-   ```bash
-   black src tests
-   flake8 src tests
-   mypy src
-   ```
+5.  **Run the full test suite with tox**:
+    Before submitting your changes, it is **mandatory** to run the full test suite using `tox`. This ensures your changes are compatible with all supported Python versions.
 
-6. **Commit your changes**:
-   ```bash
-   git add .
-   git commit -m "Add feature: brief description"
-   ```
+    ```bash
+    tox
+    ```
+
+6.  **Commit your changes**:
+    ```bash
+    git add .
+    git commit -m "feat: A brief and descriptive commit message"
+    ```
 
 ## Coding Standards
 
@@ -159,24 +183,14 @@ async def create_bidirectional_stream(self) -> WebTransportStream:
 
 ### Test Structure
 
-Tests are organized by type and mirror the source code structure. This makes it easy to find the tests corresponding to a specific module.
+Tests are organized by type and mirror the source code structure.
 
 ```
 tests/
-├── e2e/              # End-to-end tests that run a client against a server.
-├── integration/      # Tests for interactions between components.
-├── performance/      # Performance and benchmark tests.
-└── unit/             # Unit tests for individual components.
-    ├── client/       # Tests for the `src/pywebtransport/client` module.
-    │   └── test_client.py
-    ├── server/       # Tests for the `src/pywebtransport/server` module.
-    │   └── test_server.py
-    ├── connection/
-    ├── datagram/
-    ├── protocol/
-    ├── session/
-    ├── stream/
-    └── test_config.py  # Tests for `src/pywebtransport/config.py`
+├── e2e/
+├── integration/
+├── performance/
+└── unit/
 ```
 
 ### Writing Tests
@@ -186,46 +200,28 @@ tests/
 - Test error conditions and edge cases
 - Use pytest fixtures for common setup
 
-Example test:
-
-```python
-import pytest
-import asyncio
-from pywebtransport import WebTransportClient
-
-@pytest.mark.asyncio
-async def test_client_connection():
-    """Test basic client connection functionality."""
-    client = WebTransportClient()
-
-    # Test successful connection
-    session = await client.connect("https://localhost:4433/")
-    assert session.is_ready
-
-    # Test basic functionality
-    await session.datagrams.send(b"test data")
-
-    # Cleanup
-    await session.close()
-    await client.close()
-```
-
 ### Running Tests
 
+The primary way to run the full test suite is with `tox`.
+
 ```bash
-# Run all tests discovered by pytest
+# Run all checks and tests across all supported Python versions
+tox
+```
+
+For faster, iterative development, you can run `pytest` directly in your activated virtual environment. This will only test against your primary Python version.
+
+```bash
+# Run all tests using pytest
 pytest
 
-# Run a specific test file by its full path
+# Run a specific test file
 pytest tests/unit/client/test_client.py
-
-# Run all tests within a specific category directory
-pytest tests/performance/
 
 # Run tests with a specific marker
 pytest -m integration
 
-# Run all tests and generate a coverage report
+# Run tests and generate a coverage report
 pytest --cov=pywebtransport --cov-report=html
 ```
 
@@ -249,40 +245,42 @@ pytest --cov=pywebtransport --cov-report=html
 
 When updating documentation:
 
-1. Update docstrings for code changes
-2. Update README.md if adding major features
-3. Add examples to `examples/` directory for new functionality
-4. Update architecture documentation for significant changes
+1.  Update docstrings for code changes
+2.  Update README.md if adding major features
+3.  Add examples to `examples/` directory for new functionality
+4.  Update architecture documentation for significant changes
 
 ## Pull Request Process
 
 ### Before Submitting
 
-1. **Ensure all tests pass**:
+1.  **Ensure all tests pass with tox**:
 
-   ```bash
-   pytest
-   ```
+    ```bash
+    tox
+    ```
 
-2. **Run the full code quality check**:
+2.  **Ensure code is formatted and passes quality checks**. The `pre-commit` hooks should handle this, but you can also run them manually:
 
-   ```bash
-   black src tests
-   flake8 src tests
-   mypy src
-   ```
+    ```bash
+    black src tests
+    flake8 src tests
+    mypy src
+    ```
 
-3. **Update documentation** if needed
+3.  **Update documentation** if needed.
 
-4. **Add entries to CHANGELOG.md** for user-facing changes
+4.  **Add entries to CHANGELOG.md** for user-facing changes.
 
-### Pull Request Guidelines
+### Submitting a Pull Request
 
-- **Title**: Use a clear, descriptive title
-- **Description**: Explain what the PR does and why
-- **Testing**: Describe how the changes were tested
-- **Breaking Changes**: Clearly mark any breaking changes
-- **Links**: Reference related issues
+Once your changes are ready, push your branch to your fork and open a pull request against the `main` branch of the original repository.
+
+- **Title**: Use a clear, descriptive title following Conventional Commits.
+- **Description**: Explain what the PR does and why.
+- **Testing**: Describe how the changes were tested.
+- **Breaking Changes**: Clearly mark any breaking changes.
+- **Links**: Reference related issues.
 
 ### PR Template
 
@@ -300,7 +298,7 @@ Brief description of changes
 
 ## Testing
 
-- [ ] All existing tests pass
+- [ ] All existing tests pass via `tox`
 - [ ] New tests added for new functionality
 - [ ] Manual testing completed
 
@@ -314,6 +312,8 @@ Brief description of changes
 
 ## Release Process
 
+**(Note: This section is for project maintainers.)**
+
 ### Versioning
 
 We follow [Semantic Versioning](https://semver.org/):
@@ -324,11 +324,10 @@ We follow [Semantic Versioning](https://semver.org/):
 
 ### Release Steps
 
-1. Update version in `__version__.py`
-2. Update CHANGELOG.md
-3. Create release PR
-4. Tag release after merge
-5. Publish to PyPI
+1.  Update version in `src/pywebtransport/version.py`.
+2.  Update `CHANGELOG.md`.
+3.  Create a release pull request from the `dev` branch to `main` on our internal repository.
+4.  After merge, the CI/CD pipeline will automatically tag the release and publish to PyPI.
 
 ## Issue Reporting
 

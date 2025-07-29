@@ -13,13 +13,13 @@ from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.quic.connection import QuicConnection
 from aioquic.quic.events import QuicEvent
 
-from ..config import ClientConfig, ServerConfig
-from ..events import Event, EventEmitter
-from ..exceptions import ConfigurationError, ConnectionError, HandshakeError
-from ..protocol import WebTransportProtocolHandler
-from ..protocol.utils import create_quic_configuration
-from ..types import Address, ConnectionState, EventType, SessionId, SessionState
-from ..utils import Timer, format_duration, get_logger, get_timestamp
+from pywebtransport.config import ClientConfig, ServerConfig
+from pywebtransport.events import Event, EventEmitter
+from pywebtransport.exceptions import ConfigurationError, ConnectionError, HandshakeError
+from pywebtransport.protocol import WebTransportProtocolHandler
+from pywebtransport.protocol.utils import create_quic_configuration
+from pywebtransport.types import Address, ConnectionState, EventType, SessionId, SessionState
+from pywebtransport.utils import Timer, format_duration, get_logger, get_timestamp
 
 __all__ = ["ConnectionInfo", "WebTransportConnection"]
 

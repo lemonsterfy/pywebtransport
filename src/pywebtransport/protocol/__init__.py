@@ -1,7 +1,5 @@
 """
 WebTransport Protocol Subpackage.
-
-Provides the low-level protocol handler and its associated data structures.
 """
 
 from .handler import WebTransportProtocolHandler

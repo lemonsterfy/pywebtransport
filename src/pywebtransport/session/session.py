@@ -8,21 +8,16 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, AsyncIterator, Dict, List, Optional, Type, Union
 
-from ..config import ClientConfig
-from ..connection import WebTransportConnection
-from ..constants import WebTransportConstants
-from ..datagram import WebTransportDatagramDuplexStream
-from ..events import Event, EventEmitter
-from ..exceptions import SessionError, StreamError, TimeoutError, session_not_ready
-from ..protocol import WebTransportProtocolHandler
-from ..stream import (
-    StreamManager,
-    WebTransportReceiveStream,
-    WebTransportSendStream,
-    WebTransportStream,
-)
-from ..types import EventType, Headers, SessionId, SessionState, StreamDirection, StreamId
-from ..utils import format_duration, get_logger, get_timestamp
+from pywebtransport.config import ClientConfig
+from pywebtransport.connection import WebTransportConnection
+from pywebtransport.constants import WebTransportConstants
+from pywebtransport.datagram import WebTransportDatagramDuplexStream
+from pywebtransport.events import Event, EventEmitter
+from pywebtransport.exceptions import SessionError, StreamError, TimeoutError, session_not_ready
+from pywebtransport.protocol import WebTransportProtocolHandler
+from pywebtransport.stream import StreamManager, WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from pywebtransport.types import EventType, Headers, SessionId, SessionState, StreamDirection, StreamId
+from pywebtransport.utils import format_duration, get_logger, get_timestamp
 
 __all__ = ["SessionStats", "WebTransportSession"]
 

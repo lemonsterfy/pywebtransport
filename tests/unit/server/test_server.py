@@ -2,7 +2,7 @@
 
 import asyncio
 import weakref
-from typing import Any
+from typing import Any, NoReturn, cast
 
 import pytest
 from _pytest.logging import LogCaptureFixture
@@ -165,7 +165,7 @@ class TestWebTransportServer:
         del mock_quic_server.wait_closed
         mock_sleep = mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
 
-        async def stop_server_and_raise(*args, **kwargs):
+        async def stop_server_and_raise(*args: Any, **kwargs: Any) -> NoReturn:
             server._serving = False
             raise asyncio.CancelledError
 
@@ -414,7 +414,9 @@ class TestWebTransportServerProtocol:
         await asyncio.sleep(0)
 
         mock_super_made.assert_called_once_with(mock_transport)
-        protocol._server_ref()._handle_new_connection.assert_awaited_once_with(mock_transport, protocol)
+        server = protocol._server_ref()
+        assert server is not None
+        cast(Any, server._handle_new_connection).assert_awaited_once_with(mock_transport, protocol)
 
     @pytest.mark.asyncio
     async def test_quic_event_received_forwards_event_when_connection_is_set(

@@ -1,8 +1,5 @@
 """
 WebTransport Connection Subpackage.
-
-Provides high-level abstractions for creating and managing
-WebTransport connections, including managers, pools, and load balancers.
 """
 
 from .connection import ConnectionInfo, WebTransportConnection
