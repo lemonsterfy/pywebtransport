@@ -2,17 +2,16 @@
 WebTransport Datagram Reliability Layer.
 """
 
+from __future__ import annotations
+
 import asyncio
 import struct
-import weakref
 from collections import deque
 from types import TracebackType
-from typing import TYPE_CHECKING, Deque, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Self, Type
+import weakref
 
-from pywebtransport.datagram.transport import (
-    DatagramMessage,
-    WebTransportDatagramDuplexStream,
-)
+from pywebtransport.datagram.transport import DatagramMessage, WebTransportDatagramDuplexStream
 from pywebtransport.events import EventType
 from pywebtransport.exceptions import DatagramError, TimeoutError
 from pywebtransport.types import Data
@@ -38,7 +37,7 @@ class DatagramReliabilityLayer:
 
     def __init__(
         self,
-        datagram_stream: "WebTransportDatagramDuplexStream",
+        datagram_stream: WebTransportDatagramDuplexStream,
         *,
         ack_timeout: float = 2.0,
         max_retries: int = 5,
@@ -50,33 +49,36 @@ class DatagramReliabilityLayer:
         self._closed = False
         self._send_sequence = 0
         self._receive_sequence = 0
-        self._pending_acks: Dict[int, _ReliableDatagram] = {}
-        self._received_sequences: Deque[int] = deque(maxlen=1024)
-        self._incoming_queue: asyncio.Queue[bytes] = asyncio.Queue()
-        self._retry_task: Optional[asyncio.Task[None]] = None
-        datagram_stream.on(EventType.DATAGRAM_RECEIVED, self._on_datagram_received)
+        self._pending_acks: dict[int, _ReliableDatagram] = {}
+        self._received_sequences: deque[int] = deque(maxlen=1024)
+        self._incoming_queue: asyncio.Queue[bytes] | None = None
+        self._retry_task: asyncio.Task[None] | None = None
 
     @classmethod
     def create(
         cls,
-        datagram_stream: "WebTransportDatagramDuplexStream",
+        datagram_stream: WebTransportDatagramDuplexStream,
         *,
         ack_timeout: float = 1.0,
         max_retries: int = 3,
-    ) -> "DatagramReliabilityLayer":
+    ) -> Self:
         """Factory method to create a new datagram reliability layer for a stream."""
         return cls(datagram_stream, ack_timeout=ack_timeout, max_retries=max_retries)
 
-    async def __aenter__(self) -> "DatagramReliabilityLayer":
+    async def __aenter__(self) -> Self:
         """Enter the async context and start background tasks."""
+        self._incoming_queue = asyncio.Queue()
+        stream = self._stream()
+        if stream:
+            stream.on(EventType.DATAGRAM_RECEIVED, self._on_datagram_received)
         self._start_background_tasks()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and close the reliability layer."""
         await self.close()
@@ -116,8 +118,13 @@ class DatagramReliabilityLayer:
         await stream.send_structured("DATA", data_payload)
         logger.debug(f"Sent reliable datagram with sequence {seq}")
 
-    async def receive(self, *, timeout: Optional[float] = None) -> bytes:
+    async def receive(self, *, timeout: float | None = None) -> bytes:
         """Receive a reliable datagram, waiting if necessary."""
+        if self._incoming_queue is None:
+            raise DatagramError(
+                "DatagramReliabilityLayer has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         if self._closed:
             raise DatagramError("Reliability layer is closed.")
         try:
@@ -139,7 +146,7 @@ class DatagramReliabilityLayer:
             while not self._closed:
                 await asyncio.sleep(self._ack_timeout)
                 current_time = get_timestamp()
-                to_retry: List[_ReliableDatagram] = []
+                to_retry: list[_ReliableDatagram] = []
 
                 for datagram in list(self._pending_acks.values()):
                     if current_time - datagram.timestamp > self._ack_timeout:
@@ -170,8 +177,10 @@ class DatagramReliabilityLayer:
         except Exception as e:
             logger.error(f"Reliability retry loop crashed: {e}", exc_info=e)
 
-    async def _on_datagram_received(self, event: "Event") -> None:
+    async def _on_datagram_received(self, event: Event) -> None:
         """Handle all incoming datagrams from the underlying stream."""
+        if self._incoming_queue is None:
+            return
         if not isinstance(event.data, dict):
             return
 
@@ -207,6 +216,8 @@ class DatagramReliabilityLayer:
 
     async def _handle_data_message(self, payload: bytes) -> None:
         """Handle an incoming DATA message."""
+        if self._incoming_queue is None:
+            return
         if len(payload) < 4:
             return
 
@@ -227,7 +238,7 @@ class DatagramReliabilityLayer:
         self._received_sequences.append(seq)
         await self._incoming_queue.put(data)
 
-    def _get_stream(self) -> "WebTransportDatagramDuplexStream":
+    def _get_stream(self) -> WebTransportDatagramDuplexStream:
         """Get the underlying stream or raise an error if it is gone or closed."""
         stream = self._stream()
         if self._closed or not stream or stream.is_closed:

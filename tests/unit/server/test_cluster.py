@@ -1,6 +1,7 @@
 """Unit tests for the pywebtransport.server.cluster module."""
 
-from typing import Any, List, cast
+import asyncio
+from typing import Any, AsyncGenerator, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -11,12 +12,14 @@ from pywebtransport.server import ServerCluster, WebTransportServer
 
 class TestServerCluster:
     @pytest.fixture
-    def server_configs(self, mocker: MockerFixture) -> List[ServerConfig]:
-        mocker.patch("pywebtransport.config.ServerConfig.validate")
-        return [
-            ServerConfig(bind_port=8001, certfile="c1.pem", keyfile="k1.pem"),
-            ServerConfig(bind_port=8002, certfile="c2.pem", keyfile="k2.pem"),
-        ]
+    async def cluster(
+        self, server_configs: list[ServerConfig], mock_webtransport_server_class: Any
+    ) -> AsyncGenerator[ServerCluster, None]:
+        cluster_instance = ServerCluster(configs=server_configs)
+        cluster_instance._lock = asyncio.Lock()
+        yield cluster_instance
+        if cluster_instance.is_running:
+            await cluster_instance.stop_all()
 
     @pytest.fixture
     def mock_webtransport_server_class(self, mocker: MockerFixture) -> Any:
@@ -36,13 +39,22 @@ class TestServerCluster:
                 }
             )
             if "config" in kwargs and hasattr(kwargs["config"], "bind_port"):
-                instance.local_address = ("127.0.0.1", kwargs["config"].bind_port)
+                local_address = ("127.0.0.1", kwargs["config"].bind_port)
+                type(instance).local_address = mocker.PropertyMock(return_value=local_address)
             return instance
 
         mock_server_class.side_effect = new_server_instance
         return mock_server_class
 
-    def test_init(self, server_configs: List[ServerConfig]) -> None:
+    @pytest.fixture
+    def server_configs(self, mocker: MockerFixture) -> list[ServerConfig]:
+        mocker.patch("pywebtransport.config.ServerConfig.validate")
+        return [
+            ServerConfig(bind_port=8001, certfile="c1.pem", keyfile="k1.pem"),
+            ServerConfig(bind_port=8002, certfile="c2.pem", keyfile="k2.pem"),
+        ]
+
+    def test_init(self, server_configs: list[ServerConfig]) -> None:
         cluster = ServerCluster(configs=server_configs)
 
         assert cluster._configs is server_configs
@@ -50,7 +62,7 @@ class TestServerCluster:
         assert not cluster._servers
 
     @pytest.mark.asyncio
-    async def test_async_context_manager(self, server_configs: List[ServerConfig], mocker: MockerFixture) -> None:
+    async def test_async_context_manager(self, server_configs: list[ServerConfig], mocker: MockerFixture) -> None:
         cluster = ServerCluster(configs=server_configs)
         mock_start = mocker.patch.object(cluster, "start_all", new_callable=mocker.AsyncMock)
         mock_stop = mocker.patch.object(cluster, "stop_all", new_callable=mocker.AsyncMock)
@@ -64,12 +76,10 @@ class TestServerCluster:
     @pytest.mark.asyncio
     async def test_start_and_stop_all(
         self,
-        server_configs: List[ServerConfig],
-        mock_webtransport_server_class: Any,
+        cluster: ServerCluster,
     ) -> None:
-        cluster = ServerCluster(configs=server_configs)
-
         await cluster.start_all()
+
         assert cluster.is_running
         assert len(cluster._servers) == 2
         for server in cluster._servers:
@@ -77,31 +87,30 @@ class TestServerCluster:
 
         servers_to_stop = cluster._servers
         await cluster.stop_all()
+
         assert not cluster.is_running
         assert not cluster._servers  # type: ignore[unreachable]
         for server in servers_to_stop:
             cast(Any, server.close).assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_start_and_stop_idempotency(
-        self, server_configs: List[ServerConfig], mock_webtransport_server_class: Any
-    ) -> None:
-        cluster = ServerCluster(configs=server_configs)
-
+    async def test_start_and_stop_idempotency(self, cluster: ServerCluster) -> None:
         await cluster.start_all()
         assert len(cluster._servers) == 2
+
         await cluster.start_all()
         assert len(cluster._servers) == 2
 
         await cluster.stop_all()
         assert not cluster._servers
+
         await cluster.stop_all()
         assert not cluster._servers
 
     @pytest.mark.asyncio
     async def test_start_all_failure(
         self,
-        server_configs: List[ServerConfig],
+        server_configs: list[ServerConfig],
         mock_webtransport_server_class: Any,
         mocker: MockerFixture,
     ) -> None:
@@ -115,6 +124,7 @@ class TestServerCluster:
         mock_server_fail.close = mocker.AsyncMock()
         mock_webtransport_server_class.side_effect = [mock_server_ok, mock_server_fail]
         cluster = ServerCluster(configs=server_configs)
+        cluster._lock = asyncio.Lock()
 
         with pytest.raises(ValueError, match="Listen failed"):
             await cluster.start_all()
@@ -126,14 +136,13 @@ class TestServerCluster:
 
     @pytest.mark.asyncio
     async def test_start_all_with_only_failures(
-        self, server_configs: List[ServerConfig], mocker: MockerFixture
+        self, server_configs: list[ServerConfig], mocker: MockerFixture, cluster: ServerCluster
     ) -> None:
         mocker.patch.object(
-            ServerCluster,
+            cluster,
             "_create_and_start_server",
             side_effect=ValueError("Failed to create"),
         )
-        cluster = ServerCluster(configs=server_configs)
 
         with pytest.raises(ValueError, match="Failed to create"):
             await cluster.start_all()
@@ -142,22 +151,18 @@ class TestServerCluster:
         assert not cluster._servers
 
     @pytest.mark.asyncio
-    async def test_stop_all_on_non_running_cluster(
-        self, server_configs: List[ServerConfig], mocker: MockerFixture
-    ) -> None:
-        cluster = ServerCluster(configs=server_configs)
+    async def test_stop_all_on_non_running_cluster(self, cluster: ServerCluster, mocker: MockerFixture) -> None:
         mock_close = mocker.AsyncMock()
         cluster._servers = [mocker.MagicMock(close=mock_close)]
+        cluster._running = False
 
         await cluster.stop_all()
 
         mock_close.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_add_server(self, server_configs: List[ServerConfig], mock_webtransport_server_class: Any) -> None:
-        cluster = ServerCluster(configs=server_configs)
+    async def test_add_server(self, cluster: ServerCluster, server_configs: list[ServerConfig]) -> None:
         new_config = ServerConfig(bind_port=8003, certfile="c3.pem", keyfile="k3.pem")
-
         result = await cluster.add_server(new_config)
         assert result is None
         assert len(cluster._configs) == 3
@@ -172,32 +177,24 @@ class TestServerCluster:
         cast(Any, new_server.listen).assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_add_server_failure_on_creation(
-        self,
-        server_configs: List[ServerConfig],
-        mocker: MockerFixture,
-        mock_webtransport_server_class: Any,
-    ) -> None:
-        cluster = ServerCluster(configs=[server_configs[0]])
+    async def test_add_server_failure_on_creation(self, cluster: ServerCluster, mocker: MockerFixture) -> None:
         await cluster.start_all()
-        assert await cluster.get_server_count() == 1
-
+        initial_count = await cluster.get_server_count()
         mocker.patch.object(
             cluster,
             "_create_and_start_server",
             side_effect=IOError("Failed to bind socket"),
         )
         new_config = ServerConfig(bind_port=8003, certfile="c3.pem", keyfile="k3.pem")
+
         result = await cluster.add_server(new_config)
 
         assert result is None
-        assert await cluster.get_server_count() == 1
+        assert await cluster.get_server_count() == initial_count
 
     @pytest.mark.asyncio
-    async def test_remove_server(self, server_configs: List[ServerConfig], mock_webtransport_server_class: Any) -> None:
-        cluster = ServerCluster(configs=server_configs)
+    async def test_remove_server(self, cluster: ServerCluster) -> None:
         await cluster.start_all()
-
         initial_servers = cluster._servers.copy()
         assert len(initial_servers) == 2
 
@@ -212,25 +209,17 @@ class TestServerCluster:
         assert len(cluster._servers) == 1
 
     @pytest.mark.asyncio
-    async def test_get_servers_and_count(
-        self, server_configs: List[ServerConfig], mock_webtransport_server_class: Any
-    ) -> None:
-        cluster = ServerCluster(configs=server_configs)
+    async def test_get_servers_and_count(self, cluster: ServerCluster) -> None:
         assert await cluster.get_server_count() == 0
 
         await cluster.start_all()
         assert await cluster.get_server_count() == 2
-
         servers_copy = await cluster.get_servers()
         assert len(servers_copy) == 2
         assert servers_copy is not cluster._servers
 
     @pytest.mark.asyncio
-    async def test_get_cluster_stats(
-        self, server_configs: List[ServerConfig], mock_webtransport_server_class: Any
-    ) -> None:
-        cluster = ServerCluster(configs=server_configs)
-
+    async def test_get_cluster_stats(self, cluster: ServerCluster) -> None:
         assert await cluster.get_cluster_stats() == {}
 
         await cluster.start_all()

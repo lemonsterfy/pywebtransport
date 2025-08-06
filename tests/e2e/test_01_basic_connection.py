@@ -14,10 +14,8 @@ from pywebtransport.client import WebTransportClient
 from pywebtransport.config import ClientConfig
 from pywebtransport.exceptions import ConnectionError
 
-# Module-level constants
 DEBUG_MODE = "--debug" in sys.argv
 
-# Module-level configuration and variables
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)

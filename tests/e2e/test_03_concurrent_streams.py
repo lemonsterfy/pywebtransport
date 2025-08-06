@@ -13,10 +13,8 @@ from pywebtransport.client import WebTransportClient
 from pywebtransport.config import ClientConfig
 from pywebtransport.session import WebTransportSession
 
-# Module-level constants
 DEBUG_MODE = "--debug" in sys.argv
 
-# Module-level configuration and variables
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
@@ -44,26 +42,26 @@ async def test_sequential_streams() -> bool:
 
             streams = []
             for i in range(num_streams):
-                logger.info(f"Creating stream {i+1}/{num_streams}...")
+                logger.info(f"Creating stream {i + 1}/{num_streams}...")
                 stream = await session.create_bidirectional_stream()
                 streams.append(stream)
-                logger.info(f"Stream {i+1} created: ID={stream.stream_id}")
+                logger.info(f"Stream {i + 1} created: ID={stream.stream_id}")
 
             logger.info(f"All {num_streams} streams created successfully")
 
             for i, stream in enumerate(streams):
-                test_msg = f"Stream {i+1} test message".encode()
-                logger.info(f"Testing stream {i+1}: {test_msg!r}")
+                test_msg = f"Stream {i + 1} test message".encode()
+                logger.info(f"Testing stream {i + 1}: {test_msg!r}")
                 await stream.write_all(test_msg)
                 response = await stream.read_all()
 
                 expected = b"ECHO: " + test_msg
                 if response != expected:
-                    logger.error(f"Stream {i+1} echo failed")
+                    logger.error(f"Stream {i + 1} echo failed")
                     logger.error(f"   Expected: {expected!r}")
                     logger.error(f"   Received: {response!r}")
                     return False
-                logger.info(f"Stream {i+1} echo successful")
+                logger.info(f"Stream {i + 1} echo successful")
 
             await session.close()
             logger.info("Session closed")
@@ -128,7 +126,7 @@ async def test_concurrent_streams() -> bool:
             success_count = sum(1 for result in results if result is True)
             error_count = sum(1 for result in results if isinstance(result, Exception))
             logger.info(
-                f"Results: {success_count} successful, {len(results)-success_count} failed, {error_count} errors"
+                f"Results: {success_count} successful, {len(results) - success_count} failed, {error_count} errors"
             )
 
             if success_count != num_streams:
@@ -215,19 +213,19 @@ async def test_stream_stress() -> bool:
             start_time = time.time()
             for i in range(num_iterations):
                 stream = await session.create_bidirectional_stream()
-                test_msg = f"Stress test {i+1}".encode()
+                test_msg = f"Stress test {i + 1}".encode()
                 await stream.write_all(test_msg)
                 response = await stream.read_all()
 
                 expected = b"ECHO: " + test_msg
                 if response != expected:
-                    logger.error(f"Iteration {i+1}: Echo mismatch")
+                    logger.error(f"Iteration {i + 1}: Echo mismatch")
                     logger.error(f"   Expected: {expected!r}")
                     logger.error(f"   Received: {response!r}")
                     return False
 
                 if (i + 1) % 5 == 0:
-                    logger.info(f"Completed {i+1}/{num_iterations} iterations")
+                    logger.info(f"Completed {i + 1}/{num_iterations} iterations")
 
             duration = time.time() - start_time
             rate = num_iterations / duration

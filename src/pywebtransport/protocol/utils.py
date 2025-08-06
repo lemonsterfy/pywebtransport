@@ -2,6 +2,8 @@
 WebTransport Protocol Utility Functions.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 from aioquic.quic.configuration import QuicConfiguration

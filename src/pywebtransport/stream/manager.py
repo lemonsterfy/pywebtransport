@@ -2,11 +2,14 @@
 WebTransport stream management and orchestration.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections import defaultdict
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, AsyncIterator, Self, Type
 
+from pywebtransport.exceptions import StreamError
 from pywebtransport.stream.stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
 from pywebtransport.types import StreamId
 from pywebtransport.utils import get_logger
@@ -19,7 +22,7 @@ __all__ = ["StreamManager"]
 
 logger = get_logger("stream.manager")
 
-StreamType = Union[WebTransportStream, WebTransportReceiveStream, WebTransportSendStream]
+StreamType = WebTransportStream | WebTransportReceiveStream | WebTransportSendStream
 
 
 class StreamManager:
@@ -27,7 +30,7 @@ class StreamManager:
 
     def __init__(
         self,
-        session: "WebTransportSession",
+        session: WebTransportSession,
         *,
         max_streams: int = 100,
         cleanup_interval: float = 60.0,
@@ -36,39 +39,35 @@ class StreamManager:
         self._session = session
         self._max_streams = max_streams
         self._cleanup_interval = cleanup_interval
-
-        self._streams: Dict[StreamId, StreamType] = {}
-        self._lock = asyncio.Lock()
-        self._creation_semaphore = asyncio.Semaphore(max_streams)
-        self._stats = {
-            "total_created": 0,
-            "total_closed": 0,
-            "current_count": 0,
-            "max_concurrent": 0,
-        }
-        self._cleanup_task: Optional[asyncio.Task[None]] = None
+        self._streams: dict[StreamId, StreamType] = {}
+        self._lock: asyncio.Lock | None = None
+        self._creation_semaphore: asyncio.Semaphore | None = None
+        self._stats = {"total_created": 0, "total_closed": 0, "current_count": 0, "max_concurrent": 0}
+        self._cleanup_task: asyncio.Task[None] | None = None
 
     @classmethod
     def create(
         cls,
-        session: "WebTransportSession",
+        session: WebTransportSession,
         *,
         max_streams: int = 100,
         cleanup_interval: float = 60.0,
-    ) -> "StreamManager":
+    ) -> Self:
         """Factory method to create a new stream manager instance."""
         return cls(session, max_streams=max_streams, cleanup_interval=cleanup_interval)
 
-    async def __aenter__(self) -> "StreamManager":
-        """Enter the asynchronous context, starting background tasks."""
+    async def __aenter__(self) -> Self:
+        """Enter the asynchronous context, initializing resources and starting background tasks."""
+        self._lock = asyncio.Lock()
+        self._creation_semaphore = asyncio.Semaphore(self._max_streams)
         self._start_cleanup_task()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the asynchronous context, shutting down the manager."""
         await self.shutdown()
@@ -85,6 +84,11 @@ class StreamManager:
 
     async def __aiter__(self) -> AsyncIterator[StreamType]:
         """Return an async iterator over a snapshot of the managed streams."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             streams_copy = list(self._streams.values())
         for stream in streams_copy:
@@ -102,8 +106,88 @@ class StreamManager:
         await self.close_all_streams()
         logger.info("Stream manager shutdown complete")
 
+    async def create_bidirectional_stream(self) -> WebTransportStream:
+        """Create a new bidirectional stream, respecting concurrency limits."""
+        if self._creation_semaphore is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        await self._creation_semaphore.acquire()
+        try:
+            stream_id = await self._session._create_stream_on_protocol(is_unidirectional=False)
+            stream = WebTransportStream(session=self._session, stream_id=stream_id)
+            await self.add_stream(stream)
+            return stream
+        except Exception:
+            self._creation_semaphore.release()
+            raise
+
+    async def create_unidirectional_stream(self) -> WebTransportSendStream:
+        """Create a new unidirectional stream, respecting concurrency limits."""
+        if self._creation_semaphore is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        await self._creation_semaphore.acquire()
+        try:
+            stream_id = await self._session._create_stream_on_protocol(is_unidirectional=True)
+            stream = WebTransportSendStream(session=self._session, stream_id=stream_id)
+            await self.add_stream(stream)
+            return stream
+        except Exception:
+            self._creation_semaphore.release()
+            raise
+
+    async def add_stream(self, stream: StreamType) -> None:
+        """Add an externally created stream to the manager."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            if stream.stream_id in self._streams:
+                return
+            self._streams[stream.stream_id] = stream
+            self._stats["total_created"] += 1
+            self._update_stats_unsafe()
+            logger.debug(f"Added stream {stream.stream_id} (total: {self._stats['current_count']})")
+
+    async def remove_stream(self, stream_id: StreamId) -> StreamType | None:
+        """Remove a stream from the manager by its ID."""
+        if self._lock is None or self._creation_semaphore is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            stream = self._streams.pop(stream_id, None)
+            if stream:
+                self._creation_semaphore.release()
+                self._stats["total_closed"] += 1
+                self._update_stats_unsafe()
+                logger.debug(f"Removed stream {stream_id} (total: {self._stats['current_count']})")
+            return stream
+
+    async def get_stream(self, stream_id: StreamId) -> StreamType | None:
+        """Retrieve a stream by its ID in a thread-safe manner."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            return self._streams.get(stream_id)
+
     async def close_all_streams(self) -> None:
         """Close all currently managed streams."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             streams_to_close = list(self._streams.values())
             if not streams_to_close:
@@ -117,66 +201,26 @@ class StreamManager:
             self._streams.clear()
             self._update_stats_unsafe()
 
-    async def create_bidirectional_stream(self) -> WebTransportStream:
-        """Create a new bidirectional stream, respecting concurrency limits."""
-        await self._creation_semaphore.acquire()
-        try:
-            stream_id = await self._session._create_stream_on_protocol(is_unidirectional=False)
-            stream = WebTransportStream(session=self._session, stream_id=stream_id)
-            await self.add_stream(stream)
-            return stream
-        except Exception:
-            self._creation_semaphore.release()
-            raise
-
-    async def create_unidirectional_stream(self) -> WebTransportSendStream:
-        """Create a new unidirectional stream, respecting concurrency limits."""
-        await self._creation_semaphore.acquire()
-        try:
-            stream_id = await self._session._create_stream_on_protocol(is_unidirectional=True)
-            stream = WebTransportSendStream(session=self._session, stream_id=stream_id)
-            await self.add_stream(stream)
-            return stream
-        except Exception:
-            self._creation_semaphore.release()
-            raise
-
-    async def add_stream(self, stream: StreamType) -> None:
-        """Add an externally created stream to the manager."""
-        async with self._lock:
-            if stream.stream_id in self._streams:
-                return
-            self._streams[stream.stream_id] = stream
-            self._stats["total_created"] += 1
-            self._update_stats_unsafe()
-            logger.debug(f"Added stream {stream.stream_id} (total: {self._stats['current_count']})")
-
-    async def remove_stream(self, stream_id: StreamId) -> Optional[StreamType]:
-        """Remove a stream from the manager by its ID."""
-        async with self._lock:
-            stream = self._streams.pop(stream_id, None)
-            if stream:
-                self._creation_semaphore.release()
-                self._stats["total_closed"] += 1
-                self._update_stats_unsafe()
-                logger.debug(f"Removed stream {stream_id} (total: {self._stats['current_count']})")
-            return stream
-
-    async def get_stream(self, stream_id: StreamId) -> Optional[StreamType]:
-        """Retrieve a stream by its ID in a thread-safe manner."""
-        async with self._lock:
-            return self._streams.get(stream_id)
-
-    async def get_all_streams(self) -> List[StreamType]:
+    async def get_all_streams(self) -> list[StreamType]:
         """Retrieve a list of all currently managed streams."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             return list(self._streams.values())
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get detailed statistics about the managed streams."""
+        if self._lock is None or self._creation_semaphore is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
-            states: Dict[str, int] = defaultdict(int)
-            directions: Dict[str, int] = defaultdict(int)
+            states: dict[str, int] = defaultdict(int)
+            directions: dict[str, int] = defaultdict(int)
             for stream in self._streams.values():
                 if hasattr(stream, "state"):
                     states[stream.state.value] += 1
@@ -195,6 +239,11 @@ class StreamManager:
 
     async def cleanup_closed_streams(self) -> int:
         """Find and remove any streams that are marked as closed."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         closed_stream_ids = []
         async with self._lock:
             all_streams = list(self._streams.items())
@@ -222,8 +271,8 @@ class StreamManager:
         """Periodically run the cleanup process to remove closed streams."""
         try:
             while True:
-                await asyncio.sleep(self._cleanup_interval)
                 await self.cleanup_closed_streams()
+                await asyncio.sleep(self._cleanup_interval)
         except asyncio.CancelledError:
             pass
         except Exception as e:

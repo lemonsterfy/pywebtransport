@@ -14,10 +14,8 @@ from pywebtransport.client import WebTransportClient
 from pywebtransport.config import ClientConfig
 from pywebtransport.exceptions import ClientError, ConnectionError, DatagramError, StreamError, TimeoutError
 
-# Module-level constants
 DEBUG_MODE = "--debug" in sys.argv
 
-# Module-level configuration and variables
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
@@ -83,7 +81,7 @@ async def test_invalid_server_address() -> bool:
     try:
         async with WebTransportClient.create(config=config) as client:
             for i, invalid_url in enumerate(invalid_urls):
-                logger.info(f"Testing invalid URL {i+1}: {invalid_url}")
+                logger.info(f"Testing invalid URL {i + 1}: {invalid_url}")
                 try:
                     session = await client.connect(invalid_url)
                     logger.error(f"UNEXPECTED: Connection to {invalid_url} should have failed")
@@ -225,7 +223,8 @@ async def test_session_closure_handling() -> bool:
             except Exception as e:
                 logger.info(f"EXPECTED: Stream creation failed with {type(e).__name__}")
             try:
-                await session.datagrams.send(b"This should fail")
+                datagrams = await session.datagrams
+                await datagrams.send(b"This should fail")
                 logger.error("UNEXPECTED: Datagram send on closed session succeeded")
                 return False
             except Exception as e:
@@ -262,7 +261,7 @@ async def test_datagram_errors() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             max_size = datagrams.max_datagram_size
             logger.info(f"Max datagram size: {max_size} bytes")
 

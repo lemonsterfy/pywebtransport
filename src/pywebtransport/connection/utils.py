@@ -2,8 +2,9 @@
 WebTransport connection utility functions.
 """
 
+from __future__ import annotations
+
 import asyncio
-from typing import Dict, List, Optional, Tuple
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection.connection import WebTransportConnection
@@ -32,7 +33,7 @@ async def connect_with_retry(
     backoff_factor: float = 2.0,
 ) -> WebTransportConnection:
     """Establish a connection with an exponential backoff retry mechanism."""
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
             connection = await WebTransportConnection.create_client(config=config, host=host, port=port, path=path)
@@ -74,14 +75,14 @@ async def ensure_connection(
 async def create_multiple_connections(
     *,
     config: ClientConfig,
-    targets: List[Tuple[str, int]],
+    targets: list[tuple[str, int]],
     path: str = "/",
     max_concurrent: int = 10,
-) -> Dict[str, WebTransportConnection]:
+) -> dict[str, WebTransportConnection]:
     """Create multiple connections to a list of targets with a concurrency limit."""
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    async def create_single_connection(host: str, port: int) -> Tuple[str, Optional[WebTransportConnection]]:
+    async def create_single_connection(host: str, port: int) -> tuple[str, WebTransportConnection | None]:
         async with semaphore:
             try:
                 connection = await WebTransportConnection.create_client(config=config, host=host, port=port, path=path)
@@ -101,7 +102,7 @@ async def create_multiple_connections(
     return connections
 
 
-async def test_multiple_connections(*, targets: List[Tuple[str, int]], timeout: float = 10.0) -> Dict[str, bool]:
+async def test_multiple_connections(*, targets: list[tuple[str, int]], timeout: float = 10.0) -> dict[str, bool]:
     """Test TCP connectivity to multiple targets concurrently."""
     tasks = []
     target_keys = []
@@ -111,7 +112,7 @@ async def test_multiple_connections(*, targets: List[Tuple[str, int]], timeout: 
         tasks.append(test_tcp_connection(host=host, port=port, timeout=timeout))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    connection_results: Dict[str, bool] = {}
+    connection_results: dict[str, bool] = {}
     for target_key, result in zip(target_keys, results):
         connection_results[target_key] = isinstance(result, bool) and result
     return connection_results

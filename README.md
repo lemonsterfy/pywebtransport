@@ -1,34 +1,27 @@
 # PyWebTransport
 
 [![PyPI version](https://badge.fury.io/py/pywebtransport.svg)](https://badge.fury.io/py/pywebtransport)
-[![Python](https://img.shields.io/pypi/pyversions/pywebtransport.svg)](https://pypi.org/project/pywebtransport/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/pywebtransport.svg)](https://pypi.org/project/pywebtransport/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/lemonsterfy/pywebtransport/workflows/CI/badge.svg)](https://github.com/lemonsterfy/pywebtransport/actions)
 [![Coverage](https://codecov.io/gh/lemonsterfy/pywebtransport/branch/main/graph/badge.svg)](https://codecov.io/gh/lemonsterfy/pywebtransport)
+[![Docs](https://readthedocs.org/projects/pywebtransport/badge/?version=latest)](https://pywebtransport.readthedocs.io/en/latest/)
 
 A high-performance, async-native WebTransport implementation for Python.
 
 ## Features
 
-- Full WebTransport protocol implementation (bidirectional streams, unidirectional streams, datagrams)
-- High-performance async client and server implementations
-- Production-ready connection pooling and load balancing
-- Comprehensive monitoring and debugging capabilities
-- Type-safe API with complete type annotations
-- Extensive test coverage (unit, integration, end-to-end)
+- Full WebTransport protocol implementation (bidirectional streams, unidirectional streams, datagrams).
+- High-performance async client and server application frameworks.
+- Production-ready components for connection pooling, management, and load balancing.
+- Comprehensive monitoring and debugging capabilities.
+- Type-safe API with complete type annotations.
+- Extensive test coverage (unit, integration, end-to-end).
 
 ## Installation
 
 ```bash
 pip install pywebtransport
-```
-
-For development installation:
-
-```bash
-git clone https://github.com/lemonsterfy/pywebtransport.git
-cd pywebtransport
-pip install -e ".[dev]"
 ```
 
 ## Quick Start
@@ -55,9 +48,10 @@ app = ServerApp(
 
 async def handle_datagrams(session: WebTransportSession) -> None:
     try:
+        datagrams = await session.datagrams
         while True:
-            data = await session.datagrams.receive()
-            await session.datagrams.send(b"ECHO: " + data)
+            data = await datagrams.receive()
+            await datagrams.send(b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
         pass
 
@@ -102,17 +96,21 @@ async def main() -> None:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
 
     async with WebTransportClient.create(config=config) as client:
-        async with await client.connect("https://127.0.0.1:4433/") as session:
-            print("Connection established. Testing datagrams...")
-            await session.datagrams.send(b"Hello, Datagram!")
-            response = await session.datagrams.receive()
-            print(f"Datagram echo: {response!r}\n")
+        session = await client.connect("https://127.0.0.1:4433/")
 
-            print("Testing streams...")
-            stream = await session.create_bidirectional_stream()
-            await stream.write_all(b"Hello, Stream!")
-            response = await stream.read_all()
-            print(f"Stream echo: {response!r}")
+        print("Connection established. Testing datagrams...")
+        datagrams = await session.datagrams
+        await datagrams.send(b"Hello, Datagram!")
+        response = await datagrams.receive()
+        print(f"Datagram echo: {response!r}\n")
+
+        print("Testing streams...")
+        stream = await session.create_bidirectional_stream()
+        await stream.write_all(b"Hello, Stream!")
+        response = await stream.read_all()
+        print(f"Stream echo: {response!r}")
+
+        await session.close()
 
 
 if __name__ == "__main__":
@@ -127,13 +125,11 @@ if __name__ == "__main__":
 
 - **[Installation Guide](docs/installation.md)** - Setup and installation
 - **[Quick Start](docs/quickstart.md)** - 5-minute tutorial
-- **[Client Guide](docs/user-guide/client.md)** - Client development patterns
-- **[Server Guide](docs/user-guide/server.md)** - Server development patterns
 - **[API Reference](docs/api-reference/)** - Complete API documentation
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.11+
 - asyncio support
 - TLS 1.3
 
@@ -141,7 +137,6 @@ if __name__ == "__main__":
 
 - aioquic >= 1.2.0
 - cryptography >= 45.0.4
-- typing-extensions >= 4.14.0 (Python < 3.10)
 
 ## Contributing
 
@@ -152,9 +147,9 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 ```bash
 git clone https://github.com/lemonsterfy/pywebtransport.git
 cd pywebtransport
-pip install -e ".[dev]"
-pre-commit install
-pytest
+pip install -r dev-requirements.txt
+pip install -e .
+tox
 ```
 
 ## License

@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.server.router module."""
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 from _pytest.logging import LogCaptureFixture
@@ -13,8 +13,8 @@ from pywebtransport.session import WebTransportSession
 
 class TestRequestRouter:
     @pytest.fixture
-    def router(self) -> RequestRouter:
-        return RequestRouter()
+    def mock_handler(self, mocker: MockerFixture) -> Any:
+        return mocker.AsyncMock()
 
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
@@ -22,12 +22,13 @@ class TestRequestRouter:
         return session
 
     @pytest.fixture
-    def mock_handler(self, mocker: MockerFixture) -> Any:
-        return mocker.AsyncMock()
+    def router(self) -> RequestRouter:
+        return RequestRouter()
 
     def test_init(self, router: RequestRouter) -> None:
-        assert not router.get_all_routes()
         stats = router.get_route_stats()
+
+        assert not router.get_all_routes()
         assert stats["exact_routes"] == 0
         assert stats["pattern_routes"] == 0
         assert stats["has_default_handler"] is False
@@ -44,6 +45,7 @@ class TestRequestRouter:
         router.add_pattern_route(r"/users/(\d+)", mock_handler)
 
         stats = router.get_route_stats()
+
         assert stats["pattern_routes"] == 1
 
     def test_remove_route(self, router: RequestRouter, mock_handler: Any) -> None:
@@ -76,7 +78,7 @@ class TestRequestRouter:
         mock_session: Any,
         path: str,
         should_find: str,
-        expected_params: Optional[tuple],
+        expected_params: tuple | None,
         mocker: MockerFixture,
     ) -> None:
         handlers = {
@@ -119,6 +121,7 @@ class TestRequestRouter:
         self, router: RequestRouter, mock_handler: Any, caplog: LogCaptureFixture
     ) -> None:
         invalid_pattern = r"/users/(\d+"
+
         with pytest.raises(re.error):
             router.add_pattern_route(invalid_pattern, mock_handler)
 

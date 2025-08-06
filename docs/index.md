@@ -14,111 +14,6 @@ PyWebTransport is a production-grade WebTransport protocol stack for Python, ena
 - **Type Safe** - Complete type annotations for excellent IDE support and robust code.
 - **Easy to Use** - A simple, high-level API with sensible defaults and extensive documentation.
 
-## Quick Start
-
-Here’s how to get a simple echo client and server running in under a minute.
-
-### Server
-
-First, create a server that echoes back any data it receives on streams and datagrams.
-
-```python
-# server.py
-import asyncio
-
-from pywebtransport import ServerApp, ServerConfig, WebTransportSession, WebTransportStream
-from pywebtransport.exceptions import ConnectionError, SessionError
-from pywebtransport.utils import generate_self_signed_cert
-
-# Generate a self-signed certificate for local development
-generate_self_signed_cert("localhost")
-
-# Configure the server
-app = ServerApp(
-    config=ServerConfig.create(
-        certfile="localhost.crt",
-        keyfile="localhost.key",
-    )
-)
-
-
-async def handle_datagrams(session: WebTransportSession) -> None:
-    """Listen for incoming datagrams and echo them back."""
-    try:
-        while True:
-            data = await session.datagrams.receive()
-            await session.datagrams.send(b"ECHO: " + data)
-    except (ConnectionError, SessionError, asyncio.CancelledError):
-        pass  # Connection closed
-
-
-async def handle_streams(session: WebTransportSession) -> None:
-    """Listen for incoming streams and echo data back."""
-    try:
-        async for stream in session.incoming_streams():
-            if isinstance(stream, WebTransportStream):
-                data = await stream.read_all()
-                await stream.write_all(b"ECHO: " + data)
-    except (ConnectionError, SessionError, asyncio.CancelledError):
-        pass  # Connection closed
-
-
-@app.route("/")
-async def echo_handler(session: WebTransportSession) -> None:
-    """Run datagram and stream handlers concurrently for a session."""
-    datagram_task = asyncio.create_task(handle_datagrams(session))
-    stream_task = asyncio.create_task(handle_streams(session))
-    try:
-        await session.wait_closed()
-    finally:
-        datagram_task.cancel()
-        stream_task.cancel()
-
-
-if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=4433)
-
-```
-
-### Client
-
-Now, create a client to connect to the server, send data, and print the responses.
-
-```python
-# client.py
-import asyncio
-import ssl
-
-from pywebtransport import ClientConfig, WebTransportClient
-
-
-async def main() -> None:
-    # Create a client with a self-signed certificate
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
-
-    async with WebTransportClient.create(config=config) as client:
-        # Connect to the server
-        async with await client.connect("https://127.0.0.1:4433/") as session:
-            print("Connection established. Testing datagrams...")
-            await session.datagrams.send(b"Hello, Datagram!")
-            response = await session.datagrams.receive()
-            print(f"Datagram echo: {response!r}\n")
-
-            print("Testing streams...")
-            stream = await session.create_bidirectional_stream()
-            await stream.write_all(b"Hello, Stream!")
-            response = await stream.read_all()
-            print(f"Stream echo: {response!r}")
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
-
-```
-
 ## Core Concepts
 
 ### Client and Server
@@ -179,14 +74,9 @@ _For optimizing server-to-server and client-server communication._
 - **[Installation](installation.md)** - Setup and installation guide
 - **[Quick Start](quickstart.md)** - 5-minute tutorial to get running
 
-### User Guides
-
-- **[Client Development](user-guide/client.md)** - Building WebTransport clients
-- **[Server Development](user-guide/server.md)** - Creating WebTransport servers
-
 ### API Reference
 
-- **[Complete API Reference](api-reference/)** - All available APIs, including client, server, session, stream, datagrams, and configuration.
+- **[Complete API Reference](api-reference/index.md)** - All available APIs, including client, server, session, stream, datagrams, and configuration.
 
 ## Community
 

@@ -2,11 +2,13 @@
 Asynchronous Event System.
 """
 
+from __future__ import annotations
+
 import asyncio
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Deque, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Self, TypeVar
 
 from pywebtransport.types import EventData, EventHandler, EventType, Timeout
 from pywebtransport.utils import get_logger, get_timestamp
@@ -28,10 +30,10 @@ F = TypeVar("F", bound=Callable[..., Any])
 class Event:
     """A versatile base class for all system events."""
 
-    type: Union[EventType, str]
+    type: EventType | str
     timestamp: float = field(default_factory=get_timestamp)
-    data: Optional[EventData] = None
-    source: Optional[Any] = None
+    data: EventData | None = None
+    source: Any | None = None
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def __post_init__(self) -> None:
@@ -43,19 +45,19 @@ class Event:
                 pass
 
     @classmethod
-    def for_connection(cls, event_type: EventType, connection_info: Dict[str, Any]) -> "Event":
+    def for_connection(cls, event_type: EventType, connection_info: dict[str, Any]) -> Self:
         """Factory method to create a new connection event."""
         return cls(type=event_type, data=connection_info)
 
     @classmethod
-    def for_datagram(cls, event_type: EventType, datagram_info: Dict[str, Any]) -> "Event":
+    def for_datagram(cls, event_type: EventType, datagram_info: dict[str, Any]) -> Self:
         """Factory method to create a new datagram event."""
         return cls(type=event_type, data=datagram_info)
 
     @classmethod
-    def for_error(cls, error: Exception, *, source: Any = None) -> "Event":
+    def for_error(cls, error: Exception, *, source: Any = None) -> Self:
         """Factory method to create a new error event from an exception."""
-        to_dict_method: Callable[[], Dict[str, Any]] = getattr(error, "to_dict", lambda: {})
+        to_dict_method: Callable[[], dict[str, Any]] = getattr(error, "to_dict", lambda: {})
         details = to_dict_method() if callable(to_dict_method) else {}
         return cls(
             type=EventType.PROTOCOL_ERROR,
@@ -64,12 +66,12 @@ class Event:
         )
 
     @classmethod
-    def for_session(cls, event_type: EventType, session_info: Dict[str, Any]) -> "Event":
+    def for_session(cls, event_type: EventType, session_info: dict[str, Any]) -> Self:
         """Factory method to create a new session event."""
         return cls(type=event_type, data=session_info)
 
     @classmethod
-    def for_stream(cls, event_type: EventType, stream_info: Dict[str, Any]) -> "Event":
+    def for_stream(cls, event_type: EventType, stream_info: dict[str, Any]) -> Self:
         """Factory method to create a new stream event."""
         return cls(type=event_type, data=stream_info)
 
@@ -98,7 +100,7 @@ class Event:
         """Check if this event is stream-related."""
         return self._get_event_value().startswith("stream_")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the event to a dictionary."""
         return {
             "id": self.event_id,
@@ -128,15 +130,15 @@ class EventEmitter:
         """Initialize the event emitter."""
         if getattr(self, "_emitter_initialized", False):
             return
-        self._handlers: Dict[Union[EventType, str], List[EventHandler]] = defaultdict(list)
-        self._once_handlers: Dict[Union[EventType, str], List[EventHandler]] = defaultdict(list)
+        self._handlers: dict[EventType | str, list[EventHandler]] = defaultdict(list)
+        self._once_handlers: dict[EventType | str, list[EventHandler]] = defaultdict(list)
         self._max_listeners = kwargs.get("max_listeners", 100)
-        self._event_history: List[Event] = []
+        self._event_history: list[Event] = []
         self._max_history = 1000
-        self._wildcard_handlers: List[EventHandler] = []
+        self._wildcard_handlers: list[EventHandler] = []
         self._paused = False
-        self._event_queue: Deque[Event] = deque()
-        self._processing_task: Optional[asyncio.Task] = None
+        self._event_queue: deque[Event] = deque()
+        self._processing_task: asyncio.Task | None = None
         self._emitter_initialized = True
 
     async def close(self) -> None:
@@ -152,9 +154,9 @@ class EventEmitter:
 
     async def emit(
         self,
-        event_type: Union[EventType, str],
+        event_type: EventType | str,
         *,
-        data: Optional[EventData] = None,
+        data: EventData | None = None,
         source: Any = None,
     ) -> None:
         """Emit an event to all corresponding listeners."""
@@ -167,10 +169,10 @@ class EventEmitter:
 
     async def wait_for(
         self,
-        event_type: Union[EventType, str],
+        event_type: EventType | str,
         *,
-        timeout: Optional[Timeout] = None,
-        condition: Optional[Callable[[Event], bool]] = None,
+        timeout: Timeout | None = None,
+        condition: Callable[[Event], bool] | None = None,
     ) -> Event:
         """Wait for a specific event to be emitted."""
         future: asyncio.Future[Event] = asyncio.Future()
@@ -190,7 +192,7 @@ class EventEmitter:
         finally:
             self.off(event_type, handler)
 
-    def on(self, event_type: Union[EventType, str], handler: EventHandler) -> None:
+    def on(self, event_type: EventType | str, handler: EventHandler) -> None:
         """Register a persistent event handler."""
         handlers = self._handlers[event_type]
         if len(handlers) >= self._max_listeners:
@@ -201,14 +203,14 @@ class EventEmitter:
         else:
             logger.warning(f"Handler already registered for event {event_type}")
 
-    def once(self, event_type: Union[EventType, str], handler: EventHandler) -> None:
+    def once(self, event_type: EventType | str, handler: EventHandler) -> None:
         """Register a one-time event handler."""
         once_handlers = self._once_handlers[event_type]
         if handler not in once_handlers:
             once_handlers.append(handler)
             logger.debug(f"Registered once handler for event {event_type}")
 
-    def off(self, event_type: Union[EventType, str], handler: Optional[EventHandler] = None) -> None:
+    def off(self, event_type: EventType | str, handler: EventHandler | None = None) -> None:
         """Unregister a specific event handler or all handlers for an event."""
         if handler is None:
             self._handlers[event_type].clear()
@@ -228,7 +230,7 @@ class EventEmitter:
             self._wildcard_handlers.append(handler)
             logger.debug("Registered wildcard handler")
 
-    def off_any(self, handler: Optional[EventHandler] = None) -> None:
+    def off_any(self, handler: EventHandler | None = None) -> None:
         """Unregister a specific wildcard handler or all wildcard handlers."""
         if handler is None:
             self._wildcard_handlers.clear()
@@ -237,7 +239,7 @@ class EventEmitter:
             self._wildcard_handlers.remove(handler)
             logger.debug("Removed wildcard handler")
 
-    def remove_all_listeners(self, event_type: Optional[Union[EventType, str]] = None) -> None:
+    def remove_all_listeners(self, event_type: EventType | str | None = None) -> None:
         """Remove all listeners for a specific event or for all events."""
         if event_type is None:
             self._handlers.clear()
@@ -254,7 +256,7 @@ class EventEmitter:
         self._paused = True
         logger.debug("Event processing paused")
 
-    def resume(self) -> Optional[asyncio.Task]:
+    def resume(self) -> asyncio.Task | None:
         """Resume event processing and handle all queued events."""
         self._paused = False
         logger.debug("Event processing resumed")
@@ -263,15 +265,15 @@ class EventEmitter:
             return self._processing_task
         return None
 
-    def listeners(self, event_type: Union[EventType, str]) -> List[EventHandler]:
+    def listeners(self, event_type: EventType | str) -> list[EventHandler]:
         """Get all listeners for a specific event type."""
         return self._handlers[event_type][:] + self._once_handlers[event_type][:]
 
-    def listener_count(self, event_type: Union[EventType, str]) -> int:
+    def listener_count(self, event_type: EventType | str) -> int:
         """Get the number of listeners for a specific event type."""
         return len(self.listeners(event_type))
 
-    def get_event_history(self, event_type: Optional[Union[EventType, str]] = None, limit: int = 100) -> List[Event]:
+    def get_event_history(self, event_type: EventType | str | None = None, limit: int = 100) -> list[Event]:
         """Get the recorded history of events."""
         if event_type is None:
             return self._event_history[-limit:]
@@ -289,7 +291,7 @@ class EventEmitter:
         """Set the maximum number of listeners per event."""
         self._max_listeners = max_listeners
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get statistics about the event emitter."""
         total_handlers = sum(len(handlers) for handlers in self._handlers.values())
         total_once_handlers = sum(len(handlers) for handlers in self._once_handlers.values())
@@ -311,8 +313,8 @@ class EventEmitter:
 
     async def _process_event(self, event: Event) -> None:
         """Process a single event by invoking all relevant handlers."""
-        handlers_to_call: List[EventHandler] = self._handlers[event.type][:]
-        once_handlers_to_call: List[EventHandler] = self._once_handlers[event.type][:]
+        handlers_to_call: list[EventHandler] = self._handlers[event.type][:]
+        once_handlers_to_call: list[EventHandler] = self._once_handlers[event.type][:]
         if once_handlers_to_call:
             self._once_handlers[event.type].clear()
         all_handlers = handlers_to_call + once_handlers_to_call + self._wildcard_handlers
@@ -338,19 +340,21 @@ class EventEmitter:
 class EventBus:
     """A global, singleton event bus for cross-component communication."""
 
-    _instance: Optional["EventBus"] = None
-    _lock = asyncio.Lock()
+    _instance: EventBus | None = None
+    _lock: asyncio.Lock | None = None
 
     def __init__(self) -> None:
         """Initialize the event bus."""
         self._emitter = EventEmitter(max_listeners=1000)
-        self._subscriptions: Dict[str, Tuple[Union[EventType, str], EventHandler]] = {}
+        self._subscriptions: dict[str, tuple[EventType | str, EventHandler]] = {}
         self._subscription_counter = 0
 
     @classmethod
-    async def get_instance(cls) -> "EventBus":
+    async def get_instance(cls) -> EventBus:
         """Get the singleton instance of the EventBus."""
         if cls._instance is None:
+            if cls._lock is None:
+                cls._lock = asyncio.Lock()
             async with cls._lock:
                 if cls._instance is None:
                     cls._instance = cls()
@@ -368,15 +372,15 @@ class EventBus:
 
     async def emit(
         self,
-        event_type: Union[EventType, str],
+        event_type: EventType | str,
         *,
-        data: Optional[EventData] = None,
+        data: EventData | None = None,
         source: Any = None,
     ) -> None:
         """Create and emit an event on the bus."""
         await self._emitter.emit(event_type, data=data, source=source)
 
-    def subscribe(self, event_type: Union[EventType, str], handler: EventHandler, *, once: bool = False) -> str:
+    def subscribe(self, event_type: EventType | str, handler: EventHandler, *, once: bool = False) -> str:
         """Subscribe to an event, returning a unique subscription ID."""
         subscription_id = f"sub_{self._subscription_counter}"
         self._subscription_counter += 1
@@ -419,7 +423,7 @@ def create_event_emitter(max_listeners: int = 100) -> EventEmitter:
     return EventEmitter(max_listeners=max_listeners)
 
 
-def event_handler(event_type: Union[EventType, str]) -> Callable[[F], F]:
+def event_handler(event_type: EventType | str) -> Callable[[F], F]:
     """Decorate a function as a handler for a specific event type."""
 
     def decorator(func: F) -> F:

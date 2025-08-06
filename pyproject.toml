@@ -4,14 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pywebtransport"
-dynamic = ["version"] 
+dynamic = ["version"]
 description = "A high-performance, async-native WebTransport implementation for Python."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.8"
-authors = [
-    {name = "lemonsterfy", email = "lemonsterfy@gmail.com"},
-]
+requires-python = ">=3.11"
+authors = [{ name = "lemonsterfy", email = "lemonsterfy@gmail.com" }]
 keywords = ["webtransport", "http3", "quic", "async", "networking"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -19,9 +17,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -33,11 +28,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-dependencies = [
-    "aioquic>=1.2.0,<2.0.0",
-    "cryptography>=45.0.4,<46.0.0",
-    "typing-extensions>=4.14.0,<5.0.0;python_version<'3.10'",
-]
+dependencies = ["aioquic>=1.2.0,<2.0.0", "cryptography>=45.0.4,<46.0.0"]
 
 [project.optional-dependencies]
 dev = [
@@ -76,24 +67,17 @@ Changelog = "https://github.com/lemonsterfy/pywebtransport/blob/main/CHANGELOG.m
 path = "src/pywebtransport/version.py"
 
 [tool.hatch.build.targets.sdist]
-include = [
-    "/src",
-    "/py.typed",
-    "/README.md",
-    "/LICENSE",
-    "/CHANGELOG.md",
-]
+include = ["/src", "/py.typed", "/README.md", "/LICENSE", "/CHANGELOG.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pywebtransport"]
 
 [tool.black]
 line-length = 120
-target-version = ["py38"]
+target-version = ["py311"]
 include = '\.pyi?$'
 extend-exclude = '''
 /(
-  # directories
   \.eggs
   | \.git
   | \.hg
@@ -111,23 +95,9 @@ line_length = 120
 known_first_party = ["pywebtransport"]
 skip_glob = ["**/__init__.py"]
 
-[tool.flake8]
-max-line-length = 120
-extend-ignore = ["E203", "W503"]
-exclude = [
-    ".git",
-    "__pycache__",
-    "docs/source/conf.py",
-    "build",
-    "dist",
-    ".eggs",
-    "*.egg",
-    ".mypy_cache",
-]
-
 [tool.mypy]
 mypy_path = "src"
-python_version = "3.8"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -143,10 +113,7 @@ strict_equality = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = [
-    "aioquic.*",
-    "cryptography.*",
-]
+module = ["aioquic.*", "cryptography.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -167,10 +134,7 @@ source = ["src"]
 branch = true
 parallel = true
 data_file = ".cache/coverage/.coverage"
-omit = [
-    "tests/*",
-    "src/pywebtransport/protocol/h3.py",
-]
+omit = ["tests/*", "src/pywebtransport/protocol/h3.py"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -188,3 +152,44 @@ exclude_lines = [
 ]
 show_missing = true
 precision = 2
+
+[tool.tox]
+requires = ["tox>=4"]
+env_list = ["lint", "py311", "py312", "py313"]
+
+[tool.tox.env_run_base]
+description = "Run pytest for {env_name}"
+package = "editable"
+deps = ["-r dev-requirements.txt"]
+commands = [
+    [
+        "pytest",
+        "--cov=pywebtransport",
+        "--cov-report=term",
+        "{posargs}",
+    ],
+]
+
+[tool.tox.env.lint]
+description = "Run code quality checks"
+base_python = ["python3.11"]
+package = "skip"
+deps = ["-r dev-requirements.txt"]
+commands = [
+    [
+        "black",
+        "--check",
+        "src",
+        "tests",
+    ],
+    [
+        "flake8",
+        "src",
+        "tests",
+    ],
+    [
+        "mypy",
+        "src",
+        "tests",
+    ],
+]

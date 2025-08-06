@@ -17,22 +17,9 @@ from pywebtransport.session import SessionManager
 
 class TestWebTransportServer:
     @pytest.fixture
-    def mock_server_config(self, mocker: MockerFixture) -> ServerConfig:
-        mocker.patch("pywebtransport.config.ServerConfig.validate")
-        return ServerConfig(
-            bind_host="127.0.0.1", bind_port=4433, certfile="cert.pem", keyfile="key.pem", max_connections=10
-        )
-
-    @pytest.fixture
     def mock_connection_manager(self, mocker: MockerFixture) -> Any:
         mock_manager = mocker.create_autospec(ConnectionManager, instance=True)
         mocker.patch("pywebtransport.server.server.ConnectionManager.create", return_value=mock_manager)
-        return mock_manager
-
-    @pytest.fixture
-    def mock_session_manager(self, mocker: MockerFixture) -> Any:
-        mock_manager = mocker.create_autospec(SessionManager, instance=True)
-        mocker.patch("pywebtransport.server.server.SessionManager.create", return_value=mock_manager)
         return mock_manager
 
     @pytest.fixture
@@ -45,23 +32,36 @@ class TestWebTransportServer:
         return mock_server
 
     @pytest.fixture
+    def mock_server_config(self, mocker: MockerFixture) -> ServerConfig:
+        mocker.patch("pywebtransport.config.ServerConfig.validate")
+        return ServerConfig(
+            bind_host="127.0.0.1", bind_port=4433, certfile="cert.pem", keyfile="key.pem", max_connections=10
+        )
+
+    @pytest.fixture
+    def mock_session_manager(self, mocker: MockerFixture) -> Any:
+        mock_manager = mocker.create_autospec(SessionManager, instance=True)
+        mocker.patch("pywebtransport.server.server.SessionManager.create", return_value=mock_manager)
+        return mock_manager
+
+    @pytest.fixture
     def mock_webtransport_connection(self, mocker: MockerFixture) -> Any:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         type(mock_conn).is_closed = mocker.PropertyMock(return_value=False)
         mocker.patch("pywebtransport.server.server.WebTransportConnection", return_value=mock_conn)
         return mock_conn
 
-    @pytest.fixture(autouse=True)
-    def setup_common_mocks(self, mocker: MockerFixture) -> None:
-        mocker.patch("aioquic.quic.configuration.QuicConfiguration.load_cert_chain")
-        mocker.patch("pywebtransport.server.server.get_timestamp", return_value=1000.0)
-        mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
-
     @pytest.fixture
     def server(
         self, mock_server_config: ServerConfig, mock_connection_manager: Any, mock_session_manager: Any
     ) -> WebTransportServer:
         return WebTransportServer(config=mock_server_config)
+
+    @pytest.fixture(autouse=True)
+    def setup_common_mocks(self, mocker: MockerFixture) -> None:
+        mocker.patch("aioquic.quic.configuration.QuicConfiguration.load_cert_chain")
+        mocker.patch("pywebtransport.server.server.get_timestamp", return_value=1000.0)
+        mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
 
     def test_init_with_custom_config(self, server: WebTransportServer, mock_server_config: ServerConfig) -> None:
         assert server.config is mock_server_config
@@ -104,6 +104,7 @@ class TestWebTransportServer:
         mock_session_manager: Any,
     ) -> None:
         await server.listen()
+
         await server.close()
 
         mock_connection_manager.shutdown.assert_awaited_once()
@@ -116,11 +117,9 @@ class TestWebTransportServer:
         await server.listen()
 
         await server.close()
-
         mock_quic_server.close.assert_called_once()
 
         await server.close()
-
         mock_quic_server.close.assert_called_once()
 
     @pytest.mark.asyncio
@@ -163,14 +162,14 @@ class TestWebTransportServer:
         self, server: WebTransportServer, mock_quic_server: Any, mocker: MockerFixture
     ) -> None:
         del mock_quic_server.wait_closed
-        mock_sleep = mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
 
         async def stop_server_and_raise(*args: Any, **kwargs: Any) -> NoReturn:
             server._serving = False
             raise asyncio.CancelledError
 
-        mock_sleep.side_effect = stop_server_and_raise
+        mock_sleep = mocker.patch("asyncio.sleep", side_effect=stop_server_and_raise)
         await server.listen()
+
         await server.serve_forever()
 
         mock_sleep.assert_awaited_once_with(3600)
@@ -181,8 +180,8 @@ class TestWebTransportServer:
     ) -> None:
         del mock_quic_server.wait_closed
         mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
-
         await server.listen()
+
         await server.serve_forever()
 
         mock_quic_server.close.assert_called_once()
@@ -209,11 +208,10 @@ class TestWebTransportServer:
         server_emitter_mock = mocker.patch.object(server, "emit", new_callable=mocker.AsyncMock)
         captured_handler = mocker.MagicMock()
         mock_webtransport_connection.on.side_effect = lambda event, handler: captured_handler.set(handler)
-
         await server._handle_new_connection(mocker.MagicMock(), mocker.MagicMock())
-
         event_handler = captured_handler.set.call_args[0][0]
         event_data = {"path": "/test"}
+
         await event_handler(Event(type=EventType.SESSION_REQUEST, data=event_data))
 
         server_emitter_mock.assert_awaited_once()

@@ -2,7 +2,9 @@
 WebTransport Exceptions.
 """
 
-from typing import Any, Dict, Optional, Tuple, Type
+from __future__ import annotations
+
+from typing import Any, Type
 
 from pywebtransport.constants import ErrorCodes
 from pywebtransport.types import SessionState, StreamState
@@ -42,8 +44,8 @@ class WebTransportError(Exception):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the WebTransport error."""
         super().__init__(message)
@@ -59,7 +61,7 @@ class WebTransportError(Exception):
         """Return a simple string representation of the error."""
         return f"[{self.error_code}] {self.message}"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary for serialization."""
         return {
             "type": self.__class__.__name__,
@@ -76,15 +78,15 @@ class AuthenticationError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        auth_method: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        auth_method: str | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the authentication error."""
         super().__init__(message, error_code=error_code or ErrorCodes.APP_AUTHENTICATION_FAILED, details=details)
         self.auth_method = auth_method
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["auth_method"] = self.auth_method
@@ -98,17 +100,17 @@ class CertificateError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        certificate_path: Optional[str] = None,
-        certificate_error: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        certificate_path: str | None = None,
+        certificate_error: str | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the certificate error."""
         super().__init__(message, error_code=error_code or ErrorCodes.APP_AUTHENTICATION_FAILED, details=details)
         self.certificate_path = certificate_path
         self.certificate_error = certificate_error
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["certificate_path"] = self.certificate_path
@@ -123,15 +125,15 @@ class ClientError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        target_url: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        target_url: str | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the client error."""
         super().__init__(message, error_code=error_code or ErrorCodes.APP_INVALID_REQUEST, details=details)
         self.target_url = target_url
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["target_url"] = self.target_url
@@ -145,17 +147,17 @@ class ConfigurationError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        config_key: Optional[str] = None,
-        config_value: Optional[Any] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        config_key: str | None = None,
+        config_value: Any | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the configuration error."""
         super().__init__(message, error_code=error_code or ErrorCodes.APP_INVALID_REQUEST, details=details)
         self.config_key = config_key
         self.config_value = config_value
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["config_key"] = self.config_key
@@ -170,15 +172,15 @@ class ConnectionError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        remote_address: Optional[Tuple[str, int]] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        remote_address: tuple[str, int] | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the connection error."""
         super().__init__(message, error_code=error_code or ErrorCodes.CONNECTION_REFUSED, details=details)
         self.remote_address = remote_address
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["remote_address"] = self.remote_address
@@ -192,17 +194,17 @@ class DatagramError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        datagram_size: Optional[int] = None,
-        max_size: Optional[int] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        datagram_size: int | None = None,
+        max_size: int | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the datagram error."""
         super().__init__(message, error_code=error_code or ErrorCodes.INTERNAL_ERROR, details=details)
         self.datagram_size = datagram_size
         self.max_size = max_size
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["datagram_size"] = self.datagram_size
@@ -217,11 +219,11 @@ class FlowControlError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        stream_id: Optional[int] = None,
-        limit_exceeded: Optional[int] = None,
-        current_value: Optional[int] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        stream_id: int | None = None,
+        limit_exceeded: int | None = None,
+        current_value: int | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the flow control error."""
         super().__init__(message, error_code=error_code or ErrorCodes.FLOW_CONTROL_ERROR, details=details)
@@ -229,7 +231,7 @@ class FlowControlError(WebTransportError):
         self.limit_exceeded = limit_exceeded
         self.current_value = current_value
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["stream_id"] = self.stream_id
@@ -245,15 +247,15 @@ class HandshakeError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        handshake_stage: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        handshake_stage: str | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the handshake error."""
         super().__init__(message, error_code=error_code or ErrorCodes.INTERNAL_ERROR, details=details)
         self.handshake_stage = handshake_stage
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["handshake_stage"] = self.handshake_stage
@@ -267,15 +269,15 @@ class ProtocolError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        frame_type: Optional[int] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        frame_type: int | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the protocol error."""
         super().__init__(message, error_code=error_code or ErrorCodes.PROTOCOL_VIOLATION, details=details)
         self.frame_type = frame_type
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["frame_type"] = self.frame_type
@@ -289,15 +291,15 @@ class ServerError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        bind_address: Optional[Tuple[str, int]] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        bind_address: tuple[str, int] | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the server error."""
         super().__init__(message, error_code=error_code or ErrorCodes.APP_SERVICE_UNAVAILABLE, details=details)
         self.bind_address = bind_address
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["bind_address"] = self.bind_address
@@ -311,17 +313,17 @@ class SessionError(WebTransportError):
         self,
         message: str,
         *,
-        session_id: Optional[str] = None,
-        error_code: Optional[int] = None,
-        session_state: Optional[SessionState] = None,
-        details: Optional[Dict[str, Any]] = None,
+        session_id: str | None = None,
+        error_code: int | None = None,
+        session_state: SessionState | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the session error."""
         super().__init__(message, error_code=error_code or ErrorCodes.INTERNAL_ERROR, details=details)
         self.session_id = session_id
         self.session_state = session_state
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["session_id"] = self.session_id
@@ -336,10 +338,10 @@ class StreamError(WebTransportError):
         self,
         message: str,
         *,
-        stream_id: Optional[int] = None,
-        error_code: Optional[int] = None,
-        stream_state: Optional[StreamState] = None,
-        details: Optional[Dict[str, Any]] = None,
+        stream_id: int | None = None,
+        error_code: int | None = None,
+        stream_state: StreamState | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the stream error."""
         super().__init__(message, error_code=error_code or ErrorCodes.STREAM_STATE_ERROR, details=details)
@@ -353,7 +355,7 @@ class StreamError(WebTransportError):
             return f"{base_msg} (stream_id={self.stream_id})"
         return base_msg
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["stream_id"] = self.stream_id
@@ -368,22 +370,39 @@ class TimeoutError(WebTransportError):
         self,
         message: str,
         *,
-        error_code: Optional[int] = None,
-        timeout_duration: Optional[float] = None,
-        operation: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        error_code: int | None = None,
+        timeout_duration: float | None = None,
+        operation: str | None = None,
+        details: dict[str, Any] | None = None,
     ):
         """Initialize the timeout error."""
         super().__init__(message, error_code=error_code or ErrorCodes.APP_CONNECTION_TIMEOUT, details=details)
         self.timeout_duration = timeout_duration
         self.operation = operation
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["timeout_duration"] = self.timeout_duration
         data["operation"] = self.operation
         return data
+
+
+_ERROR_CATEGORY_MAP: dict[Type[Exception], str] = {
+    AuthenticationError: "authentication",
+    CertificateError: "certificate",
+    ClientError: "client",
+    ConfigurationError: "configuration",
+    ConnectionError: "connection",
+    DatagramError: "datagram",
+    FlowControlError: "flow_control",
+    HandshakeError: "handshake",
+    ProtocolError: "protocol",
+    ServerError: "server",
+    SessionError: "session",
+    StreamError: "stream",
+    TimeoutError: "timeout",
+}
 
 
 def certificate_not_found(path: str) -> CertificateError:
@@ -412,7 +431,7 @@ def invalid_config(key: str, value: Any, reason: str) -> ConfigurationError:
     return ConfigurationError(f"Invalid configuration for '{key}': {reason}", config_key=key, config_value=value)
 
 
-def protocol_violation(message: str, frame_type: Optional[int] = None) -> ProtocolError:
+def protocol_violation(message: str, frame_type: int | None = None) -> ProtocolError:
     """Create a protocol violation error."""
     return ProtocolError(message, frame_type=frame_type, error_code=ErrorCodes.PROTOCOL_VIOLATION)
 
@@ -457,23 +476,6 @@ def is_retriable_error(exception: Exception) -> bool:
         }
         return exception.error_code in retriable_codes
     return False
-
-
-_ERROR_CATEGORY_MAP: Dict[Type[Exception], str] = {
-    AuthenticationError: "authentication",
-    CertificateError: "certificate",
-    ClientError: "client",
-    ConfigurationError: "configuration",
-    ConnectionError: "connection",
-    DatagramError: "datagram",
-    FlowControlError: "flow_control",
-    HandshakeError: "handshake",
-    ProtocolError: "protocol",
-    ServerError: "server",
-    SessionError: "session",
-    StreamError: "stream",
-    TimeoutError: "timeout",
-}
 
 
 def get_error_category(exception: Exception) -> str:

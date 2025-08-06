@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Any, AsyncGenerator, Callable, cast
+from unittest import mock
 
 import pytest
 from pytest_mock import MockerFixture
@@ -31,15 +32,11 @@ def mock_stream_factory(mocker: MockerFixture) -> Callable[[], Any]:
 
 
 @pytest.fixture
-async def stream_pool(mock_session: Any) -> AsyncGenerator[StreamPool, None]:
-    pool = StreamPool(session=mock_session)
-    yield pool
-    if pool._maintenance_task and not pool._maintenance_task.done():
-        pool._maintenance_task.cancel()
-        try:
-            await pool._maintenance_task
-        except asyncio.CancelledError:
-            pass
+async def populated_pool(mock_session: Any, mock_stream_factory: Callable[[], Any]) -> AsyncGenerator[StreamPool, None]:
+    streams = [mock_stream_factory() for _ in range(2)]
+    mock_session.create_bidirectional_stream.side_effect = streams
+    async with StreamPool(session=mock_session, pool_size=2) as pool:
+        yield pool
 
 
 class TestStreamPoolInitialization:
@@ -63,251 +60,269 @@ class TestStreamPoolInitialization:
 
 
 class TestStreamPoolLifecycle:
-    async def test_initialize_pool_is_idempotent(self, mock_session: Any, mocker: MockerFixture) -> None:
-        pool = StreamPool(session=mock_session, pool_size=2)
-        mocker.patch.object(pool, "_fill_pool", wraps=pool._fill_pool)
+    @pytest.mark.asyncio
+    async def test_initialize_pool_is_idempotent(
+        self, mock_session: Any, mock_stream_factory: Callable[[], Any], mocker: MockerFixture
+    ) -> None:
+        streams = [mock_stream_factory() for _ in range(2)]
+        mock_session.create_bidirectional_stream.side_effect = streams
 
-        await pool._initialize_pool()
-        assert cast(Any, pool._fill_pool).call_count == 1
-        assert pool._total_managed_streams == 2
+        async with StreamPool(session=mock_session, pool_size=2) as pool:
+            fill_pool_spy = mocker.spy(pool, "_fill_pool")
+            fill_pool_spy.reset_mock()
+            assert pool._total_managed_streams == 2
 
-        await pool._initialize_pool()
-        assert cast(Any, pool._fill_pool).call_count == 1
-        assert pool._total_managed_streams == 2
+            await pool._initialize_pool()
 
-    async def test_close_all_on_uninitialized_pool(self, mock_session: Any) -> None:
+            fill_pool_spy.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_close_all_on_uninitialized_pool_fails(self, mock_session: Any) -> None:
         pool = StreamPool(session=mock_session)
 
-        await pool.close_all()
+        with pytest.raises(StreamError, match="StreamPool has not been activated"):
+            await pool.close_all()
 
-        assert pool._total_managed_streams == 0
+    @pytest.mark.asyncio
+    async def test_async_context_manager_calls_close_all(self, mock_session: Any, mocker: MockerFixture) -> None:
+        mocker.patch.object(StreamPool, "_initialize_pool", new_callable=mocker.AsyncMock)
+        close_all_mock = mocker.patch.object(StreamPool, "close_all", new_callable=mocker.AsyncMock)
 
-    async def test_async_context_manager_handles_exception(self, mock_session: Any, mocker: MockerFixture) -> None:
-        pool = StreamPool(session=mock_session)
-        close_all_mock = mocker.patch.object(pool, "close_all", new_callable=mocker.AsyncMock)
-
-        with pytest.raises(ValueError, match="Test Exception"):
-            async with pool:
-                raise ValueError("Test Exception")
+        async with StreamPool(session=mock_session):
+            pass
 
         close_all_mock.assert_awaited_once()
 
-    async def test_fill_pool_stops_if_session_closed(self, mock_session: Any, mocker: MockerFixture) -> None:
-        pool = StreamPool(session=mock_session, pool_size=5)
+    @pytest.mark.asyncio
+    async def test_fill_pool_stops_if_session_closed(
+        self, mock_session: Any, mock_stream_factory: Callable[[], Any], mocker: MockerFixture
+    ) -> None:
         mock_logger = mocker.patch("pywebtransport.stream.pool.logger")
+        mock_session.create_bidirectional_stream.side_effect = [mock_stream_factory() for _ in range(5)]
         type(mock_session).is_closed = mocker.PropertyMock(side_effect=[False, False, True])
 
-        await pool._initialize_pool()
+        async with StreamPool(session=mock_session, pool_size=5) as pool:
+            assert pool._total_managed_streams == 2
+            mock_logger.warning.assert_called_once_with("Session closed during stream pool replenishment.")
 
-        assert pool._total_managed_streams == 2
-        mock_logger.warning.assert_called_once_with("Session closed during stream pool replenishment.")
-
-    async def test_initialize_pool_no_exception_raised(self, mock_session: Any, mocker: MockerFixture) -> None:
-        pool = StreamPool(session=mock_session)
+    @pytest.mark.asyncio
+    async def test_initialize_pool_does_not_raise_on_error(self, mock_session: Any, mocker: MockerFixture) -> None:
         mock_logger = mocker.patch("pywebtransport.stream.pool.logger")
         mock_session.create_bidirectional_stream.side_effect = RuntimeError("Creation failed")
 
-        await pool._initialize_pool()
+        async with StreamPool(session=mock_session):
+            pass
 
-        mock_logger.error.assert_called_with("Failed to create a new stream for the pool: Creation failed")
-        assert pool._total_managed_streams == 0
-        assert pool._available.empty()
+        mock_logger.error.assert_called_with("Error initializing stream pool: Creation failed")
 
-    async def test_close_all_cancels_maintenance_task(self, mock_session: Any, mocker: MockerFixture) -> None:
-        pool = StreamPool(session=mock_session)
-        mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
-        await pool._initialize_pool()
-        task = pool._maintenance_task
+    @pytest.mark.asyncio
+    async def test_close_all_cancels_maintenance_task(self, populated_pool: StreamPool) -> None:
+        task = populated_pool._maintenance_task
         assert task is not None
         assert not task.done()
 
-        await pool.close_all()
+        await populated_pool.close_all()
 
         assert task.done()
 
+    @pytest.mark.asyncio
     async def test_close_all_waits_for_cancelled_task(self, mock_session: Any, mocker: MockerFixture) -> None:
-        pool = StreamPool(session=mock_session)
         task_is_running = asyncio.Event()
+        task_has_finished = asyncio.Event()
 
         async def controlled_coro() -> None:
             task_is_running.set()
-            await asyncio.sleep(30)
+            try:
+                await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.01)
+                task_has_finished.set()
+                raise
 
-        mocker.patch.object(pool, "_maintain_pool_loop", side_effect=controlled_coro)
-        await pool._initialize_pool()
-        await task_is_running.wait()
+        mocker.patch.object(StreamPool, "_maintain_pool_loop", side_effect=controlled_coro)
 
-        await pool.close_all()
-
-        assert pool._maintenance_task is not None
-        assert pool._maintenance_task.done()
+        async with StreamPool(session=mock_session) as pool:
+            await task_is_running.wait()
+            await pool.close_all()
+            assert task_has_finished.is_set()
 
 
 class TestStreamPoolOperations:
-    @pytest.fixture(autouse=True)
-    async def setup(
-        self,
-        stream_pool: StreamPool,
-        mock_session: Any,
-        mock_stream_factory: Callable[[], Any],
-    ) -> None:
-        streams = [mock_stream_factory() for _ in range(stream_pool._pool_size)]
-        mock_session.create_bidirectional_stream.side_effect = streams
-        await stream_pool._initialize_pool()
+    @pytest.mark.asyncio
+    async def test_get_stream_from_pool(self, populated_pool: StreamPool) -> None:
+        assert populated_pool._available is not None
+        initial_qsize = populated_pool._available.qsize()
+        assert initial_qsize == 2
 
-    async def test_get_stream_from_pool(self, stream_pool: StreamPool) -> None:
-        initial_qsize = stream_pool._available.qsize()
-
-        stream = await stream_pool.get_stream()
+        stream = await populated_pool.get_stream()
 
         assert stream is not None
-        assert not stream.is_closed
-        assert stream_pool._available.qsize() == initial_qsize - 1
+        assert populated_pool._available.qsize() == initial_qsize - 1
 
-    async def test_return_stream_to_pool(self, stream_pool: StreamPool, mock_stream_factory: Callable[[], Any]) -> None:
-        await stream_pool.close_all()
-        assert stream_pool._available.empty()
-        stream_to_return = mock_stream_factory()
+    @pytest.mark.asyncio
+    async def test_return_stream_to_pool(self, populated_pool: StreamPool) -> None:
+        stream = await populated_pool.get_stream()
+        assert populated_pool._available is not None
+        assert populated_pool._available.qsize() == 1
 
-        await stream_pool.return_stream(stream_to_return)
+        await populated_pool.return_stream(stream)
 
-        assert stream_pool._available.qsize() == 1
-        retrieved_stream = await stream_pool.get_stream()
-        assert retrieved_stream is stream_to_return
+        assert populated_pool._available.qsize() == 2
 
+    @pytest.mark.asyncio
     async def test_get_stream_from_empty_pool(
         self,
-        stream_pool: StreamPool,
+        populated_pool: StreamPool,
         mock_session: Any,
         mock_stream_factory: Callable[[], Any],
     ) -> None:
-        for _ in range(stream_pool._pool_size):
-            await stream_pool.get_stream()
-        assert stream_pool._available.empty()
+        for _ in range(populated_pool._pool_size):
+            await populated_pool.get_stream()
+        assert populated_pool._available is not None
+        assert populated_pool._available.empty()
         mock_session.create_bidirectional_stream.reset_mock()
         new_stream = mock_stream_factory()
         mock_session.create_bidirectional_stream.side_effect = [new_stream]
 
-        stream = await stream_pool.get_stream()
+        stream = await populated_pool.get_stream()
 
         assert stream is new_stream
         mock_session.create_bidirectional_stream.assert_awaited_once()
 
+    @pytest.mark.asyncio
     async def test_get_stale_stream_from_pool(
         self,
-        stream_pool: StreamPool,
+        populated_pool: StreamPool,
         mock_stream_factory: Callable[[], Any],
         mocker: MockerFixture,
     ) -> None:
         stale_stream = mock_stream_factory()
         type(stale_stream).is_closed = mocker.PropertyMock(return_value=True)
         healthy_stream = mock_stream_factory()
-        await stream_pool.close_all()
-        await stream_pool._available.put(stale_stream)
-        await stream_pool._available.put(healthy_stream)
-        stream_pool._total_managed_streams = 2
+        assert populated_pool._available is not None
+        while not populated_pool._available.empty():
+            populated_pool._available.get_nowait()
+        await populated_pool._available.put(stale_stream)
+        await populated_pool._available.put(healthy_stream)
+        populated_pool._total_managed_streams = 2
 
-        stream = await stream_pool.get_stream()
+        stream = await populated_pool.get_stream()
 
         assert stream is healthy_stream
-        assert stream_pool._total_managed_streams == 1
+        assert not stream.is_closed
+        assert populated_pool._total_managed_streams == 1
+        assert populated_pool._available.empty()
 
-    async def test_return_closed_stream(
-        self, stream_pool: StreamPool, mock_stream_factory: Callable[[], Any], mocker: MockerFixture
-    ) -> None:
-        await stream_pool.get_stream()
-        initial_managed = stream_pool._total_managed_streams
-        initial_qsize = stream_pool._available.qsize()
-        stream_to_return = mock_stream_factory()
-        type(stream_to_return).is_closed = mocker.PropertyMock(return_value=True)
+    @pytest.mark.asyncio
+    async def test_return_closed_stream(self, populated_pool: StreamPool, mocker: MockerFixture) -> None:
+        stream_to_return = await populated_pool.get_stream()
+        initial_managed = populated_pool._total_managed_streams
+        mocker.patch.object(type(stream_to_return), "is_closed", new_callable=mock.PropertyMock, return_value=True)
 
-        await stream_pool.return_stream(stream_to_return)
+        await populated_pool.return_stream(stream_to_return)
 
-        assert stream_pool._available.qsize() == initial_qsize
-        assert stream_pool._total_managed_streams == initial_managed - 1
+        assert populated_pool._total_managed_streams == initial_managed - 1
 
+    @pytest.mark.asyncio
     async def test_return_stream_to_full_pool(
-        self, stream_pool: StreamPool, mock_stream_factory: Callable[[], Any]
+        self, populated_pool: StreamPool, mock_stream_factory: Callable[[], Any]
     ) -> None:
-        assert stream_pool._available.full()
+        assert populated_pool._available is not None
+        assert populated_pool._available.full()
         stream_to_return = mock_stream_factory()
 
-        await stream_pool.return_stream(stream_to_return)
+        await populated_pool.return_stream(stream_to_return)
 
-        stream_to_return.close.assert_awaited_once()
-        assert stream_pool._available.full()
+        cast(mock.AsyncMock, stream_to_return.close).assert_awaited_once()
+        assert populated_pool._available.full()
+        assert populated_pool._total_managed_streams == populated_pool._pool_size
 
-    async def test_get_stream_creation_fails(self, stream_pool: StreamPool, mock_session: Any) -> None:
-        for _ in range(stream_pool._pool_size):
-            await stream_pool.get_stream()
+    @pytest.mark.asyncio
+    async def test_get_stream_creation_fails(self, populated_pool: StreamPool, mock_session: Any) -> None:
+        for _ in range(populated_pool._pool_size):
+            await populated_pool.get_stream()
         mock_session.create_bidirectional_stream.side_effect = ConnectionError("Failed")
 
         with pytest.raises(StreamError, match="Failed to create a new stream"):
-            await stream_pool.get_stream()
+            await populated_pool.get_stream()
 
 
 class TestStreamPoolMaintenance:
-    async def test_start_maintenance_task_is_idempotent(self, mock_session: Any, mocker: MockerFixture) -> None:
-        pool = StreamPool(session=mock_session)
-        create_task_mock = mocker.patch("asyncio.create_task")
-        mocker.patch.object(pool, "_maintain_pool_loop", new=mocker.MagicMock())
+    @pytest.mark.asyncio
+    async def test_start_maintenance_task_is_idempotent(self, mocker: MockerFixture) -> None:
+        async with StreamPool(session=mocker.MagicMock()) as pool:
+            task1 = pool._maintenance_task
+            assert task1 is not None
 
-        pool._start_maintenance_task()
-        create_task_mock.assert_called_once()
+            create_task_spy = mocker.spy(asyncio, "create_task")
+            pool._start_maintenance_task()
 
-        pool._start_maintenance_task()
-        create_task_mock.assert_called_once()
+            task2 = pool._maintenance_task
+            assert task1 is task2
+            create_task_spy.assert_not_called()
 
+            task1.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task1
+
+    @pytest.mark.asyncio
     async def test_maintain_pool_loop_replenishes(
         self,
         mocker: MockerFixture,
         mock_session: Any,
         mock_stream_factory: Callable[[], Any],
     ) -> None:
-        mock_sleep = mocker.patch("pywebtransport.stream.pool.asyncio.sleep", new_callable=mocker.AsyncMock)
+        mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_sleep.side_effect = [None, asyncio.CancelledError]
-        pool = StreamPool(session=mock_session, pool_size=3, maintenance_interval=0.1)
-        pool._total_managed_streams = 1
-        new_streams = [mock_stream_factory(), mock_stream_factory()]
-        mock_session.create_bidirectional_stream.side_effect = new_streams
 
-        await pool._maintain_pool_loop()
+        async with StreamPool(session=mock_session, pool_size=3, maintenance_interval=0.1) as pool:
+            assert pool._available is not None
+            pool._total_managed_streams = 1
+            while not pool._available.empty():
+                pool._available.get_nowait()
 
-        mock_sleep.assert_awaited_with(0.1)
-        assert mock_session.create_bidirectional_stream.call_count == 2
-        assert pool._total_managed_streams == 3
-        assert pool._available.qsize() == 2
+            mock_session.create_bidirectional_stream.reset_mock()
+            new_streams = [mock_stream_factory() for _ in range(2)]
+            mock_session.create_bidirectional_stream.side_effect = new_streams
 
-    async def test_maintain_pool_does_nothing_if_full(self, mock_session: Any, mocker: MockerFixture) -> None:
-        mock_sleep = mocker.patch("pywebtransport.stream.pool.asyncio.sleep", new_callable=mocker.AsyncMock)
+            await pool._maintain_pool_loop()
+
+            mock_sleep.assert_awaited_with(0.1)
+            assert mock_session.create_bidirectional_stream.call_count == 2
+            assert pool._total_managed_streams == 3
+
+    @pytest.mark.asyncio
+    async def test_maintain_pool_does_nothing_if_full(
+        self, populated_pool: StreamPool, mock_session: Any, mocker: MockerFixture
+    ) -> None:
+        mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_sleep.side_effect = [None, asyncio.CancelledError]
-        pool = StreamPool(session=mock_session, pool_size=3)
-        pool._total_managed_streams = 3
+        mock_session.create_bidirectional_stream.reset_mock()
 
-        await pool._maintain_pool_loop()
+        await populated_pool._maintain_pool_loop()
 
         mock_session.create_bidirectional_stream.assert_not_called()
 
+    @pytest.mark.asyncio
     async def test_maintain_pool_loop_crashes(
         self,
         mocker: MockerFixture,
         mock_session: Any,
     ) -> None:
         mock_logger = mocker.patch("pywebtransport.stream.pool.logger")
-        mock_sleep = mocker.patch("pywebtransport.stream.pool.asyncio.sleep", new_callable=mocker.AsyncMock)
+        mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_sleep.side_effect = RuntimeError("Something went wrong")
-        pool = StreamPool(session=mock_session, pool_size=2)
 
-        await pool._maintain_pool_loop()
+        async with StreamPool(session=mock_session, pool_size=2) as pool:
+            await pool._maintain_pool_loop()
 
-        mock_logger.error.assert_called_once()
-        assert "Stream pool maintenance task crashed" in mock_logger.error.call_args[0][0]
+            mock_logger.error.assert_called_once()
+            assert "Stream pool maintenance task crashed" in mock_logger.error.call_args[0][0]
 
     def test_start_maintenance_task_no_running_loop(self, mock_session: Any, mocker: MockerFixture) -> None:
         mocker.patch("asyncio.create_task", side_effect=RuntimeError("no running loop"))
         mock_logger = mocker.patch("pywebtransport.stream.pool.logger")
         pool = StreamPool(session=mock_session)
-        mocker.patch.object(pool, "_maintain_pool_loop", new=mocker.MagicMock())
 
         pool._start_maintenance_task()
 

@@ -2,9 +2,11 @@
 WebTransport Client Pool.
 """
 
+from __future__ import annotations
+
 import asyncio
 from types import TracebackType
-from typing import List, Optional, Type
+from typing import Self, Type
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -20,23 +22,25 @@ logger = get_logger("client.pool")
 class ClientPool:
     """Manages a pool of WebTransportClient instances."""
 
-    def __init__(self, configs: List[Optional[ClientConfig]]):
+    def __init__(self, configs: list[ClientConfig | None]):
         """Initialize the client pool."""
         if not configs:
             raise ValueError("ClientPool requires at least one client configuration.")
         self._configs = configs
-        self._clients: List[WebTransportClient] = []
+        self._clients: list[WebTransportClient] = []
         self._current_index = 0
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
 
     @classmethod
-    def create(cls, *, num_clients: int = 10, base_config: Optional[ClientConfig] = None) -> "ClientPool":
+    def create(cls, *, num_clients: int = 10, base_config: ClientConfig | None = None) -> Self:
         """Factory method to create a client pool with a specified number of clients."""
         configs = [base_config for _ in range(num_clients)]
         return cls(configs=configs)
 
-    async def __aenter__(self) -> "ClientPool":
+    async def __aenter__(self) -> Self:
         """Enter the async context and activate all clients in the pool."""
+        self._lock = asyncio.Lock()
+
         if self._clients:
             return self
 
@@ -56,15 +60,20 @@ class ClientPool:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and close all clients in the pool."""
         await self.close_all()
 
     async def get_client(self) -> WebTransportClient:
         """Get an active client from the pool using a round-robin strategy."""
+        if self._lock is None:
+            raise ClientError(
+                "ClientPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         if not self._clients:
             raise ClientError("No clients available. The pool might not have been started or is empty.")
 
@@ -73,8 +82,16 @@ class ClientPool:
             self._current_index = (self._current_index + 1) % len(self._clients)
             return client
 
-    async def connect_all(self, url: str) -> List[WebTransportSession]:
+    async def connect_all(self, url: str) -> list[WebTransportSession]:
         """Instruct all clients in the pool to connect to a single URL concurrently."""
+        if self._lock is None:
+            raise ClientError(
+                "ClientPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        if not self._clients:
+            return []
+
         connect_tasks = [client.connect(url) for client in self._clients]
         results = await asyncio.gather(*connect_tasks, return_exceptions=True)
 

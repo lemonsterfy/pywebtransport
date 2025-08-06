@@ -1,12 +1,21 @@
-# .flake8
 [flake8]
 max-line-length = 120
 extend-ignore = E203, W503
 exclude =
-    .git,
-    __pycache__,
-    .venv,
-    build,
-    dist,
-    *.egg-info,
+    .benchmarks
+    .cache
+    .eggs
+    .git
+    .github
     .mypy_cache
+    .pytest_cache
+    .tox
+    .venv
+    .vscode
+    __pycache__
+    build
+    dist
+    docs
+    scripts
+    *.egg
+    *.egg-info

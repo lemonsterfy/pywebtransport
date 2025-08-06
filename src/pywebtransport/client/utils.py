@@ -2,8 +2,10 @@
 WebTransport Client Utilities.
 """
 
+from __future__ import annotations
+
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -20,12 +22,12 @@ __all__ = [
 async def benchmark_client_performance(
     url: str,
     *,
-    config: Optional[ClientConfig] = None,
+    config: ClientConfig | None = None,
     num_requests: int = 100,
     concurrent_requests: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Benchmark client performance by measuring request-response latency."""
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "total_requests": num_requests,
         "successful_requests": 0,
         "failed_requests": 0,
@@ -33,7 +35,7 @@ async def benchmark_client_performance(
     }
     semaphore = asyncio.Semaphore(concurrent_requests)
 
-    async def benchmark_single_request(client: WebTransportClient) -> Optional[float]:
+    async def benchmark_single_request(client: WebTransportClient) -> float | None:
         async with semaphore:
             try:
                 start_time = get_timestamp()
@@ -69,8 +71,8 @@ async def benchmark_client_performance(
 
 
 async def test_client_connectivity(
-    url: str, *, config: Optional[ClientConfig] = None, timeout: float = 10.0
-) -> Dict[str, Any]:
+    url: str, *, config: ClientConfig | None = None, timeout: float = 10.0
+) -> dict[str, Any]:
     """Test client connectivity to a given URL."""
     async with WebTransportClient.create(config=config) as client:
         try:

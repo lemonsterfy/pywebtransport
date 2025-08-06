@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.client.proxy module."""
 
 import asyncio
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import pytest
 from pytest_mock import MockerFixture
@@ -28,22 +28,34 @@ class TestWebTransportProxy:
         return mocker.MagicMock(spec=ClientConfig)
 
     @pytest.fixture
-    def mock_underlying_client(self, mocker: MockerFixture) -> Any:
-        client = mocker.create_autospec(WebTransportClient, instance=True)
-        client.__aenter__.return_value = client
-        return client
-
-    @pytest.fixture
     def mock_proxy_session(self, mocker: MockerFixture) -> Any:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.is_ready = True
+        session.create_bidirectional_stream = mocker.AsyncMock()
         return session
 
     @pytest.fixture
     def mock_tunnel_stream(self, mocker: MockerFixture) -> Any:
         stream = mocker.create_autospec(WebTransportStream, instance=True)
         stream.is_closed = False
+        stream.write = mocker.AsyncMock()
+        stream.read = mocker.AsyncMock()
+        stream.close = mocker.AsyncMock()
         return stream
+
+    @pytest.fixture
+    def mock_underlying_client(self, mocker: MockerFixture) -> Any:
+        client = mocker.create_autospec(WebTransportClient, instance=True)
+        client.__aenter__ = mocker.AsyncMock(return_value=client)
+        client.close = mocker.AsyncMock()
+        client.connect = mocker.AsyncMock()
+        return client
+
+    @pytest.fixture
+    async def proxy(self) -> AsyncGenerator[WebTransportProxy, None]:
+        proxy_instance = WebTransportProxy(proxy_url=self.PROXY_URL)
+        async with proxy_instance as activated_proxy:
+            yield activated_proxy
 
     @pytest.fixture(autouse=True)
     def setup_common_mocks(self, mocker: MockerFixture, mock_underlying_client: Any) -> None:
@@ -51,7 +63,6 @@ class TestWebTransportProxy:
             "pywebtransport.client.proxy.WebTransportClient.create",
             return_value=mock_underlying_client,
         )
-        mocker.patch("asyncio.Lock", return_value=mocker.AsyncMock())
 
     def test_create_factory(self, mocker: MockerFixture, mock_client_config: Any) -> None:
         mock_init = mocker.patch("pywebtransport.client.proxy.WebTransportProxy.__init__", return_value=None)
@@ -73,6 +84,7 @@ class TestWebTransportProxy:
     @pytest.mark.asyncio
     async def test_connect_through_proxy_success(
         self,
+        proxy: WebTransportProxy,
         mock_underlying_client: Any,
         mock_proxy_session: Any,
         mock_tunnel_stream: Any,
@@ -80,7 +92,6 @@ class TestWebTransportProxy:
         mock_underlying_client.connect.return_value = mock_proxy_session
         mock_proxy_session.create_bidirectional_stream.return_value = mock_tunnel_stream
         mock_tunnel_stream.read.return_value = b"HTTP/1.1 200 OK\r\n\r\n"
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
 
         tunnel = await proxy.connect_through_proxy(self.TARGET_URL)
 
@@ -93,13 +104,13 @@ class TestWebTransportProxy:
     @pytest.mark.asyncio
     async def test_connect_reuses_proxy_session(
         self,
+        proxy: WebTransportProxy,
         mock_underlying_client: Any,
         mock_proxy_session: Any,
         mock_tunnel_stream: Any,
     ) -> None:
         mock_proxy_session.create_bidirectional_stream.return_value = mock_tunnel_stream
         mock_tunnel_stream.read.return_value = b"HTTP/1.1 200 OK\r\n\r\n"
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
         proxy._proxy_session = mock_proxy_session
 
         await proxy.connect_through_proxy(self.TARGET_URL)
@@ -108,9 +119,8 @@ class TestWebTransportProxy:
         mock_proxy_session.create_bidirectional_stream.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_connect_proxy_connection_fails(self, mock_underlying_client: Any) -> None:
+    async def test_connect_proxy_connection_fails(self, proxy: WebTransportProxy, mock_underlying_client: Any) -> None:
         mock_underlying_client.connect.side_effect = TimeoutError("Proxy timeout")
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
 
         with pytest.raises(ConnectionError, match="Failed to establish proxy session"):
             await proxy.connect_through_proxy(self.TARGET_URL)
@@ -118,6 +128,7 @@ class TestWebTransportProxy:
     @pytest.mark.asyncio
     async def test_connect_proxy_returns_bad_response(
         self,
+        proxy: WebTransportProxy,
         mock_underlying_client: Any,
         mock_proxy_session: Any,
         mock_tunnel_stream: Any,
@@ -125,7 +136,6 @@ class TestWebTransportProxy:
         mock_underlying_client.connect.return_value = mock_proxy_session
         mock_proxy_session.create_bidirectional_stream.return_value = mock_tunnel_stream
         mock_tunnel_stream.read.return_value = b"HTTP/1.1 500 Internal Server Error\r\n\r\n"
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
 
         with pytest.raises(ClientError, match="Proxy error"):
             await proxy.connect_through_proxy(self.TARGET_URL)
@@ -135,6 +145,7 @@ class TestWebTransportProxy:
     @pytest.mark.asyncio
     async def test_connect_tunnel_timeout(
         self,
+        proxy: WebTransportProxy,
         mock_underlying_client: Any,
         mock_proxy_session: Any,
         mock_tunnel_stream: Any,
@@ -142,7 +153,6 @@ class TestWebTransportProxy:
         mock_underlying_client.connect.return_value = mock_proxy_session
         mock_proxy_session.create_bidirectional_stream.return_value = mock_tunnel_stream
         mock_tunnel_stream.read.side_effect = asyncio.TimeoutError
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
 
         with pytest.raises(TimeoutError, match="Timeout while establishing tunnel"):
             await proxy.connect_through_proxy(self.TARGET_URL)
@@ -150,12 +160,10 @@ class TestWebTransportProxy:
         mock_tunnel_stream.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_connect_raises_session_error_if_proxy_fails_silently(self, mocker: MockerFixture) -> None:
-        mocker.patch(
-            "pywebtransport.client.proxy.WebTransportProxy._ensure_proxy_session",
-            new_callable=mocker.AsyncMock,
-        )
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
+    async def test_connect_raises_session_error_if_proxy_fails_silently(
+        self, proxy: WebTransportProxy, mocker: MockerFixture
+    ) -> None:
+        mocker.patch.object(proxy, "_ensure_proxy_session", new_callable=mocker.AsyncMock)
         proxy._proxy_session = None
 
         with pytest.raises(SessionError):
@@ -164,6 +172,7 @@ class TestWebTransportProxy:
     @pytest.mark.asyncio
     async def test_connect_failure_with_already_closed_stream(
         self,
+        proxy: WebTransportProxy,
         mock_underlying_client: Any,
         mock_proxy_session: Any,
         mock_tunnel_stream: Any,
@@ -172,7 +181,6 @@ class TestWebTransportProxy:
         mock_proxy_session.create_bidirectional_stream.return_value = mock_tunnel_stream
         mock_tunnel_stream.write.side_effect = ValueError("Write failed")
         mock_tunnel_stream.is_closed = True
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
 
         with pytest.raises(ValueError, match="Write failed"):
             await proxy.connect_through_proxy(self.TARGET_URL)
@@ -180,20 +188,24 @@ class TestWebTransportProxy:
         mock_tunnel_stream.close.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_ensure_proxy_session_is_locked(self, mocker: MockerFixture, mock_underlying_client: Any) -> None:
-        proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
+    async def test_ensure_proxy_session_is_locked(
+        self, proxy: WebTransportProxy, mocker: MockerFixture, mock_underlying_client: Any
+    ) -> None:
         mock_proxy_session = mocker.MagicMock(spec=WebTransportSession, is_ready=True)
-        first_call_done = asyncio.Event()
+        mock_underlying_client.connect.return_value = mock_proxy_session
+
+        async def delayed_connect_side_effect(*args: Any, **kwargs: Any) -> Any:
+            await asyncio.sleep(0.01)
+            return mock_proxy_session
+
+        mock_underlying_client.connect.side_effect = delayed_connect_side_effect
 
         async def first_call() -> None:
             await proxy._ensure_proxy_session(headers=None, timeout=10.0)
-            first_call_done.set()
 
         async def second_call() -> None:
-            await first_call_done.wait()
             await proxy._ensure_proxy_session(headers=None, timeout=10.0)
 
-        mock_underlying_client.connect.return_value = mock_proxy_session
         await asyncio.gather(first_call(), second_call())
 
-        mock_underlying_client.connect.assert_awaited_once()
+        assert mock_underlying_client.connect.call_count == 1

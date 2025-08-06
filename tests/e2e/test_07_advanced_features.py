@@ -13,10 +13,8 @@ from typing import Awaitable, Callable, List, Tuple
 from pywebtransport.client import WebTransportClient
 from pywebtransport.config import ClientConfig
 
-# Module-level constants
 DEBUG_MODE = "--debug" in sys.argv
 
-# Module-level configuration and variables
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
@@ -54,10 +52,12 @@ async def test_session_statistics() -> bool:
             logger.info("Performing operations to generate statistics...")
             for i in range(3):
                 stream = await session.create_bidirectional_stream()
-                await stream.write_all(f"Statistics test {i+1}".encode())
+                await stream.write_all(f"Statistics test {i + 1}".encode())
                 await stream.read_all()
+
+            datagrams = await session.datagrams
             for i in range(5):
-                await session.datagrams.send(f"Datagram {i+1}".encode())
+                await datagrams.send(f"Datagram {i + 1}".encode())
 
             await asyncio.sleep(1)
             final_stats = await session.get_session_stats()
@@ -148,7 +148,7 @@ async def test_client_statistics() -> bool:
             logger.info("Performing multiple connections...")
             for i in range(3):
                 session = await client.connect(server_url)
-                logger.info(f"   Connection {i+1} established: {session.session_id}")
+                logger.info(f"   Connection {i + 1} established: {session.session_id}")
                 await session.close()
                 await asyncio.sleep(0.5)
 
@@ -194,7 +194,7 @@ async def test_stream_management() -> bool:
             streams = [await session.create_bidirectional_stream() for _ in range(5)]
             logger.info(f"Created {len(streams)} streams")
 
-            if hasattr(session, "stream_manager"):
+            if session.stream_manager:
                 stream_manager = session.stream_manager
                 manager_stats = await stream_manager.get_stats()
                 logger.info("Stream manager statistics:")
@@ -208,7 +208,7 @@ async def test_stream_management() -> bool:
 
             logger.info("Testing stream communication...")
             for i, stream in enumerate(streams):
-                await stream.write_all(f"Stream {i+1} test".encode())
+                await stream.write_all(f"Stream {i + 1} test".encode())
                 await stream.read(size=1024)
 
             logger.info("Closing all streams...")
@@ -216,7 +216,7 @@ async def test_stream_management() -> bool:
                 if not stream.is_closed:
                     await stream.close()
 
-            if hasattr(session, "stream_manager"):
+            if session.stream_manager:
                 await asyncio.sleep(0.1)
                 final_stats = await session.stream_manager.get_stats()
                 logger.info(f"Final active streams: {final_stats.get('current_count', 0)}")
@@ -247,7 +247,7 @@ async def test_datagram_statistics() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             logger.info("Initial datagram statistics:")
             logger.info(f"   Datagrams sent: {datagrams.stats.get('datagrams_sent', 0)}")
 
@@ -315,12 +315,12 @@ async def test_performance_monitoring() -> bool:
                 throughput = size / avg_rtt / 1024 if avg_rtt > 0 else float("inf")
                 result = {"size": size, "avg_rtt": avg_rtt, "throughput": throughput}
                 performance_results.append(result)
-                logger.info(f"      Average RTT: {avg_rtt*1000:.1f}ms, Throughput: {throughput:.1f} KB/s")
+                logger.info(f"      Average RTT: {avg_rtt * 1000:.1f}ms, Throughput: {throughput:.1f} KB/s")
 
             logger.info("Performance Summary:")
             for result in performance_results:
                 logger.info(
-                    f"   {result['size']} bytes: {result['avg_rtt']*1000:.1f}ms RTT, {result['throughput']:.1f} KB/s"
+                    f"   {result['size']} bytes: {result['avg_rtt'] * 1000:.1f}ms RTT, {result['throughput']:.1f} KB/s"
                 )
 
             await session.close()
@@ -354,7 +354,10 @@ async def test_session_lifecycle_events() -> bool:
             stream = await session.create_bidirectional_stream()
             await stream.write_all(b"Lifecycle test")
             await stream.read(size=1024)
-            await session.datagrams.send(b"Lifecycle datagram")
+
+            datagrams = await session.datagrams
+            await datagrams.send(b"Lifecycle datagram")
+
             await session.close()
             events_received.append(("session_closed", time.time()))
 

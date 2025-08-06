@@ -2,9 +2,11 @@
 WebTransport Application Framework.
 """
 
+from __future__ import annotations
+
 import asyncio
 from types import TracebackType
-from typing import Any, Callable, List, Optional, Type, TypeVar
+from typing import Any, Callable, Self, Type, TypeVar
 
 from pywebtransport.config import ServerConfig
 from pywebtransport.connection import WebTransportConnection
@@ -26,14 +28,14 @@ F = TypeVar("F", bound=Callable[..., Any])
 class ServerApp:
     """A high-level WebTransport application with routing and middleware."""
 
-    def __init__(self, *, config: Optional[ServerConfig] = None):
+    def __init__(self, *, config: ServerConfig | None = None):
         """Initialize the server application."""
         self._server = WebTransportServer(config=config)
         self._router = RequestRouter()
         self._middleware_manager = MiddlewareManager()
-        self._stateful_middleware: List[Any] = []
-        self._startup_handlers: List[Callable[[], Any]] = []
-        self._shutdown_handlers: List[Callable[[], Any]] = []
+        self._stateful_middleware: list[Any] = []
+        self._startup_handlers: list[Callable[[], Any]] = []
+        self._shutdown_handlers: list[Callable[[], Any]] = []
         self._server.on(EventType.SESSION_REQUEST, self._handle_session_request)
 
     @property
@@ -41,7 +43,7 @@ class ServerApp:
         """Get the underlying WebTransportServer instance."""
         return self._server
 
-    async def __aenter__(self) -> "ServerApp":
+    async def __aenter__(self) -> Self:
         """Enter the async context and run startup procedures."""
         await self._server.__aenter__()
         await self.startup()
@@ -50,9 +52,9 @@ class ServerApp:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and run shutdown procedures."""
         await self.shutdown()
@@ -81,14 +83,14 @@ class ServerApp:
             if hasattr(middleware, "__aexit__"):
                 await middleware.__aexit__(None, None, None)
 
-    async def serve(self, *, host: Optional[str] = None, port: Optional[int] = None, **kwargs: Any) -> None:
+    async def serve(self, *, host: str | None = None, port: int | None = None, **kwargs: Any) -> None:
         """Start the server and serve forever."""
         final_host = host if host is not None else self.server.config.bind_host
         final_port = port if port is not None else self.server.config.bind_port
         await self._server.listen(host=final_host, port=final_port)
         await self._server.serve_forever()
 
-    def run(self, *, host: Optional[str] = None, port: Optional[int] = None, **kwargs: Any) -> None:
+    def run(self, *, host: str | None = None, port: int | None = None, **kwargs: Any) -> None:
         """Run the server application in a new asyncio event loop."""
         final_host = host if host is not None else self.server.config.bind_host
         final_port = port if port is not None else self.server.config.bind_port
@@ -173,6 +175,7 @@ class ServerApp:
                 return
 
             session = WebTransportSession(connection=connection, session_id=session_id)
+            await session.initialize()
             session._path = session_info.path
             session._headers = session_info.headers
             session._control_stream_id = stream_id

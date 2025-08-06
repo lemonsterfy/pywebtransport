@@ -6,10 +6,10 @@ Complete guide for installing PyWebTransport on different platforms and environm
 
 ### Python Version
 
-PyWebTransport requires **Python 3.8 or higher**:
+PyWebTransport requires **Python 3.11 or higher**:
 
 ```bash
-python --version  # Should show 3.8+
+python --version  # Should show 3.11+
 ```
 
 ### Supported Platforms
@@ -28,27 +28,11 @@ Install the latest stable release:
 pip install pywebtransport
 ```
 
-Upgrade to the latest version:
-
-```bash
-pip install --upgrade pywebtransport
-```
-
-### Install with Development Tools
-
-For development work:
-
-```bash
-pip install pywebtransport[dev]
-```
-
-This includes testing, linting, and formatting tools.
-
 ## Advanced Installation
 
 ### Install from Source
 
-For the latest development features:
+For the latest development features or to contribute to the project, you can install from a local clone. See our [Contributing Guide](../CONTRIBUTING.md) for the full developer setup.
 
 ```bash
 git clone https://github.com/lemonsterfy/pywebtransport.git
@@ -56,22 +40,13 @@ cd pywebtransport
 pip install -e .
 ```
 
-For development with all tools:
-
-```bash
-git clone https://github.com/lemonsterfy/pywebtransport.git
-cd pywebtransport
-pip install -e ".[dev]"
-```
-
 ### Optional Dependencies
 
-Available dependency groups:
+You can install optional dependency groups for specific tasks like running tests or building documentation against the installed package.
 
 ```bash
-pip install pywebtransport[dev]   # Development tools
-pip install pywebtransport[docs]  # Documentation building
-pip install pywebtransport[test]  # Testing utilities
+pip install pywebtransport[docs]  # For building documentation
+pip install pywebtransport[test]  # For running tests
 ```
 
 ## Virtual Environment Setup
@@ -80,11 +55,11 @@ pip install pywebtransport[test]  # Testing utilities
 
 ```bash
 # Create virtual environment
-python -m venv pywebtransport-env
+python -m venv .venv
 
 # Activate
-source pywebtransport-env/bin/activate  # Linux/macOS
-pywebtransport-env\Scripts\activate     # Windows
+source .venv/bin/activate  # Linux/macOS
+.venv\Scripts\activate     # Windows
 
 # Install
 pip install pywebtransport
@@ -93,7 +68,7 @@ pip install pywebtransport
 ### Using conda
 
 ```bash
-conda create -n pywebtransport python=3.11
+conda create -n pywebtransport python=3.12
 conda activate pywebtransport
 pip install pywebtransport
 ```
@@ -110,11 +85,12 @@ python -c "import pywebtransport; print(pywebtransport.__version__)"
 
 **2. Test core component initialization:**
 
-Save the following code as `verify.py` and run it. This script does not make any network requests but confirms that the client and server objects can be created.
+Save the following code as `verify.py` and run it. This script does not make any network requests but confirms that the client and server objects can be created following the correct asynchronous lifecycle.
 
 ```python
 # verify.py
 import asyncio
+import os
 
 from pywebtransport import ClientConfig, ServerApp, ServerConfig, WebTransportClient
 
@@ -122,14 +98,11 @@ from pywebtransport import ClientConfig, ServerApp, ServerConfig, WebTransportCl
 async def verify() -> None:
     print("Initializing core components...")
     try:
-        # Initialize a client (without connecting)
-        client = WebTransportClient(config=ClientConfig.create())
+        async with WebTransportClient.create(config=ClientConfig.create()):
+            pass
 
-        # Initialize a server app (without starting)
-        # A minimal config requires dummy cert files for initialization.
         ServerApp(config=ServerConfig.create(certfile="dummy.crt", keyfile="dummy.key"))
 
-        await client.close()
         print("SUCCESS: Core components initialized successfully!")
 
     except Exception as e:
@@ -137,16 +110,23 @@ async def verify() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(verify())
+    with open("dummy.crt", "w") as f:
+        f.write("")
+    with open("dummy.key", "w") as f:
+        f.write("")
+
+    try:
+        asyncio.run(verify())
+    finally:
+        os.remove("dummy.crt")
+        os.remove("dummy.key")
 
 ```
 
 Run the script from your terminal:
+
 ```bash
-# Create dummy files for the script to run without errors
-touch dummy.crt dummy.key
 python verify.py
-rm dummy.crt dummy.key
 ```
 
 If the script prints "SUCCESS", your installation is working correctly.
@@ -155,15 +135,14 @@ If the script prints "SUCCESS", your installation is working correctly.
 
 ### Core Dependencies
 
-PyWebTransport automatically installs its core dependencies with precise version constraints to ensure stability:
+PyWebTransport automatically installs its core dependencies:
 
 - **aioquic** (`>=1.2.0,<2.0.0`) - The underlying QUIC protocol implementation.
 - **cryptography** (`>=45.0.4,<46.0.0`) - Handles all cryptographic operations.
-- **typing-extensions** (`>=4.14.0,<5.0.0`) - Required for type hints on Python < 3.10.
 
 ### System Requirements
 
-- **TLS 1.3 support** (included in Python 3.8+)
+- **TLS 1.3 support** (included in Python 3.11+)
 - **asyncio support** (standard library)
 - **C compiler** (for building cryptography on some platforms)
 
@@ -202,16 +181,11 @@ Most installations work out of the box. If you encounter build errors:
 
 ### Permission Errors
 
-Use virtual environment or user installation:
+Use a virtual environment (recommended) or user installation:
 
 ```bash
 # User installation
 pip install --user pywebtransport
-
-# Virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # Linux/macOS
-pip install pywebtransport
 ```
 
 ### Build Errors
@@ -241,13 +215,13 @@ Check Python version and virtual environment:
 
 ```bash
 python --version
-which python
+which python  # On Linux/macOS
 pip list | grep pywebtransport
 ```
 
 ### Network Issues
 
-Use alternative index if default fails:
+Use an alternative index if the default fails:
 
 ```bash
 pip install -i https://pypi.org/simple/ pywebtransport
@@ -258,7 +232,7 @@ pip install -i https://pypi.org/simple/ pywebtransport
 Basic Dockerfile:
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -297,7 +271,7 @@ Remove PyWebTransport:
 pip uninstall pywebtransport
 ```
 
-Clean up virtual environment:
+Clean up a virtual environment:
 
 ```bash
 rm -rf pywebtransport-env  # Linux/macOS
@@ -306,7 +280,7 @@ rmdir /s pywebtransport-env  # Windows
 
 ## See Also
 
-- **[Client API](client.md)** - WebTransport client implementation
-- **[Server API](server.md)** - WebTransport server implementation
-- **[Configuration API](config.md)** - Configuration options and builders
-- **[Types API](types.md)** - Type definitions and constants
+- **[Home](index.md)**: Project homepage and overview  
+- **[Quick Start](quickstart.md)**: A 5-minute tutorial  
+- **[API Reference](api-reference/index.md)**: Complete API documentation  
+- **[Contributing Guide](../CONTRIBUTING.md)**: Learn how to contribute

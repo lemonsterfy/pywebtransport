@@ -11,10 +11,8 @@ import sys
 from pywebtransport.client import WebTransportClient
 from pywebtransport.config import ClientConfig
 
-# Module-level constants
 DEBUG_MODE = "--debug" in sys.argv
 
-# Module-level configuration and variables
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
@@ -130,7 +128,7 @@ async def test_multiple_messages() -> bool:
             success_count = 0
 
             for i, message in enumerate(messages):
-                logger.info(f"Sending message {i+1}: {message!r}")
+                logger.info(f"Sending message {i + 1}: {message!r}")
                 stream = await session.create_bidirectional_stream()
                 try:
                     await stream.write_all(message)
@@ -138,10 +136,10 @@ async def test_multiple_messages() -> bool:
 
                     expected = b"ECHO: " + message
                     if response_data == expected:
-                        logger.info(f"Message {i+1} echo successful")
+                        logger.info(f"Message {i + 1} echo successful")
                         success_count += 1
                     else:
-                        logger.error(f"Message {i+1} echo failed")
+                        logger.error(f"Message {i + 1} echo failed")
                         logger.error(f"   Expected: {expected!r}")
                         logger.error(f"   Received: {response_data!r}")
                 finally:

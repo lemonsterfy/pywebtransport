@@ -2,6 +2,8 @@
 WebTransport stream utility functions.
 """
 
+from __future__ import annotations
+
 from pywebtransport.exceptions import StreamError
 from pywebtransport.stream.stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
 from pywebtransport.utils import get_logger
@@ -16,8 +18,8 @@ logger = get_logger("stream.utils")
 
 async def copy_stream_data(
     *,
-    source: "WebTransportReceiveStream",
-    destination: "WebTransportSendStream",
+    source: WebTransportReceiveStream,
+    destination: WebTransportSendStream,
     chunk_size: int = 8192,
 ) -> int:
     """Copy all data from a source stream to a destination stream."""
@@ -34,7 +36,7 @@ async def copy_stream_data(
     return total_bytes
 
 
-async def echo_stream(*, stream: "WebTransportStream") -> None:
+async def echo_stream(*, stream: WebTransportStream) -> None:
     """Echo all data received on a bidirectional stream back to the sender."""
     try:
         async for chunk in stream.read_iter():

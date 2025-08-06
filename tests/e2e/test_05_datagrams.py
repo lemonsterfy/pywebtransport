@@ -13,10 +13,8 @@ from typing import Awaitable, Callable, List, Tuple
 from pywebtransport.client import WebTransportClient
 from pywebtransport.config import ClientConfig
 
-# Module-level constants
 DEBUG_MODE = "--debug" in sys.argv
 
-# Module-level configuration and variables
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
@@ -46,7 +44,7 @@ async def test_basic_datagram() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             logger.info("Datagram stream available")
             logger.info(f"   Max size: {datagrams.max_datagram_size} bytes")
 
@@ -91,13 +89,13 @@ async def test_multiple_datagrams() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             start_time = time.time()
             for i in range(num_datagrams):
-                message = f"Datagram message {i+1}".encode()
+                message = f"Datagram message {i + 1}".encode()
                 await datagrams.send(message)
                 if (i + 1) % 5 == 0:
-                    logger.info(f"Sent {i+1}/{num_datagrams} datagrams")
+                    logger.info(f"Sent {i + 1}/{num_datagrams} datagrams")
 
             duration = time.time() - start_time
             rate = num_datagrams / duration if duration > 0 else float("inf")
@@ -138,7 +136,7 @@ async def test_datagram_sizes() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             max_size = datagrams.max_datagram_size
             logger.info(f"Max datagram size: {max_size} bytes")
 
@@ -193,7 +191,7 @@ async def test_datagram_priority() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             priorities = [0, 1, 2]
             for priority in priorities:
                 message = f"Priority {priority} message".encode()
@@ -236,7 +234,7 @@ async def test_datagram_ttl() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             ttl_values = [1.0, 5.0, 10.0]
             for ttl in ttl_values:
                 message = f"TTL {ttl}s message".encode()
@@ -278,7 +276,7 @@ async def test_json_datagrams() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             json_messages = [
                 {"type": "greeting", "message": "Hello from JSON datagram"},
                 {"type": "data", "values": [1, 2, 3, 4, 5]},
@@ -286,9 +284,9 @@ async def test_json_datagrams() -> bool:
                 {"type": "complex", "nested": {"level": 1, "items": ["a", "b", "c"]}},
             ]
             for i, json_data in enumerate(json_messages):
-                logger.info(f"Sending JSON datagram {i+1}: {json_data}")
+                logger.info(f"Sending JSON datagram {i + 1}: {json_data}")
                 await datagrams.send_json(json_data)
-                logger.info(f"JSON datagram {i+1} sent")
+                logger.info(f"JSON datagram {i + 1} sent")
 
             stats = datagrams.stats
             logger.info(f"Total JSON datagrams sent: {stats['datagrams_sent']}")
@@ -326,11 +324,11 @@ async def test_datagram_burst() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             logger.info(f"Starting burst of {burst_size} datagrams...")
             start_time = time.time()
 
-            tasks = [asyncio.create_task(datagrams.send(f"Burst datagram {i+1}".encode())) for i in range(burst_size)]
+            tasks = [asyncio.create_task(datagrams.send(f"Burst datagram {i + 1}".encode())) for i in range(burst_size)]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             duration = time.time() - start_time
 
@@ -375,7 +373,7 @@ async def test_datagram_queue_behavior() -> bool:
             session = await client.connect(server_url)
             logger.info(f"Connected, session: {session.session_id}")
 
-            datagrams = session.datagrams
+            datagrams = await session.datagrams
             initial_send_buffer = datagrams.get_send_buffer_size()
             initial_receive_buffer = datagrams.get_receive_buffer_size()
             logger.info("Initial queue sizes:")
@@ -383,7 +381,7 @@ async def test_datagram_queue_behavior() -> bool:
             logger.info(f"   Receive buffer: {initial_receive_buffer}")
 
             for i in range(5):
-                await datagrams.send(f"Queue test message {i+1}".encode())
+                await datagrams.send(f"Queue test message {i + 1}".encode())
             logger.info(f"Send buffer after sending: {datagrams.get_send_buffer_size()}")
 
             await asyncio.sleep(1)

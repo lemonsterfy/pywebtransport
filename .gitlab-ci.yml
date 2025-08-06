@@ -1,6 +1,7 @@
 # PyWebTransport CI/CD Pipeline
 
 stages:
+  - lint
   - test
   - report
   - build
@@ -15,20 +16,36 @@ cache:
   paths:
     - .cache/pip
 
-# Test stage - runs on dev and main branches
-test:
-  stage: test
+lint:
+  stage: lint
   image: python:3.11-slim
   before_script:
     - python -m pip install --upgrade pip
-    - pip install -e ".[dev]"
+    - pip install -r dev-requirements.txt
   script:
     - black --check src tests
     - flake8 src tests
-    - mypy src
+    - mypy src tests
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+test:
+  stage: test
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.11", "3.12", "3.13"]
+  image: python:$PYTHON_VERSION-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r dev-requirements.txt
+    - pip install -e .
+  script:
     - pytest --cov=pywebtransport --cov-report=term --cov-report=xml
   coverage: '/TOTAL.*\s+(\d+%)$/'
   artifacts:
+    paths:
+      - coverage.xml
     reports:
       coverage_report:
         coverage_format: cobertura
@@ -48,11 +65,10 @@ codecov:
   script:
     - wget https://uploader.codecov.io/latest/linux/codecov
     - chmod +x codecov
-    - ./codecov -t $CODECOV_TOKEN -f coverage.xml -s lemonsterfy/pywebtransport
+    - ./codecov -t $CODECOV_TOKEN -f coverage.xml
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
-# Build stage - only runs on main branch
 build:
   stage: build
   image: python:3.11-slim
@@ -70,10 +86,11 @@ build:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
-# Deploy stage - only runs on main branch
 deploy:
   stage: deploy
   image: python:3.11-slim
+  variables:
+    GIT_DEPTH: 0
   dependencies:
     - build
   before_script:
@@ -84,27 +101,18 @@ deploy:
     - pip install hatch
     - pip install .
   script:
-    # Check if version already released
-    - export VERSION=$(python -c "from src.pywebtransport.version import __version__; print(__version__)")
+    - export VERSION=$(hatch version)
     - |
       if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION"; then
         echo "Version v$VERSION already released - skipping"
         exit 0
       fi
-
-    # Publish to PyPI
     - hatch publish
-
-    # Use the deploy token and predefined variables for push authentication
     - git remote set-url origin "https://gitlab-ci-token:$GITLAB_DEPLOY_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git"
-
-    # Create git tag
     - git config user.name "GitLab CI"
     - git config user.email "ci@gitlab.local"
     - git tag "v$VERSION"
     - git push origin "v$VERSION"
-
-    # Push to GitHub
     - git remote add github https://$GITHUB_TOKEN@github.com/lemonsterfy/pywebtransport.git
     - git push github $CI_COMMIT_BRANCH --tags || echo "GitHub sync failed (release still successful)"
   rules:

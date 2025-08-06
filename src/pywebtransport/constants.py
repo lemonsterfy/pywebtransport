@@ -2,8 +2,10 @@
 WebTransport Constants and Defaults.
 """
 
+from __future__ import annotations
+
 from enum import IntEnum
-from typing import Dict, List, Tuple, TypedDict
+from typing import TypedDict
 
 from pywebtransport.version import __version__
 
@@ -30,13 +32,13 @@ DEFAULT_LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 DEFAULT_LOG_LEVEL: str = "INFO"
 DEFAULT_WEBTRANSPORT_PATH: str = "/webtransport"
 ORIGIN_HEADER: str = "origin"
-RECOMMENDED_BUFFER_SIZES: Dict[str, int] = {"small": 8192, "medium": 65536, "large": 262144}
-SECURE_SCHEMES: Tuple[str, str] = ("https", "wss")
+RECOMMENDED_BUFFER_SIZES: dict[str, int] = {"small": 8192, "medium": 65536, "large": 262144}
+SECURE_SCHEMES: tuple[str, str] = ("https", "wss")
 SEC_WEBTRANSPORT_HTTP3_DRAFT13: str = "webtransport"
 USER_AGENT_HEADER: str = "user-agent"
 WEBTRANSPORT_HEADER: str = "webtransport"
 WEBTRANSPORT_MIME_TYPE: str = "application/webtransport"
-WEBTRANSPORT_SCHEMES: Tuple[str, str] = ("https", "wss")
+WEBTRANSPORT_SCHEMES: tuple[str, str] = ("https", "wss")
 
 
 class WebTransportConstants:
@@ -47,7 +49,7 @@ class WebTransportConstants:
     DEFAULT_DEV_PORT: int = 4433
 
     DRAFT_VERSION: int = 13
-    SUPPORTED_VERSIONS: Tuple[str, ...] = ("draft-ietf-webtrans-http3-13", "h3")
+    SUPPORTED_VERSIONS: tuple[str, ...] = ("draft-ietf-webtrans-http3-13", "h3")
     DEFAULT_VERSION: str = "h3"
 
     BIDIRECTIONAL_STREAM: int = 0x0
@@ -94,7 +96,7 @@ class WebTransportConstants:
     ALPN_H3: str = "h3"
     ALPN_H3_29: str = "h3-29"
     ALPN_H3_32: str = "h3-32"
-    DEFAULT_ALPN_PROTOCOLS: Tuple[str, str] = (ALPN_H3, ALPN_H3_29)
+    DEFAULT_ALPN_PROTOCOLS: tuple[str, str] = (ALPN_H3, ALPN_H3_29)
 
 
 class ErrorCodes(IntEnum):
@@ -153,7 +155,7 @@ class ClientConfigDefaults(TypedDict):
     close_timeout: float
     max_streams: int
     stream_buffer_size: int
-    alpn_protocols: List[str]
+    alpn_protocols: list[str]
     http_version: str
     verify_mode: None
     check_hostname: bool
@@ -170,7 +172,7 @@ class ServerConfigDefaults(TypedDict):
     connection_timeout: float
     read_timeout: float
     write_timeout: float
-    alpn_protocols: List[str]
+    alpn_protocols: list[str]
     http_version: str
     backlog: int
     reuse_port: bool
