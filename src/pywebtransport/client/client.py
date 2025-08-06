@@ -2,15 +2,17 @@
 WebTransport Client Implementation.
 """
 
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Self, Type
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection import ConnectionManager, WebTransportConnection
 from pywebtransport.events import EventEmitter
-from pywebtransport.exceptions import ClientError, TimeoutError
+from pywebtransport.exceptions import ClientError, ConnectionError, TimeoutError
 from pywebtransport.session import WebTransportSession
 from pywebtransport.types import URL, Headers
 from pywebtransport.utils import Timer, format_duration, get_logger, get_timestamp, parse_webtransport_url, validate_url
@@ -37,6 +39,7 @@ class ClientStats:
         """Get the average connection time."""
         if self.connections_successful == 0:
             return 0.0
+
         return self.total_connect_time / self.connections_successful
 
     @property
@@ -44,9 +47,10 @@ class ClientStats:
         """Get the connection success rate."""
         if self.connections_attempted == 0:
             return 1.0
+
         return self.connections_successful / self.connections_attempted
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert statistics to a dictionary."""
         return {
             "created_at": self.created_at,
@@ -68,7 +72,7 @@ class ClientStats:
 class WebTransportClient(EventEmitter):
     """A client for establishing WebTransport connections and sessions."""
 
-    def __init__(self, *, config: Optional[ClientConfig] = None):
+    def __init__(self, *, config: ClientConfig | None = None):
         """Initialize the WebTransport client."""
         super().__init__()
         self._config = config or ClientConfig.create()
@@ -79,7 +83,7 @@ class WebTransportClient(EventEmitter):
         logger.info("WebTransport client initialized")
 
     @classmethod
-    def create(cls, *, config: Optional[ClientConfig] = None) -> "WebTransportClient":
+    def create(cls, *, config: ClientConfig | None = None) -> Self:
         """Factory method to create a new WebTransport client instance."""
         return cls(config=config)
 
@@ -94,20 +98,20 @@ class WebTransportClient(EventEmitter):
         return self._closed
 
     @property
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Get a snapshot of the client's performance statistics."""
         return self._stats.to_dict()
 
-    async def __aenter__(self) -> "WebTransportClient":
+    async def __aenter__(self) -> Self:
         """Enter the async context for the client."""
         await self._connection_manager.__aenter__()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and close the client."""
         await self.close()
@@ -126,8 +130,8 @@ class WebTransportClient(EventEmitter):
         self,
         url: URL,
         *,
-        timeout: Optional[float] = None,
-        headers: Optional[Headers] = None,
+        timeout: float | None = None,
+        headers: Headers | None = None,
     ) -> WebTransportSession:
         """Connect to a WebTransport server and return a session."""
         if self._closed:
@@ -139,7 +143,8 @@ class WebTransportClient(EventEmitter):
         logger.info(f"Connecting to {host}:{port}{path}")
         self._stats.connections_attempted += 1
 
-        connection: Optional[WebTransportConnection] = None
+        connection: WebTransportConnection | None = None
+        session: WebTransportSession | None = None
         try:
             with Timer() as timer:
                 connection_headers = self._default_headers.copy()
@@ -147,10 +152,10 @@ class WebTransportClient(EventEmitter):
                     connection_headers.update(headers)
 
                 conn_config = self._config.update(headers=connection_headers)
-                connection = WebTransportConnection(conn_config)
-
+                connection = await WebTransportConnection.create_client(
+                    config=conn_config, host=host, port=port, path=path
+                )
                 await self._connection_manager.add_connection(connection)
-                await connection.connect(host=host, port=port, path=path)
 
                 if not connection.protocol_handler:
                     raise ConnectionError("Protocol handler not initialized after connection")
@@ -161,8 +166,7 @@ class WebTransportClient(EventEmitter):
                     raise TimeoutError(f"Session ready timeout after {connect_timeout}s") from e
 
                 session = WebTransportSession(connection=connection, session_id=session_id)
-                if not session.is_ready:
-                    await session.ready(timeout=connect_timeout)
+                await session.initialize()
 
                 connect_time = timer.elapsed
                 self._stats.connections_successful += 1
@@ -174,6 +178,8 @@ class WebTransportClient(EventEmitter):
                 return session
         except Exception as e:
             self._stats.connections_failed += 1
+            if session and not session.is_closed:
+                await session.close()
             if connection and not connection.is_closed:
                 await connection.close()
 
@@ -185,7 +191,7 @@ class WebTransportClient(EventEmitter):
         """Set default headers for all subsequent connections."""
         self._default_headers = headers.copy()
 
-    def debug_state(self) -> Dict[str, Any]:
+    def debug_state(self) -> dict[str, Any]:
         """Get a detailed snapshot of the client's state for debugging."""
         return {
             "client": {"closed": self.is_closed, "default_headers": self._default_headers},
@@ -193,9 +199,9 @@ class WebTransportClient(EventEmitter):
             "statistics": self.stats,
         }
 
-    def diagnose_issues(self) -> List[str]:
+    def diagnose_issues(self) -> list[str]:
         """Diagnose potential issues based on client connection statistics."""
-        issues: List[str] = []
+        issues: list[str] = []
         stats = self.stats
 
         if self.is_closed:

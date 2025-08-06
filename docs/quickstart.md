@@ -4,7 +4,7 @@ Get up and running with PyWebTransport in 5 minutes. This guide covers the essen
 
 ## Prerequisites
 
-- Python 3.8 or higher.
+- Python 3.11 or higher.
 - `pip` for installing packages.
 
 ## 1. Installation
@@ -29,10 +29,8 @@ from pywebtransport import ServerApp, ServerConfig, WebTransportSession, WebTran
 from pywebtransport.exceptions import ConnectionError, SessionError
 from pywebtransport.utils import generate_self_signed_cert
 
-# Generate a self-signed certificate for local development
 generate_self_signed_cert("localhost")
 
-# Configure the server
 app = ServerApp(
     config=ServerConfig.create(
         certfile="localhost.crt",
@@ -42,29 +40,27 @@ app = ServerApp(
 
 
 async def handle_datagrams(session: WebTransportSession) -> None:
-    """Listen for incoming datagrams and echo them back."""
     try:
+        datagrams = await session.datagrams
         while True:
-            data = await session.datagrams.receive()
-            await session.datagrams.send(b"ECHO: " + data)
+            data = await datagrams.receive()
+            await datagrams.send(b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
-        pass  # Connection closed
+        pass
 
 
 async def handle_streams(session: WebTransportSession) -> None:
-    """Listen for incoming streams and echo data back."""
     try:
         async for stream in session.incoming_streams():
             if isinstance(stream, WebTransportStream):
                 data = await stream.read_all()
                 await stream.write_all(b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
-        pass  # Connection closed
+        pass
 
 
 @app.route("/")
 async def echo_handler(session: WebTransportSession) -> None:
-    """Run datagram and stream handlers concurrently for a session."""
     datagram_task = asyncio.create_task(handle_datagrams(session))
     stream_task = asyncio.create_task(handle_streams(session))
     try:
@@ -94,22 +90,24 @@ from pywebtransport import ClientConfig, WebTransportClient
 
 
 async def main() -> None:
-    # Create a client config that trusts our self-signed certificate
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
 
     async with WebTransportClient.create(config=config) as client:
-        # Connect to the server
-        async with await client.connect("https://127.0.0.1:4433/") as session:
-            print("Connection established. Testing datagrams...")
-            await session.datagrams.send(b"Hello, Datagram!")
-            response = await session.datagrams.receive()
-            print(f"Datagram echo: {response!r}\n")
+        session = await client.connect("https://127.0.0.1:4433/")
 
-            print("Testing streams...")
-            stream = await session.create_bidirectional_stream()
-            await stream.write_all(b"Hello, Stream!")
-            response = await stream.read_all()
-            print(f"Stream echo: {response!r}")
+        print("Connection established. Testing datagrams...")
+        datagrams = await session.datagrams
+        await datagrams.send(b"Hello, Datagram!")
+        response = await datagrams.receive()
+        print(f"Datagram echo: {response!r}\n")
+
+        print("Testing streams...")
+        stream = await session.create_bidirectional_stream()
+        await stream.write_all(b"Hello, Stream!")
+        response = await stream.read_all()
+        print(f"Stream echo: {response!r}")
+
+        await session.close()
 
 
 if __name__ == "__main__":
@@ -142,14 +140,16 @@ You should see output confirming the echoed messages from the server.
 
 ### Sessions
 
-A `WebTransportSession` is created by a `WebTransportClient` and represents a single connection.
+A `WebTransportSession` is created by a `WebTransportClient` and represents a single connection. The `WebTransportClient` must be used as an async context manager.
 
 ```python
 # Client-side session
+config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
 async with WebTransportClient.create(config=config) as client:
-    async with await client.connect(url) as session:
-        # Use the session object
-        print(f"Session to {session.path} is ready.")
+    session = await client.connect(url)
+    # Use the session object
+    print(f"Session to {session.path} is ready.")
+    await session.close()
 ```
 
 ### Datagrams
@@ -157,11 +157,14 @@ async with WebTransportClient.create(config=config) as client:
 Send and receive unreliable, out-of-order messages.
 
 ```python
+# Get the datagrams interface (must be awaited on first access)
+datagrams = await session.datagrams
+
 # Send a datagram
-await session.datagrams.send(b"unreliable message")
+await datagrams.send(b"unreliable message")
 
 # Receive a datagram
-data = await session.datagrams.receive()
+data = await datagrams.receive()
 ```
 
 ### Streams
@@ -183,7 +186,7 @@ response = await stream.read_all()
 
 Now that you have a basic connection working, explore more advanced topics:
 
-- **[Installation](installation.md)** - Setup and installation guide
-- **[Client Guide](user-guide/client.md)** - Learn about connection pooling and advanced client patterns.
-- **[Server Guide](user-guide/server.md)** - Discover routing, middleware, and server management.
-- **[API Reference](api-reference/)** - Dive into the complete API documentation.
+- **[Installation Guide](installation.md)** - In-depth setup and installation guide.
+- **[Client API](api-reference/client.md)** - Detailed client API reference and usage patterns.
+- **[Server API](api-reference/server.md)** - Detailed server API reference and usage patterns.
+- **[API Reference](api-reference/index.md)** - Complete API documentation

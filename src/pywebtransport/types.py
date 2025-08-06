@@ -2,6 +2,8 @@
 Core Type Definitions.
 """
 
+from __future__ import annotations
+
 import ssl
 from enum import Enum
 from typing import (
@@ -12,17 +14,11 @@ from typing import (
     AsyncIterator,
     Awaitable,
     Callable,
-    Dict,
-    List,
-    Optional,
     Protocol,
-    Tuple,
+    TypeAlias,
     TypeVar,
-    Union,
     runtime_checkable,
 )
-
-from typing_extensions import TypeAlias
 
 if TYPE_CHECKING:
     from pywebtransport.connection import WebTransportConnection
@@ -153,48 +149,48 @@ class StreamState(Enum):
     RESET_RECEIVED = "reset_received"
 
 
-Address: TypeAlias = Tuple[str, int]
-Buffer: TypeAlias = Union[bytes, bytearray, memoryview]
+Address: TypeAlias = tuple[str, int]
+Buffer: TypeAlias = bytes | bytearray | memoryview
 BufferSize: TypeAlias = int
-CertificateData: TypeAlias = Union[str, bytes]
+CertificateData: TypeAlias = str | bytes
 ConnectionId: TypeAlias = str
-ConnectionStats: TypeAlias = Dict[str, Union[int, float, str, List["SessionStats"]]]
-Data: TypeAlias = Union[bytes, str]
+ConnectionStats: TypeAlias = dict[str, int | float | str | list["SessionStats"]]
+Data: TypeAlias = bytes | str
 ErrorCode: TypeAlias = int
 EventData: TypeAlias = Any
 FlowControlWindow: TypeAlias = int
-Headers: TypeAlias = Dict[str, str]
+Headers: TypeAlias = dict[str, str]
 Priority: TypeAlias = int
-PrivateKeyData: TypeAlias = Union[str, bytes]
+PrivateKeyData: TypeAlias = str | bytes
 ReasonPhrase: TypeAlias = str
 RoutePattern: TypeAlias = str
 SSLContext: TypeAlias = ssl.SSLContext
 SessionId: TypeAlias = str
-SessionStats: TypeAlias = Dict[str, Union[int, float, str, List["StreamStats"]]]
+SessionStats: TypeAlias = dict[str, int | float | str | list["StreamStats"]]
 StreamId: TypeAlias = int
-StreamStats: TypeAlias = Dict[str, Union[int, float, str]]
+StreamStats: TypeAlias = dict[str, int | float | str]
 Timestamp: TypeAlias = float
-Timeout: TypeAlias = Optional[float]
-TimeoutDict: TypeAlias = Dict[str, float]
+Timeout: TypeAlias = float | None
+TimeoutDict: TypeAlias = dict[str, float]
 URL: TypeAlias = str
-URLParts: TypeAlias = Tuple[str, int, str]
+URLParts: TypeAlias = tuple[str, int, str]
 Weight: TypeAlias = int
 
 if TYPE_CHECKING:
-    ConnectionLostHandler: TypeAlias = Callable[["WebTransportConnection", Optional[Exception]], Awaitable[None]]
-    EventHandler: TypeAlias = Callable[["Event"], Awaitable[None]]
-    RouteHandler: TypeAlias = Callable[["WebTransportSession"], Awaitable[None]]
-    SessionHandler: TypeAlias = Callable[["WebTransportSession"], Awaitable[None]]
-    StreamHandler: TypeAlias = Callable[[Union["WebTransportStream", "WebTransportReceiveStream"]], Awaitable[None]]
+    ConnectionLostHandler: TypeAlias = Callable[[WebTransportConnection, Exception | None], Awaitable[None]]
+    EventHandler: TypeAlias = Callable[[Event], Awaitable[None]]
+    RouteHandler: TypeAlias = Callable[[WebTransportSession], Awaitable[None]]
+    SessionHandler: TypeAlias = Callable[[WebTransportSession], Awaitable[None]]
+    StreamHandler: TypeAlias = Callable[[WebTransportStream | WebTransportReceiveStream], Awaitable[None]]
 else:
-    ConnectionLostHandler: TypeAlias = Callable[[Any, Optional[Exception]], Awaitable[None]]
+    ConnectionLostHandler: TypeAlias = Callable[[Any, Exception | None], Awaitable[None]]
     EventHandler: TypeAlias = Callable[[Any], Awaitable[None]]
     RouteHandler: TypeAlias = Callable[[Any], Awaitable[None]]
     SessionHandler: TypeAlias = Callable[[Any], Awaitable[None]]
     StreamHandler: TypeAlias = Callable[[Any], Awaitable[None]]
 DatagramHandler: TypeAlias = Callable[[bytes], Awaitable[None]]
 ErrorHandler: TypeAlias = Callable[[Exception], Awaitable[None]]
-Routes: TypeAlias = Dict[RoutePattern, RouteHandler]
+Routes: TypeAlias = dict[RoutePattern, RouteHandler]
 
 
 @runtime_checkable
@@ -202,17 +198,17 @@ class ClientConfigProtocol(Protocol):
     """A protocol defining the structure of a client configuration object."""
 
     connect_timeout: float
-    read_timeout: Optional[float]
-    write_timeout: Optional[float]
+    read_timeout: float | None
+    write_timeout: float | None
     close_timeout: float
     max_streams: int
     stream_buffer_size: int
-    verify_mode: Optional[ssl.VerifyMode]
-    ca_certs: Optional[str]
-    certfile: Optional[str]
-    keyfile: Optional[str]
+    verify_mode: ssl.VerifyMode | None
+    ca_certs: str | None
+    certfile: str | None
+    keyfile: str | None
     check_hostname: bool
-    alpn_protocols: List[str]
+    alpn_protocols: list[str]
     http_version: str
     user_agent: str
     headers: Headers
@@ -222,10 +218,10 @@ class ClientConfigProtocol(Protocol):
 class ConnectionInfoProtocol(Protocol):
     """A protocol for retrieving connection information."""
 
-    local_address: Optional[Address]
-    remote_address: Optional[Address]
+    local_address: Address | None
+    remote_address: Address | None
     state: ConnectionState
-    established_at: Optional[float]
+    established_at: float | None
     bytes_sent: int
     bytes_received: int
     streams_created: int
@@ -241,11 +237,11 @@ class EventEmitterProtocol(Protocol):
         """Register an event handler."""
         ...
 
-    def off(self, event_type: EventType, *, handler: Optional[EventHandler] = None) -> None:
+    def off(self, event_type: EventType, *, handler: EventHandler | None = None) -> None:
         """Unregister an event handler."""
         ...
 
-    async def emit(self, event_type: EventType, *, data: EventData = None) -> None:
+    async def emit(self, event_type: EventType, *, data: EventData | None = None) -> None:
         """Emit an event."""
         ...
 
@@ -254,7 +250,7 @@ class EventEmitterProtocol(Protocol):
 class MiddlewareProtocol(Protocol):
     """A protocol for a middleware object."""
 
-    async def process_session(self, session: "WebTransportSession") -> "WebTransportSession":
+    async def process_session(self, session: WebTransportSession) -> WebTransportSession:
         """Process a session through the middleware."""
         ...
 
@@ -292,7 +288,7 @@ class WritableStreamProtocol(Protocol):
         """Write data to the stream."""
         ...
 
-    async def writelines(self, lines: List[Data]) -> None:
+    async def writelines(self, lines: list[Data]) -> None:
         """Write multiple lines to the stream."""
         ...
 
@@ -300,7 +296,7 @@ class WritableStreamProtocol(Protocol):
         """Flush the stream's write buffer."""
         ...
 
-    async def close(self, *, code: Optional[int] = None, reason: Optional[str] = None) -> None:
+    async def close(self, *, code: int | None = None, reason: str | None = None) -> None:
         """Close the stream."""
         ...
 
@@ -324,14 +320,14 @@ class ServerConfigProtocol(Protocol):
     bind_port: int
     certfile: str
     keyfile: str
-    ca_certs: Optional[str]
+    ca_certs: str | None
     verify_mode: ssl.VerifyMode
     max_connections: int
     max_streams_per_connection: int
     connection_timeout: float
-    read_timeout: Optional[float]
-    write_timeout: Optional[float]
-    alpn_protocols: List[str]
+    read_timeout: float | None
+    write_timeout: float | None
+    alpn_protocols: list[str]
     http_version: str
     backlog: int
     reuse_port: bool
@@ -345,8 +341,8 @@ class SessionInfoProtocol(Protocol):
     session_id: SessionId
     state: SessionState
     created_at: float
-    ready_at: Optional[float]
-    closed_at: Optional[float]
+    ready_at: float | None
+    closed_at: float | None
     streams_count: int
     bytes_sent: int
     bytes_received: int
@@ -360,7 +356,7 @@ class StreamInfoProtocol(Protocol):
     direction: StreamDirection
     state: StreamState
     created_at: float
-    closed_at: Optional[float]
+    closed_at: float | None
     bytes_sent: int
     bytes_received: int
 
@@ -373,7 +369,7 @@ class WebTransportProtocol(Protocol):
         """Called when a connection is established."""
         ...
 
-    def connection_lost(self, exc: Optional[Exception]) -> None:
+    def connection_lost(self, exc: Exception | None) -> None:
         """Called when a connection is lost."""
         ...
 

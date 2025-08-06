@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, List
+from typing import Any, AsyncGenerator
 
 import pytest
 from _pytest.logging import LogCaptureFixture
@@ -157,7 +157,7 @@ class TestMiddlewareFactories:
         ],
     )
     async def test_create_cors_middleware(
-        self, mock_session: Any, origin: Any, allowed_origins: List[str], expected_result: bool
+        self, mock_session: Any, origin: Any, allowed_origins: list[str], expected_result: bool
     ) -> None:
         mock_session.headers = {"origin": origin} if origin else {}
         cors_middleware = create_cors_middleware(allowed_origins=allowed_origins)
@@ -174,12 +174,17 @@ class TestRateLimiter:
         session.connection.remote_address = ("1.2.3.4", 12345)
         return session
 
+    @pytest.fixture
+    async def rate_limiter(self) -> AsyncGenerator[RateLimiter, None]:
+        limiter = RateLimiter(max_requests=2, window_seconds=10)
+        async with limiter as activated_limiter:
+            yield activated_limiter
+
     @pytest.mark.asyncio
     async def test_rate_limiting_logic(
-        self, mock_session: Any, mocker: MockerFixture, caplog: LogCaptureFixture
+        self, mock_session: Any, mocker: MockerFixture, caplog: LogCaptureFixture, rate_limiter: RateLimiter
     ) -> None:
         mock_timestamp = mocker.patch("pywebtransport.server.middleware.get_timestamp")
-        rate_limiter = RateLimiter(max_requests=2, window_seconds=10)
 
         mock_timestamp.return_value = 100.0
         assert await rate_limiter(mock_session) is True
@@ -195,10 +200,9 @@ class TestRateLimiter:
         assert await rate_limiter(mock_session) is True
 
     @pytest.mark.asyncio
-    async def test_call_no_remote_address(self, mocker: MockerFixture) -> None:
+    async def test_call_no_remote_address(self, mocker: MockerFixture, rate_limiter: RateLimiter) -> None:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.connection.remote_address = None
-        rate_limiter = RateLimiter()
 
         assert await rate_limiter(session) is True
 
@@ -219,6 +223,7 @@ class TestRateLimiter:
         rate_limiter = RateLimiter(window_seconds=10, cleanup_interval=30)
 
         async with rate_limiter as rl:
+            assert rl._lock is not None
             async with rl._lock:
                 rl._requests["active_ip"] = [210.0]
                 rl._requests["stale_ip"] = [100.0]
@@ -227,6 +232,7 @@ class TestRateLimiter:
             proceed_event.set()
             await asyncio.sleep(0)
 
+            assert rl._lock is not None
             async with rl._lock:
                 assert "active_ip" in rl._requests
                 assert "stale_ip" not in rl._requests
@@ -258,25 +264,29 @@ class TestRateLimiter:
     async def test_periodic_cleanup_no_stale_ips(self, mocker: MockerFixture) -> None:
         mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
         mock_timestamp = mocker.patch("pywebtransport.server.middleware.get_timestamp")
-        rate_limiter = RateLimiter()
-        async with rate_limiter._lock:
-            rate_limiter._requests["active_ip"] = [100.0]
-        mock_timestamp.return_value = 105.0
 
-        with pytest.raises(asyncio.CancelledError):
-            await rate_limiter._periodic_cleanup()
+        async with RateLimiter() as rate_limiter:
+            assert rate_limiter._lock is not None
+            async with rate_limiter._lock:
+                rate_limiter._requests["active_ip"] = [100.0]
+            mock_timestamp.return_value = 105.0
 
-        assert "active_ip" in rate_limiter._requests
+            with pytest.raises(asyncio.CancelledError):
+                await rate_limiter._periodic_cleanup()
+
+            assert "active_ip" in rate_limiter._requests
 
     @pytest.mark.asyncio
     async def test_periodic_cleanup_empty_timestamps(self, mocker: MockerFixture) -> None:
         mocker.patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError])
         mocker.patch("pywebtransport.server.middleware.get_timestamp", return_value=100.0)
-        rate_limiter = RateLimiter()
-        async with rate_limiter._lock:
-            rate_limiter._requests["empty_ip"] = []
 
-        with pytest.raises(asyncio.CancelledError):
-            await rate_limiter._periodic_cleanup()
+        async with RateLimiter() as rate_limiter:
+            assert rate_limiter._lock is not None
+            async with rate_limiter._lock:
+                rate_limiter._requests["empty_ip"] = []
 
-        assert "empty_ip" not in rate_limiter._requests
+            with pytest.raises(asyncio.CancelledError):
+                await rate_limiter._periodic_cleanup()
+
+            assert "empty_ip" not in rate_limiter._requests

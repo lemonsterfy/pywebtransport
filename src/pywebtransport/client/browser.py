@@ -2,12 +2,15 @@
 WebTransport Browser Client.
 """
 
+from __future__ import annotations
+
 import asyncio
 from types import TracebackType
-from typing import List, Optional, Type
+from typing import Self, Type
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
+from pywebtransport.exceptions import ClientError
 from pywebtransport.session import WebTransportSession
 from pywebtransport.utils import get_logger
 
@@ -19,40 +22,47 @@ logger = get_logger("client.browser")
 class WebTransportBrowser:
     """A browser-like WebTransport client with a managed lifecycle and history."""
 
-    def __init__(self, *, config: Optional[ClientConfig] = None):
+    def __init__(self, *, config: ClientConfig | None = None) -> None:
         """Initialize the browser-like WebTransport client."""
         self._client = WebTransportClient.create(config=config)
-        self._history: List[str] = []
+        self._history: list[str] = []
         self._history_index: int = -1
-        self._current_session: Optional[WebTransportSession] = None
-        self._lock = asyncio.Lock()
+        self._current_session: WebTransportSession | None = None
+        self._lock: asyncio.Lock | None = None
 
     @classmethod
-    def create(cls, *, config: Optional[ClientConfig] = None) -> "WebTransportBrowser":
+    def create(cls, *, config: ClientConfig | None = None) -> Self:
         """Factory method to create a new browser-like client instance."""
         return cls(config=config)
 
     @property
-    def current_session(self) -> Optional[WebTransportSession]:
+    def current_session(self) -> WebTransportSession | None:
         """Get the current active session."""
         return self._current_session
 
-    async def __aenter__(self) -> "WebTransportBrowser":
-        """Enter the async context, activating the underlying client."""
+    async def __aenter__(self) -> Self:
+        """Enter the async context, initializing resources."""
+        self._lock = asyncio.Lock()
         await self._client.__aenter__()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context, ensuring all resources are closed."""
         await self.close()
 
     async def close(self) -> None:
         """Close the browser, the current session, and all underlying resources."""
+        if self._lock is None:
+            raise ClientError(
+                "WebTransportBrowser has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         async with self._lock:
             logger.info("Closing WebTransportBrowser and active session.")
             if self._current_session and not self._current_session.is_closed:
@@ -65,7 +75,16 @@ class WebTransportBrowser:
 
     async def navigate(self, url: str) -> WebTransportSession:
         """Navigate to a URL, creating a new session and clearing forward history."""
+        if self._lock is None:
+            raise ClientError(
+                "WebTransportBrowser has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         async with self._lock:
+            if self._current_session and self._history and self._history[self._history_index] == url:
+                return self._current_session
+
             if self._history_index < len(self._history) - 1:
                 self._history = self._history[: self._history_index + 1]
 
@@ -75,8 +94,14 @@ class WebTransportBrowser:
             self._history_index = len(self._history) - 1
             return await self._navigate_internal(url)
 
-    async def back(self) -> Optional[WebTransportSession]:
+    async def back(self) -> WebTransportSession | None:
         """Go back to the previous entry in the navigation history."""
+        if self._lock is None:
+            raise ClientError(
+                "WebTransportBrowser has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         async with self._lock:
             if self._history_index > 0:
                 self._history_index -= 1
@@ -84,8 +109,14 @@ class WebTransportBrowser:
                 return await self._navigate_internal(url_to_navigate)
             return None
 
-    async def forward(self) -> Optional[WebTransportSession]:
+    async def forward(self) -> WebTransportSession | None:
         """Go forward to the next entry in the navigation history."""
+        if self._lock is None:
+            raise ClientError(
+                "WebTransportBrowser has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         async with self._lock:
             if self._history_index < len(self._history) - 1:
                 self._history_index += 1
@@ -93,16 +124,28 @@ class WebTransportBrowser:
                 return await self._navigate_internal(url_to_navigate)
             return None
 
-    async def refresh(self) -> Optional[WebTransportSession]:
+    async def refresh(self) -> WebTransportSession | None:
         """Refresh the current session by reconnecting to the current URL."""
+        if self._lock is None:
+            raise ClientError(
+                "WebTransportBrowser has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         async with self._lock:
             if not self._history:
                 return None
             current_url = self._history[self._history_index]
             return await self._navigate_internal(current_url)
 
-    async def get_history(self) -> List[str]:
+    async def get_history(self) -> list[str]:
         """Get a copy of the navigation history."""
+        if self._lock is None:
+            raise ClientError(
+                "WebTransportBrowser has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         async with self._lock:
             return self._history.copy()
 

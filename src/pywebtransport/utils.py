@@ -2,6 +2,8 @@
 Core Library Utilities.
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import logging
@@ -10,10 +12,10 @@ import socket
 import ssl
 import time
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, Type, TypeVar
+from typing import Any, Callable, Coroutine, Self, Type, TypeVar
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -74,7 +76,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def setup_logging(
-    *, level: str = DEFAULT_LOG_LEVEL, format_string: Optional[str] = None, logger_name: str = "pywebtransport"
+    *, level: str = DEFAULT_LOG_LEVEL, format_string: str | None = None, logger_name: str = "pywebtransport"
 ) -> logging.Logger:
     """Set up and configure the main logger."""
     logger = logging.getLogger(logger_name)
@@ -113,8 +115,8 @@ class Timer:
     def __init__(self, name: str = "timer"):
         """Initialize the timer."""
         self.name = name
-        self.start_time: Optional[float] = None
-        self.end_time: Optional[float] = None
+        self.start_time: float | None = None
+        self.end_time: float | None = None
 
     @property
     def elapsed(self) -> float:
@@ -124,16 +126,16 @@ class Timer:
         end = self.end_time or time.time()
         return end - self.start_time
 
-    def __enter__(self) -> "Timer":
+    def __enter__(self) -> Self:
         """Start the timer upon entering the context."""
         self.start()
         return self
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Stop the timer and log the duration upon exiting the context."""
         elapsed = self.stop()
@@ -159,7 +161,7 @@ def get_timestamp() -> float:
 
 
 def build_webtransport_url(
-    host: str, port: int, *, path: str = "/", secure: bool = True, query_params: Optional[Dict[str, str]] = None
+    host: str, port: int, *, path: str = "/", secure: bool = True, query_params: dict[str, str] | None = None
 ) -> URL:
     """Build a WebTransport URL from its components."""
     scheme = "https" if secure else "http"
@@ -257,7 +259,7 @@ def format_bytes(data: bytes, *, max_length: int = 100) -> str:
 def format_duration(seconds: float) -> str:
     """Format a duration in seconds into a human-readable string."""
     if seconds < 1:
-        return f"{seconds*1000:.1f}ms"
+        return f"{seconds * 1000:.1f}ms"
     elif seconds < 60:
         return f"{seconds:.1f}s"
     elif seconds < 3600:
@@ -276,13 +278,13 @@ def format_timestamp(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).isoformat()
 
 
-def normalize_headers(headers: Dict[str, Any]) -> Dict[str, str]:
+def normalize_headers(headers: dict[str, Any]) -> dict[str, str]:
     """Normalize header keys to lowercase and values to strings."""
     return {str(key).lower(): str(value) for key, value in headers.items()}
 
 
 async def create_task_with_timeout(
-    coro: Coroutine[Any, Any, T], *, timeout: Optional[Timeout] = None, name: Optional[str] = None
+    coro: Coroutine[Any, Any, T], *, timeout: Timeout | None = None, name: str | None = None
 ) -> asyncio.Task[T]:
     """Create an asyncio task with an optional timeout wrapper."""
     if timeout is None:
@@ -294,9 +296,7 @@ async def create_task_with_timeout(
     return asyncio.create_task(_wrapper(), name=name)
 
 
-async def run_with_timeout(
-    coro: Coroutine[Any, Any, T], *, timeout: float, default_value: Optional[T] = None
-) -> Optional[T]:
+async def run_with_timeout(coro: Coroutine[Any, Any, T], *, timeout: float, default_value: T | None = None) -> T | None:
     """Run a coroutine with a timeout, returning a default value on timeout."""
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
@@ -305,7 +305,7 @@ async def run_with_timeout(
 
 
 async def wait_for_condition(
-    condition: Callable[[], bool], *, timeout: Optional[Timeout] = None, interval: float = 0.1
+    condition: Callable[[], bool], *, timeout: Timeout | None = None, interval: float = 0.1
 ) -> None:
     """Wait for a condition to become true, with an optional timeout."""
 
@@ -333,7 +333,7 @@ def calculate_checksum(data: bytes, *, algorithm: str = "sha256") -> str:
 
 def generate_self_signed_cert(
     hostname: str, *, output_dir: str = ".", key_size: int = 2048, days_valid: int = 365
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Generate a self-signed certificate and key for testing purposes."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
     subject = issuer = x509.Name(
@@ -351,8 +351,8 @@ def generate_self_signed_cert(
         .issuer_name(issuer)
         .public_key(private_key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.utcnow())
-        .not_valid_after(datetime.utcnow() + timedelta(days=days_valid))
+        .not_valid_before(datetime.now(timezone.utc))
+        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=days_valid))
         .add_extension(x509.SubjectAlternativeName([x509.DNSName(hostname)]), critical=False)
         .sign(private_key, hashes.SHA256())
     )
@@ -437,14 +437,14 @@ def validate_url(url: URL) -> bool:
         return False
 
 
-def chunked_read(data: bytes, *, chunk_size: int = 8192) -> List[bytes]:
+def chunked_read(data: bytes, *, chunk_size: int = 8192) -> list[bytes]:
     """Split data into a list of chunks of a specified size."""
     if chunk_size <= 0:
         raise ValueError("Chunk size must be positive")
     return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
-def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) -> Dict[str, Any]:
+def merge_configs(base_config: dict[str, Any], override_config: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge two configuration dictionaries."""
     result = base_config.copy()
     for key, value in override_config.items():

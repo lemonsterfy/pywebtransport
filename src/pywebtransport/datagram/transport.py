@@ -2,6 +2,8 @@
 WebTransport Datagram Stream.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import struct
@@ -10,7 +12,7 @@ import weakref
 from collections import deque
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple, Type, cast
+from typing import TYPE_CHECKING, Any, Self, Type, cast
 
 from pywebtransport.events import Event, EventEmitter, EventType
 from pywebtransport.exceptions import DatagramError, TimeoutError, datagram_too_large
@@ -73,15 +75,19 @@ class DatagramStats:
     def send_success_rate(self) -> float:
         """Get the success rate of sending datagrams."""
         total_attempts = self.datagrams_sent + self.send_failures
-        return self.datagrams_sent / max(1, total_attempts)
+        if total_attempts == 0:
+            return 1.0
+        return self.datagrams_sent / total_attempts
 
     @property
     def receive_success_rate(self) -> float:
         """Get the success rate of receiving datagrams."""
         total_received = self.datagrams_received + self.receive_errors
-        return self.datagrams_received / max(1, total_received)
+        if total_received == 0:
+            return 1.0  # FIX: No attempts should result in 100% success rate.
+        return self.datagrams_received / total_received
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert statistics to a dictionary."""
         return {
             "session_id": self.session_id,
@@ -113,10 +119,10 @@ class DatagramMessage:
     data: bytes
     timestamp: float = field(default_factory=get_timestamp)
     size: int = field(init=False)
-    checksum: Optional[str] = None
-    sequence: Optional[int] = None
+    checksum: str | None = None
+    sequence: int | None = None
     priority: int = 0
-    ttl: Optional[float] = None
+    ttl: float | None = None
 
     def __post_init__(self) -> None:
         """Initialize computed fields after object creation."""
@@ -136,7 +142,7 @@ class DatagramMessage:
         """Get the current age of the datagram in seconds."""
         return get_timestamp() - self.timestamp
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the datagram message and its metadata to a dictionary."""
         return {
             "size": self.size,
@@ -153,19 +159,21 @@ class DatagramMessage:
 class DatagramQueue:
     """A priority queue for datagrams with size and TTL limits."""
 
-    def __init__(self, max_size: int = 1000, max_age: Optional[float] = None):
+    def __init__(self, *, max_size: int = 1000, max_age: float | None = None):
         """Initialize the datagram queue."""
         self._max_size = max_size
         self._max_age = max_age
+        self._lock: asyncio.Lock | None = None
+        self._not_empty: asyncio.Event | None = None
+        self._size = 0
+        self._priority_queues: dict[int, deque[DatagramMessage]] = {0: deque(), 1: deque(), 2: deque()}
+        self._cleanup_task: asyncio.Task[None] | None = None
+
+    async def initialize(self) -> None:
+        """Initialize asyncio resources for the queue."""
         self._lock = asyncio.Lock()
         self._not_empty = asyncio.Event()
-        self._size = 0
-        self._priority_queues: Dict[int, Deque["DatagramMessage"]] = {
-            0: deque(),
-            1: deque(),
-            2: deque(),
-        }
-        self._cleanup_task: Optional[asyncio.Task[None]] = None
+        self._start_cleanup()
 
     async def close(self) -> None:
         """Close the queue and clean up background tasks."""
@@ -175,14 +183,20 @@ class DatagramQueue:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
+
         await self.clear()
 
     async def put(self, datagram: DatagramMessage) -> bool:
-        """Add a datagram to the queue, blocking if necessary."""
-        async with self._lock:
-            if datagram.is_expired:
-                return False
+        """Add a datagram to the queue, applying priority and size limits."""
+        if self._lock is None or self._not_empty is None:
+            raise DatagramError(
+                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+            )
 
+        if datagram.is_expired:
+            return False
+
+        async with self._lock:
             if self._size >= self._max_size:
                 if self._priority_queues[0]:
                     self._priority_queues[0].popleft()
@@ -196,28 +210,43 @@ class DatagramQueue:
             self._not_empty.set()
             return True
 
-    def put_nowait(self, datagram: DatagramMessage) -> bool:
+    async def put_nowait(self, datagram: DatagramMessage) -> bool:
         """Add a datagram to the queue without blocking."""
+        if self._lock is None or self._not_empty is None:
+            raise DatagramError(
+                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+            )
+
         if datagram.is_expired:
             return False
 
-        if self._size >= self._max_size:
-            if self._priority_queues[0]:
-                self._priority_queues[0].popleft()
-                self._size -= 1
-            else:
-                return False
+        async with self._lock:
+            if self._size >= self._max_size:
+                if self._priority_queues[0]:
+                    self._priority_queues[0].popleft()
+                    self._size -= 1
+                else:
+                    return False
 
-        priority = min(max(datagram.priority, 0), 2)
-        self._priority_queues[priority].append(datagram)
-        self._size += 1
-        self._not_empty.set()
-        return True
+            priority = min(max(datagram.priority, 0), 2)
+            self._priority_queues[priority].append(datagram)
+            self._size += 1
+            self._not_empty.set()
+            return True
 
-    async def get(self, *, timeout: Optional[float] = None) -> DatagramMessage:
+    async def get(self, *, timeout: float | None = None) -> DatagramMessage:
         """Get a datagram from the queue, waiting if it's empty."""
+        if self._lock is None or self._not_empty is None:
+            raise DatagramError(
+                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+            )
 
         async def _wait_for_item() -> DatagramMessage:
+            if self._lock is None or self._not_empty is None:
+                raise DatagramError(
+                    "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+                )
+
             while True:
                 async with self._lock:
                     for priority in [2, 1, 0]:
@@ -234,19 +263,28 @@ class DatagramQueue:
         except asyncio.TimeoutError:
             raise TimeoutError(f"Datagram get timeout after {timeout}s") from None
 
-    def get_nowait(self) -> Optional[DatagramMessage]:
+    async def get_nowait(self) -> DatagramMessage | None:
         """Get a datagram from the queue without blocking."""
-        for priority in [2, 1, 0]:
-            if self._priority_queues[priority]:
-                datagram = self._priority_queues[priority].popleft()
-                self._size -= 1
-                if self._size == 0:
-                    self._not_empty.clear()
-                return datagram
-        return None
+        if self._lock is None or self._not_empty is None:
+            raise DatagramError(
+                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+            )
+
+        async with self._lock:
+            for priority in [2, 1, 0]:
+                if self._priority_queues[priority]:
+                    datagram = self._priority_queues[priority].popleft()
+                    self._size -= 1
+                    if self._size == 0:
+                        self._not_empty.clear()
+                    return datagram
+            return None
 
     async def clear(self) -> None:
         """Safely clear all items from the queue."""
+        if self._lock is None or self._not_empty is None:
+            return
+
         async with self._lock:
             for priority_queue in self._priority_queues.values():
                 priority_queue.clear()
@@ -261,7 +299,7 @@ class DatagramQueue:
         """Check if the queue is empty."""
         return self._size == 0
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Get statistics about the queue's state."""
         return {
             "size": self._size,
@@ -281,6 +319,9 @@ class DatagramQueue:
 
     async def _cleanup_loop(self) -> None:
         """Periodically clean up expired datagrams from the queue."""
+        if self._lock is None:
+            return
+
         try:
             while True:
                 await asyncio.sleep(self._max_age or 1.0)
@@ -313,7 +354,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
 
     def __init__(
         self,
-        session: "WebTransportSession",
+        session: WebTransportSession,
         *,
         high_water_mark: int = 100,
         sender_get_timeout: float = 1.0,
@@ -323,19 +364,18 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         self._session = weakref.ref(session)
         self._session_id = session.session_id
         self._closed = False
+        self._is_initialized = False
         self._sender_get_timeout = sender_get_timeout
         self._outgoing_high_water_mark = high_water_mark
-        self._outgoing_max_age: Optional[float] = None
-        self._incoming_max_age: Optional[float] = None
+        self._outgoing_max_age: float | None = None
+        self._incoming_max_age: float | None = None
         self._send_sequence = 0
         self._receive_sequence = 0
-        self._sequence_lock = asyncio.Lock()
+        self._sequence_lock: asyncio.Lock | None = None
         self._stats = DatagramStats(session_id=session.session_id, created_at=get_timestamp())
-        self._outgoing_queue = DatagramQueue(max_size=self._outgoing_high_water_mark, max_age=self._outgoing_max_age)
-        self._incoming_queue = DatagramQueue(max_size=self._outgoing_high_water_mark, max_age=self._incoming_max_age)
-        self._sender_task: Optional[asyncio.Task[None]] = None
-        session.on(EventType.DATAGRAM_RECEIVED, self._on_datagram_received)
-        self._start_background_tasks()
+        self._outgoing_queue: DatagramQueue | None = None
+        self._incoming_queue: DatagramQueue | None = None
+        self._sender_task: asyncio.Task[None] | None = None
 
     @property
     def is_readable(self) -> bool:
@@ -358,19 +398,26 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         return self._session_id
 
     @property
-    def session(self) -> Optional["WebTransportSession"]:
+    def session(self) -> WebTransportSession | None:
         """Get the parent WebTransportSession instance."""
         return self._session()
+
+    @property
+    def send_sequence(self) -> int:
+        """Get the current send sequence number."""
+        return self._send_sequence
+
+    @property
+    def receive_sequence(self) -> int:
+        """Get the current receive sequence number."""
+        return self._receive_sequence
 
     @property
     def max_datagram_size(self) -> int:
         """Get the maximum datagram size allowed by the QUIC connection."""
         session = self._session()
         if session and session.protocol_handler:
-            return cast(
-                int,
-                getattr(session.protocol_handler.quic_connection, "_max_datagram_size", 1200),
-            )
+            return cast(int, getattr(session.protocol_handler.quic_connection, "_max_datagram_size", 1200))
         return 1200
 
     @property
@@ -379,12 +426,12 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         return self._outgoing_high_water_mark
 
     @property
-    def outgoing_max_age(self) -> Optional[float]:
+    def outgoing_max_age(self) -> float | None:
         """Get the maximum age for outgoing datagrams before being dropped."""
         return self._outgoing_max_age
 
     @property
-    def incoming_max_age(self) -> Optional[float]:
+    def incoming_max_age(self) -> float | None:
         """Get the maximum age for incoming datagrams before being dropped."""
         return self._incoming_max_age
 
@@ -409,37 +456,46 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         return self._stats.bytes_received
 
     @property
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Get a dictionary of all datagram statistics."""
         return self._stats.to_dict()
 
-    @property
-    def send_sequence(self) -> int:
-        """Get the current send sequence number."""
-        return self._send_sequence
-
-    @property
-    def receive_sequence(self) -> int:
-        """Get the current receive sequence number."""
-        return self._receive_sequence
-
-    async def __aenter__(self) -> "WebTransportDatagramDuplexStream":
+    async def __aenter__(self) -> Self:
         """Enter the async context for the stream."""
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context, closing the stream."""
         await self.close()
+
+    async def initialize(self) -> None:
+        """Initialize the stream, preparing it for use."""
+        if self._is_initialized:
+            return
+
+        self._sequence_lock = asyncio.Lock()
+        self._outgoing_queue = DatagramQueue(max_size=self._outgoing_high_water_mark, max_age=self._outgoing_max_age)
+        self._incoming_queue = DatagramQueue(max_size=self._outgoing_high_water_mark, max_age=self._incoming_max_age)
+        await self._outgoing_queue.initialize()
+        await self._incoming_queue.initialize()
+
+        session = self.session
+        if session:
+            session.on(EventType.DATAGRAM_RECEIVED, self._on_datagram_received)
+
+        self._start_background_tasks()
+        self._is_initialized = True
 
     async def close(self) -> None:
         """Close the datagram stream and clean up resources."""
         if self._closed:
             return
+
         self._closed = True
 
         if self._sender_task:
@@ -449,18 +505,24 @@ class WebTransportDatagramDuplexStream(EventEmitter):
             except asyncio.CancelledError:
                 pass
 
-        await self._outgoing_queue.close()
-        await self._incoming_queue.close()
+        if self._outgoing_queue:
+            await self._outgoing_queue.close()
+        if self._incoming_queue:
+            await self._incoming_queue.close()
+
         logger.debug(f"Datagram stream closed for session {self._session_id}")
 
-    def start_heartbeat(self, *, interval: float = 30.0) -> asyncio.Task[None]:
-        """Run a task that sends periodic heartbeat datagrams."""
-        return asyncio.create_task(self._heartbeat_loop(interval=interval))
-
-    async def send(self, data: Data, *, priority: int = 0, ttl: Optional[float] = None) -> None:
+    async def send(self, data: Data, *, priority: int = 0, ttl: float | None = None) -> None:
         """Send a datagram with a given priority and TTL."""
-        if self._closed:
-            raise DatagramError("Datagram stream is closed")
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        if self.is_closed:
+            raise DatagramError("Datagram stream is closed.")
+        if self._sequence_lock is None or self._outgoing_queue is None:
+            raise DatagramError("Internal state error: lock or queue is None despite stream being initialized.")
 
         data_bytes = ensure_bytes(data)
         if len(data_bytes) > self.max_datagram_size:
@@ -472,6 +534,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
 
         datagram = DatagramMessage(data=data_bytes, sequence=sequence, priority=priority, ttl=ttl)
         success = await self._outgoing_queue.put(datagram)
+
         if not success:
             self._stats.send_drops += 1
             raise DatagramError("Outgoing datagram queue full or datagram expired")
@@ -482,9 +545,16 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         self._stats.min_datagram_size = min(self._stats.min_datagram_size, datagram.size)
         self._stats.max_datagram_size = max(self._stats.max_datagram_size, datagram.size)
 
-    async def try_send(self, data: Data, *, priority: int = 0, ttl: Optional[float] = None) -> bool:
+    async def try_send(self, data: Data, *, priority: int = 0, ttl: float | None = None) -> bool:
         """Try to send a datagram without blocking."""
-        if self._closed:
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        if self.is_closed:
+            return False
+        if self._sequence_lock is None or self._outgoing_queue is None:
             return False
 
         data_bytes = ensure_bytes(data)
@@ -497,7 +567,8 @@ class WebTransportDatagramDuplexStream(EventEmitter):
             self._send_sequence += 1
 
         datagram = DatagramMessage(data=data_bytes, sequence=sequence, priority=priority, ttl=ttl)
-        success = self._outgoing_queue.put_nowait(datagram)
+        success = await self._outgoing_queue.put_nowait(datagram)
+
         if not success:
             self._stats.send_drops += 1
         else:
@@ -508,7 +579,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
             self._stats.max_datagram_size = max(self._stats.max_datagram_size, datagram.size)
         return success
 
-    async def send_multiple(self, datagrams: List[Data], *, priority: int = 0, ttl: Optional[float] = None) -> int:
+    async def send_multiple(self, datagrams: list[Data], *, priority: int = 0, ttl: float | None = None) -> int:
         """Send multiple datagrams and return the number successfully sent."""
         sent_count = 0
         for data in datagrams:
@@ -520,7 +591,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
                 break
         return sent_count
 
-    async def send_json(self, data: Any, *, priority: int = 0, ttl: Optional[float] = None) -> None:
+    async def send_json(self, data: Any, *, priority: int = 0, ttl: float | None = None) -> None:
         """Send JSON-serializable data as a datagram."""
         try:
             json_data = json.dumps(data, separators=(",", ":")).encode("utf-8")
@@ -529,7 +600,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
             raise DatagramError(f"Failed to serialize JSON datagram: {e}") from e
 
     async def send_structured(
-        self, message_type: str, payload: bytes, *, priority: int = 0, ttl: Optional[float] = None
+        self, message_type: str, payload: bytes, *, priority: int = 0, ttl: float | None = None
     ) -> None:
         """Send a structured datagram with a type header."""
         type_bytes = message_type.encode("utf-8")
@@ -539,14 +610,22 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         frame = struct.pack("!B", len(type_bytes)) + type_bytes + payload
         await self.send(frame, priority=priority, ttl=ttl)
 
-    async def receive(self, *, timeout: Optional[float] = None) -> bytes:
+    async def receive(self, *, timeout: float | None = None) -> bytes:
         """Receive a single datagram."""
-        if self._closed:
-            raise DatagramError("Datagram stream is closed")
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        if self.is_closed:
+            raise DatagramError("Datagram stream is closed.")
+        if self._incoming_queue is None:
+            raise DatagramError("Internal state error: queue is None despite stream being initialized.")
 
         start_time = time.time()
         datagram = await self._incoming_queue.get(timeout=timeout)
         receive_time = time.time() - start_time
+
         self._update_receive_stats(datagram, receive_time)
         await self.emit(
             EventType.DATAGRAM_RECEIVED,
@@ -559,24 +638,30 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         )
         return datagram.data
 
-    def try_receive(self) -> Optional[bytes]:
+    async def try_receive(self) -> bytes | None:
         """Try to receive a datagram without blocking."""
-        if self._closed:
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        if self.is_closed or self._incoming_queue is None:
             return None
-        datagram = self._incoming_queue.get_nowait()
+
+        datagram = await self._incoming_queue.get_nowait()
         if datagram:
             self._update_receive_stats(datagram, 0.0)
             return datagram.data
         return None
 
-    async def receive_multiple(self, *, max_count: int = 10, timeout: Optional[float] = None) -> List[bytes]:
+    async def receive_multiple(self, *, max_count: int = 10, timeout: float | None = None) -> list[bytes]:
         """Receive multiple datagrams in a batch."""
         datagrams = []
         try:
             first_datagram = await self.receive(timeout=timeout)
             datagrams.append(first_datagram)
             for _ in range(max_count - 1):
-                datagram = self.try_receive()
+                datagram = await self.try_receive()
                 if datagram is None:
                     break
                 datagrams.append(datagram)
@@ -585,18 +670,26 @@ class WebTransportDatagramDuplexStream(EventEmitter):
                 raise
         return datagrams
 
-    async def receive_with_metadata(self, *, timeout: Optional[float] = None) -> Dict[str, Any]:
+    async def receive_with_metadata(self, *, timeout: float | None = None) -> dict[str, Any]:
         """Receive a datagram along with its metadata."""
-        if self._closed:
-            raise DatagramError("Datagram stream is closed")
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        if self.is_closed:
+            raise DatagramError("Datagram stream is closed.")
+        if self._incoming_queue is None:
+            raise DatagramError("Internal state error: queue is None despite stream being initialized.")
 
         start_time = time.time()
         datagram = await self._incoming_queue.get(timeout=timeout)
         receive_time = time.time() - start_time
+
         self._update_receive_stats(datagram, receive_time)
         return {"data": datagram.data, "metadata": {**datagram.to_dict(), "receive_time": receive_time}}
 
-    async def receive_json(self, *, timeout: Optional[float] = None) -> Any:
+    async def receive_json(self, *, timeout: float | None = None) -> Any:
         """Receive and parse a JSON-encoded datagram."""
         try:
             data = await self.receive(timeout=timeout)
@@ -608,7 +701,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         except Exception as e:
             raise DatagramError(f"Failed to receive JSON datagram: {e}") from e
 
-    async def receive_structured(self, *, timeout: Optional[float] = None) -> Tuple[str, bytes]:
+    async def receive_structured(self, *, timeout: float | None = None) -> tuple[str, bytes]:
         """Receive and parse a structured datagram."""
         try:
             data = await self.receive(timeout=timeout)
@@ -629,37 +722,63 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         except Exception as e:
             raise DatagramError(f"Failed to receive structured datagram: {e}") from e
 
-    def get_send_buffer_size(self) -> int:
-        """Get the current number of datagrams in the send buffer."""
-        return self._outgoing_queue.qsize()
-
-    def get_receive_buffer_size(self) -> int:
-        """Get the current number of datagrams in the receive buffer."""
-        return self._incoming_queue.qsize()
+    def start_heartbeat(self, *, interval: float = 30.0) -> asyncio.Task[None]:
+        """Run a task that sends periodic heartbeat datagrams."""
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        return asyncio.create_task(self._heartbeat_loop(interval=interval))
 
     async def clear_send_buffer(self) -> int:
         """Clear the send buffer and return the number of cleared datagrams."""
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        if self._outgoing_queue is None:
+            return 0
+
         count = self._outgoing_queue.qsize()
         await self._outgoing_queue.clear()
         return count
 
     async def clear_receive_buffer(self) -> int:
         """Clear the receive buffer and return the number of cleared datagrams."""
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramDuplexStream is not initialized. Its factory "
+                "should call 'await stream.initialize()' before use."
+            )
+        if self._incoming_queue is None:
+            return 0
+
         count = self._incoming_queue.qsize()
         await self._incoming_queue.clear()
         return count
 
-    def get_queue_stats(self) -> Dict[str, Dict[str, int]]:
+    def get_send_buffer_size(self) -> int:
+        """Get the current number of datagrams in the send buffer."""
+        return self._outgoing_queue.qsize() if self._outgoing_queue else 0
+
+    def get_receive_buffer_size(self) -> int:
+        """Get the current number of datagrams in the receive buffer."""
+        return self._incoming_queue.qsize() if self._incoming_queue else 0
+
+    def get_queue_stats(self) -> dict[str, dict[str, int]]:
         """Get detailed statistics for the outgoing and incoming queues."""
         return {
-            "outgoing": self._outgoing_queue.get_stats(),
-            "incoming": self._incoming_queue.get_stats(),
+            "outgoing": self._outgoing_queue.get_stats() if self._outgoing_queue else {},
+            "incoming": self._incoming_queue.get_stats() if self._incoming_queue else {},
         }
 
-    def debug_state(self) -> Dict[str, Any]:
+    def debug_state(self) -> dict[str, Any]:
         """Get a detailed snapshot of the datagram stream's state."""
         stats = self.stats
         queue_stats = self.get_queue_stats()
+
         return {
             "stream": {
                 "session_id": self.session_id,
@@ -675,13 +794,10 @@ class WebTransportDatagramDuplexStream(EventEmitter):
                 "outgoing_max_age": self.outgoing_max_age,
                 "incoming_max_age": self.incoming_max_age,
             },
-            "sequences": {
-                "send_sequence": self.send_sequence,
-                "receive_sequence": self.receive_sequence,
-            },
+            "sequences": {"send_sequence": self.send_sequence, "receive_sequence": self.receive_sequence},
         }
 
-    async def diagnose_issues(self) -> List[str]:
+    async def diagnose_issues(self) -> list[str]:
         """Analyze stream statistics to identify potential issues."""
         issues = []
         stats = self.stats
@@ -699,16 +815,16 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         if outgoing_q_stats.get("max_size", 0) > 0:
             usage = outgoing_q_stats.get("size", 0) / outgoing_q_stats.get("max_size", 1)
             if usage > 0.9:
-                issues.append(f"Outgoing queue nearly full: {usage*100:.1f}%")
+                issues.append(f"Outgoing queue nearly full: {usage * 100:.1f}%")
 
         incoming_q_stats = queue_stats.get("incoming", {})
         if incoming_q_stats.get("max_size", 0) > 0:
             usage = incoming_q_stats.get("size", 0) / incoming_q_stats.get("max_size", 1)
             if usage > 0.9:
-                issues.append(f"Incoming queue nearly full: {usage*100:.1f}%")
+                issues.append(f"Incoming queue nearly full: {usage * 100:.1f}%")
 
         if stats["avg_send_time"] > 0.1:
-            issues.append(f"High send latency: {stats['avg_send_time']*1000:.1f}ms")
+            issues.append(f"High send latency: {stats['avg_send_time'] * 1000:.1f}ms")
 
         if self.is_closed:
             issues.append("Datagram stream is closed")
@@ -721,6 +837,9 @@ class WebTransportDatagramDuplexStream(EventEmitter):
 
     def _start_background_tasks(self) -> None:
         """Start all background tasks for the stream."""
+        if self._outgoing_queue is None or self._incoming_queue is None:
+            return
+
         try:
             self._outgoing_queue._start_cleanup()
             self._incoming_queue._start_cleanup()
@@ -731,6 +850,9 @@ class WebTransportDatagramDuplexStream(EventEmitter):
 
     async def _sender_loop(self) -> None:
         """Continuously send datagrams from the outgoing queue."""
+        if self._outgoing_queue is None:
+            return
+
         try:
             while not self._closed:
                 try:
@@ -760,8 +882,11 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         except Exception as e:
             logger.error(f"Sender loop fatal error: {e}", exc_info=e)
 
-    async def _on_datagram_received(self, event: "Event") -> None:
+    async def _on_datagram_received(self, event: Event) -> None:
         """Handle an incoming datagram event from the session."""
+        if not self._is_initialized or self._sequence_lock is None or self._incoming_queue is None:
+            return
+
         try:
             data = event.data.get("data") if isinstance(event.data, dict) else None
             if data:
@@ -812,6 +937,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
     def __str__(self) -> str:
         """Format a concise summary of datagram stream info for logging."""
         stats = self.stats
+
         return (
             f"DatagramStream({self.session_id[:12]}..., "
             f"sent={stats['datagrams_sent']}, "

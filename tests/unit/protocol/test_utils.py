@@ -12,15 +12,17 @@ def test_create_quic_configuration(mocker: MockerFixture) -> None:
     mock_quic_config = mocker.patch("pywebtransport.protocol.utils.QuicConfiguration")
 
     protocol_utils.create_quic_configuration(is_client=True)
+
     mock_quic_config.assert_called_once_with(
         is_client=True,
         alpn_protocols=WebTransportConstants.DEFAULT_ALPN_PROTOCOLS,
         max_datagram_frame_size=WebTransportConstants.MAX_DATAGRAM_SIZE,
     )
-    mock_quic_config.reset_mock()
 
+    mock_quic_config.reset_mock()
     custom_alpn = ["my-protocol"]
     protocol_utils.create_quic_configuration(is_client=False, alpn_protocols=custom_alpn, max_datagram_size=1200)
+
     mock_quic_config.assert_called_once_with(
         is_client=False,
         alpn_protocols=custom_alpn,

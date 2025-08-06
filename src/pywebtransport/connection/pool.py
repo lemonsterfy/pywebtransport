@@ -2,13 +2,16 @@
 WebTransport connection pooling implementation.
 """
 
+from __future__ import annotations
+
 import asyncio
 import time
 from types import TracebackType
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Self, Type
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection.connection import WebTransportConnection
+from pywebtransport.exceptions import ConnectionError
 from pywebtransport.utils import get_logger
 
 __all__ = ["ConnectionPool"]
@@ -30,20 +33,21 @@ class ConnectionPool:
         self._max_size = max_size
         self._max_idle_time = max_idle_time
         self._cleanup_interval = cleanup_interval
-        self._pool: Dict[str, List[Tuple[WebTransportConnection, float]]] = {}
-        self._lock = asyncio.Lock()
-        self._cleanup_task: Optional[asyncio.Task[None]] = None
+        self._pool: dict[str, list[tuple[WebTransportConnection, float]]] = {}
+        self._lock: asyncio.Lock | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
 
-    async def __aenter__(self) -> "ConnectionPool":
-        """Enter async context, starting background tasks."""
+    async def __aenter__(self) -> Self:
+        """Enter async context, initializing resources and starting background tasks."""
+        self._lock = asyncio.Lock()
         self._start_cleanup_task()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit async context, closing all pooled connections."""
         await self.close_all()
@@ -57,6 +61,11 @@ class ConnectionPool:
         path: str = "/",
     ) -> WebTransportConnection:
         """Get a connection from the pool or create a new one."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         pool_key = self._get_pool_key(host, port)
         async with self._lock:
             if pool_key in self._pool and self._pool[pool_key]:
@@ -75,6 +84,12 @@ class ConnectionPool:
 
     async def return_connection(self, connection: WebTransportConnection) -> None:
         """Return a connection to the pool for potential reuse."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         if not connection.is_connected:
             await connection.close()
             return
@@ -99,6 +114,12 @@ class ConnectionPool:
 
     async def close_all(self) -> None:
         """Close all idle connections and shut down the pool."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:
@@ -116,7 +137,7 @@ class ConnectionPool:
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get current statistics about the connection pool."""
         total_connections = sum(len(conns) for conns in self._pool.values())
         return {
@@ -133,14 +154,18 @@ class ConnectionPool:
     def _start_cleanup_task(self) -> None:
         """Start the periodic cleanup task if it is not already running."""
         if self._cleanup_task is None:
+            coro = self._cleanup_idle_connections()
             try:
-                self._cleanup_task = asyncio.create_task(self._cleanup_idle_connections())
+                self._cleanup_task = asyncio.create_task(coro)
             except RuntimeError:
+                coro.close()
                 self._cleanup_task = None
                 logger.warning("Could not start pool cleanup task: no running event loop.")
 
     async def _cleanup_idle_connections(self) -> None:
         """Periodically find and remove idle connections from the pool."""
+        if self._lock is None:
+            return
         try:
             while True:
                 await asyncio.sleep(self._cleanup_interval)

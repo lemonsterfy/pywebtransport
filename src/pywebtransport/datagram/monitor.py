@@ -2,10 +2,12 @@
 WebTransport Datagram Performance Monitor.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections import deque
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Self, Type
 
 from pywebtransport.utils import get_logger, get_timestamp
 
@@ -23,7 +25,7 @@ class DatagramMonitor:
 
     def __init__(
         self,
-        datagram_stream: "WebTransportDatagramDuplexStream",
+        datagram_stream: WebTransportDatagramDuplexStream,
         *,
         monitoring_interval: float = 5.0,
         samples_maxlen: int = 100,
@@ -35,9 +37,9 @@ class DatagramMonitor:
         """Initialize the datagram performance monitor."""
         self._stream = datagram_stream
         self._interval = monitoring_interval
-        self._monitor_task: Optional[asyncio.Task[None]] = None
-        self._samples: Deque[Dict[str, Any]] = deque(maxlen=samples_maxlen)
-        self._alerts: Deque[Dict[str, Any]] = deque(maxlen=alerts_maxlen)
+        self._monitor_task: asyncio.Task[None] | None = None
+        self._samples: deque[dict[str, Any]] = deque(maxlen=samples_maxlen)
+        self._alerts: deque[dict[str, Any]] = deque(maxlen=alerts_maxlen)
         self._queue_size_threshold = queue_size_threshold
         self._success_rate_threshold = success_rate_threshold
         self._trend_analysis_window = trend_analysis_window
@@ -45,10 +47,10 @@ class DatagramMonitor:
     @classmethod
     def create(
         cls,
-        datagram_stream: "WebTransportDatagramDuplexStream",
+        datagram_stream: WebTransportDatagramDuplexStream,
         *,
         monitoring_interval: float = 5.0,
-    ) -> "DatagramMonitor":
+    ) -> Self:
         """Factory method to create a new datagram monitor for a stream."""
         return cls(datagram_stream, monitoring_interval=monitoring_interval)
 
@@ -57,7 +59,7 @@ class DatagramMonitor:
         """Check if the monitoring task is currently active."""
         return self._monitor_task is not None and not self._monitor_task.done()
 
-    async def __aenter__(self) -> "DatagramMonitor":
+    async def __aenter__(self) -> Self:
         """Enter the async context and start the monitoring task."""
         if self.is_monitoring:
             return self
@@ -72,9 +74,9 @@ class DatagramMonitor:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and stop the monitoring task."""
         if self._monitor_task:
@@ -85,14 +87,14 @@ class DatagramMonitor:
                 pass
         logger.info(f"Datagram monitoring stopped for session {self._stream.session_id[:12]}...")
 
-    def get_samples(self, *, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_samples(self, *, limit: int | None = None) -> list[dict[str, Any]]:
         """Get a copy of the collected performance samples."""
         samples_list = list(self._samples)
         if limit is not None:
             return samples_list[-limit:]
         return samples_list
 
-    def get_alerts(self) -> List[Dict[str, Any]]:
+    def get_alerts(self) -> list[dict[str, Any]]:
         """Get a copy of the currently active alerts."""
         return list(self._alerts)
 
@@ -121,7 +123,7 @@ class DatagramMonitor:
         except Exception as e:
             logger.error(f"Monitor loop error: {e}", exc_info=e)
 
-    async def _check_alerts(self, current_sample: Dict[str, Any]) -> None:
+    async def _check_alerts(self, current_sample: dict[str, Any]) -> None:
         """Check the current sample against configured alert thresholds."""
         if current_sample["outgoing_queue_size"] > self._stream.outgoing_high_water_mark * self._queue_size_threshold:
             self._alerts.append(
@@ -153,7 +155,7 @@ class DatagramMonitor:
                     }
                 )
 
-    def _analyze_trend(self, values: List[float]) -> str:
+    def _analyze_trend(self, values: list[float]) -> str:
         """Perform a simple trend analysis on a series of values."""
         if len(values) < self._trend_analysis_window:
             return "stable"

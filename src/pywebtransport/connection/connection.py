@@ -2,12 +2,14 @@
 WebTransport connection core implementation.
 """
 
+from __future__ import annotations
+
 import asyncio
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Dict, List, Optional, Type, Union, cast
+from typing import Any, Self, Type, cast
 
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.quic.connection import QuicConnection
@@ -32,16 +34,16 @@ class ConnectionInfo:
 
     connection_id: str
     state: ConnectionState
-    local_address: Optional[Address] = None
-    remote_address: Optional[Address] = None
-    established_at: Optional[float] = None
-    closed_at: Optional[float] = None
+    local_address: Address | None = None
+    remote_address: Address | None = None
+    established_at: float | None = None
+    closed_at: float | None = None
     bytes_sent: int = 0
     bytes_received: int = 0
     packets_sent: int = 0
     packets_received: int = 0
     error_count: int = 0
-    last_activity: Optional[float] = None
+    last_activity: float | None = None
 
     @property
     def uptime(self) -> float:
@@ -50,7 +52,7 @@ class ConnectionInfo:
             return 0.0
         return (self.closed_at or get_timestamp()) - self.established_at
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the connection information to a dictionary."""
         return asdict(self)
 
@@ -58,33 +60,31 @@ class ConnectionInfo:
 class WebTransportConnection(EventEmitter):
     """Manages the lifecycle of a WebTransport connection over QUIC."""
 
-    def __init__(self, config: Union[ClientConfig, ServerConfig]):
+    def __init__(self, config: ClientConfig | ServerConfig):
         """Initialize the WebTransport connection."""
         super().__init__()
         self._config = config
         self._connection_id: str = f"conn_{uuid.uuid4()}"
-        self._quic_connection: Optional[QuicConnection] = None
-        self._protocol_handler: Optional[WebTransportProtocolHandler] = None
-        self._transport: Optional[asyncio.DatagramTransport] = None
-        self._protocol: Optional[QuicConnectionProtocol] = None
+        self._quic_connection: QuicConnection | None = None
+        self._protocol_handler: WebTransportProtocolHandler | None = None
+        self._transport: asyncio.DatagramTransport | None = None
+        self._protocol: QuicConnectionProtocol | None = None
         self._state = ConnectionState.IDLE
         self._info = ConnectionInfo(connection_id=self._connection_id, state=self._state)
-        self._closed_future: asyncio.Future[None] = asyncio.Future()
+        self._closed_future: asyncio.Future[None] | None = None
         self._ping_uid_counter = 0
-        self._heartbeat_task: Optional[asyncio.Task[None]] = None
-        self._timer_handle: Optional[asyncio.TimerHandle] = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
+        self._timer_handle: asyncio.TimerHandle | None = None
 
     @classmethod
-    async def create_client(
-        cls, *, config: ClientConfig, host: str, port: int, path: str = "/"
-    ) -> "WebTransportConnection":
+    async def create_client(cls, *, config: ClientConfig, host: str, port: int, path: str = "/") -> Self:
         """Create a WebTransportConnection instance for client use."""
         connection = cls(config)
         await connection.connect(host=host, port=port, path=path)
         return connection
 
     @classmethod
-    async def create_server(cls, *, config: ServerConfig, transport: Any, protocol: Any) -> "WebTransportConnection":
+    async def create_server(cls, *, config: ServerConfig, transport: Any, protocol: Any) -> Self:
         """Create a WebTransportConnection instance for server use."""
         connection = cls(config)
         await connection.accept(transport=transport, protocol=protocol)
@@ -111,31 +111,31 @@ class WebTransportConnection(EventEmitter):
         return self._state == ConnectionState.CLOSED
 
     @property
-    def config(self) -> Union[ClientConfig, ServerConfig]:
-        """Get the configuration object for this connection."""
-        return self._config
-
-    @property
     def connection_id(self) -> str:
         """Get the unique ID of this connection."""
         return self._connection_id
 
     @property
-    def local_address(self) -> Optional[Address]:
+    def config(self) -> ClientConfig | ServerConfig:
+        """Get the configuration object for this connection."""
+        return self._config
+
+    @property
+    def local_address(self) -> Address | None:
         """Get the local address of the connection."""
         if self._transport:
-            return cast(Optional[Address], self._transport.get_extra_info("sockname", None))
+            return cast(Address | None, self._transport.get_extra_info("sockname", None))
         return None
 
     @property
-    def remote_address(self) -> Optional[Address]:
+    def remote_address(self) -> Address | None:
         """Get the remote address of the connection."""
         if self._transport:
-            return cast(Optional[Address], self._transport.get_extra_info("peername", None))
+            return cast(Address | None, self._transport.get_extra_info("peername", None))
         return None
 
     @property
-    def protocol_handler(self) -> Optional[WebTransportProtocolHandler]:
+    def protocol_handler(self) -> WebTransportProtocolHandler | None:
         """Get the underlying protocol handler instance."""
         return self._protocol_handler
 
@@ -154,21 +154,25 @@ class WebTransportConnection(EventEmitter):
             self._info.packets_received = getattr(self._quic_connection, "_packets_received", 0)
         return self._info
 
-    async def __aenter__(self) -> "WebTransportConnection":
+    async def __aenter__(self) -> Self:
         """Enter the asynchronous context for the connection."""
+        if self._closed_future is None:
+            self._closed_future = asyncio.Future()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the asynchronous context, closing the connection."""
         await self.close()
 
     async def connect(self, host: str, port: int, path: str = "/") -> None:
         """Establish a client connection to a WebTransport endpoint."""
+        if self._closed_future is None:
+            self._closed_future = asyncio.Future()
         if self._state != ConnectionState.IDLE:
             raise ConnectionError(f"Connection already in state {self._state}")
         if not isinstance(self._config, ClientConfig):
@@ -194,6 +198,8 @@ class WebTransportConnection(EventEmitter):
 
     async def accept(self, transport: asyncio.DatagramTransport, protocol: QuicConnectionProtocol) -> None:
         """Accept an incoming server connection."""
+        if self._closed_future is None:
+            self._closed_future = asyncio.Future()
         if self._state != ConnectionState.IDLE:
             raise ConnectionError(f"Connection already in state {self._state}")
         if not isinstance(self._config, ServerConfig):
@@ -221,6 +227,9 @@ class WebTransportConnection(EventEmitter):
         """Close the connection."""
         if self._state in [ConnectionState.CLOSING, ConnectionState.CLOSED]:
             return
+        if self._closed_future is None:
+            self._closed_future = asyncio.Future()
+
         logger.info(f"Closing connection {self._connection_id}...")
         self._set_state(ConnectionState.CLOSING)
         self._info.closed_at = get_timestamp()
@@ -240,13 +249,15 @@ class WebTransportConnection(EventEmitter):
             logger.error(f"Error during connection teardown: {e}")
         finally:
             self._set_state(ConnectionState.CLOSED)
-            if not self._closed_future.done():
+            if self._closed_future and not self._closed_future.done():
                 self._closed_future.set_result(None)
             logger.info(f"Connection {self._connection_id} closed.")
 
     async def wait_closed(self) -> None:
         """Wait until the connection is fully closed."""
         if self._state == ConnectionState.CLOSED:
+            return
+        if self._closed_future is None:
             return
         await self._closed_future
 
@@ -262,7 +273,6 @@ class WebTransportConnection(EventEmitter):
         if ready_session_id := self.get_ready_session_id():
             logger.debug(f"Found existing ready session (fast path): {ready_session_id}")
             return ready_session_id
-
         if not self.protocol_handler:
             raise ConnectionError("Protocol handler is not initialized.")
 
@@ -280,7 +290,7 @@ class WebTransportConnection(EventEmitter):
         except Exception as e:
             raise ConnectionError(f"Failed to get a ready session: {e}") from e
 
-    def get_ready_session_id(self) -> Optional[SessionId]:
+    def get_ready_session_id(self) -> SessionId | None:
         """Get the ID of the first available ready session, if any."""
         if not self.protocol_handler:
             return None
@@ -289,7 +299,7 @@ class WebTransportConnection(EventEmitter):
                 return session_info.session_id
         return None
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         """Get a structured summary of a connection for monitoring."""
         info = self.info
         return {
@@ -311,7 +321,7 @@ class WebTransportConnection(EventEmitter):
             while self.is_connected:
                 try:
                     rtt = await asyncio.wait_for(self._get_rtt(), timeout=rtt_timeout)
-                    logger.debug(f"Connection {self.connection_id} health check: RTT={rtt*1000:.1f}ms")
+                    logger.debug(f"Connection {self.connection_id} health check: RTT={rtt * 1000:.1f}ms")
                 except asyncio.TimeoutError:
                     logger.warning(f"Connection {self.connection_id} RTT check timeout")
                     break
@@ -322,11 +332,11 @@ class WebTransportConnection(EventEmitter):
         except asyncio.CancelledError:
             pass
 
-    async def diagnose_issues(self) -> Dict[str, Any]:
+    async def diagnose_issues(self) -> dict[str, Any]:
         """Diagnose and report a list of potential issues with a connection."""
-        issues: List[str] = []
-        recommendations: List[str] = []
-        diagnosis: Dict[str, Any] = {
+        issues: list[str] = []
+        recommendations: list[str] = []
+        diagnosis: dict[str, Any] = {
             "connection_id": self.connection_id,
             "state": self.state.value,
             "is_connected": self.is_connected,
@@ -352,7 +362,7 @@ class WebTransportConnection(EventEmitter):
                 rtt = await asyncio.wait_for(self._get_rtt(), timeout=5.0)
                 diagnosis["ping_rtt"] = rtt
                 if rtt > 1.0:
-                    issues.append(f"High latency (RTT): {rtt*1000:.1f}ms")
+                    issues.append(f"High latency (RTT): {rtt * 1000:.1f}ms")
                     recommendations.append("Check network quality")
             except asyncio.TimeoutError:
                 issues.append("RTT check timed out")
@@ -379,7 +389,7 @@ class WebTransportConnection(EventEmitter):
         self._quic_connection = QuicConnection(configuration=quic_config)
 
         class _ClientProtocol(QuicConnectionProtocol):
-            def __init__(self, owner: "WebTransportConnection", *args: Any, **kwargs: Any):
+            def __init__(self, owner: WebTransportConnection, *args: Any, **kwargs: Any):
                 super().__init__(*args, **kwargs)
                 self._owner = owner
 
@@ -387,7 +397,7 @@ class WebTransportConnection(EventEmitter):
                 if self._owner._protocol_handler:
                     asyncio.create_task(self._owner._protocol_handler.handle_quic_event(event))
 
-            def connection_lost(self, exc: Optional[Exception]) -> None:
+            def connection_lost(self, exc: Exception | None) -> None:
                 super().connection_lost(exc)
                 self._owner._on_connection_lost(exc)
 
@@ -449,7 +459,7 @@ class WebTransportConnection(EventEmitter):
         except Exception as e:
             logger.error(f"Heartbeat loop error: {e}", exc_info=e)
 
-    def _on_connection_lost(self, exc: Optional[Exception]) -> None:
+    def _on_connection_lost(self, exc: Exception | None) -> None:
         """Handle an unexpected connection loss."""
         if self._state in [ConnectionState.CLOSING, ConnectionState.CLOSED]:
             return

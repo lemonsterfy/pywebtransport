@@ -71,7 +71,9 @@ class TestDefaults:
                 "user_agent": f"pywebtransport/{project_version}",
             },
         )
+
         config = Defaults.get_client_config()
+
         assert config["connect_timeout"] == 30.0
         assert config["max_streams"] == 100
         assert config["user_agent"] == f"pywebtransport/{project_version}"
@@ -79,13 +81,14 @@ class TestDefaults:
     def test_get_client_config_returns_copy(self) -> None:
         config1 = Defaults.get_client_config()
         config2 = Defaults.get_client_config()
-        assert config1 is not config2
 
+        assert config1 is not config2
         config1["max_streams"] = 999
         assert Defaults.get_client_config()["max_streams"] == 100
 
     def test_get_server_config(self) -> None:
         config = Defaults.get_server_config()
+
         assert config["bind_host"] == "localhost"
         assert config["bind_port"] == WebTransportConstants.DEFAULT_DEV_PORT
         assert config["connection_timeout"] == WebTransportConstants.DEFAULT_KEEPALIVE_TIMEOUT
@@ -93,7 +96,7 @@ class TestDefaults:
     def test_get_server_config_returns_copy(self) -> None:
         config1 = Defaults.get_server_config()
         config2 = Defaults.get_server_config()
-        assert config1 is not config2
 
+        assert config1 is not config2
         config1["max_connections"] = 9999
         assert Defaults.get_server_config()["max_connections"] == 1000

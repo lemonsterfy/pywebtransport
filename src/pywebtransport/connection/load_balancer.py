@@ -2,11 +2,13 @@
 Load balancer for WebTransport connections.
 """
 
+from __future__ import annotations
+
 import asyncio
 import random
 import time
 from types import TracebackType
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Self, Type
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection.connection import WebTransportConnection
@@ -25,7 +27,7 @@ class ConnectionLoadBalancer:
     def __init__(
         self,
         *,
-        targets: List[Tuple[str, int]],
+        targets: list[tuple[str, int]],
         health_check_interval: float = 30.0,
         health_check_timeout: float = 5.0,
     ):
@@ -36,36 +38,45 @@ class ConnectionLoadBalancer:
         self._targets = list(dict.fromkeys(targets))
         self._health_check_interval = health_check_interval
         self._health_check_timeout = health_check_timeout
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
         self._current_index = 0
-        self._connections: Dict[str, WebTransportConnection] = {}
-        self._failed_targets: Set[str] = set()
-        self._target_weights: Dict[str, float] = {self._get_target_key(h, p): 1.0 for h, p in self._targets}
-        self._target_latencies: Dict[str, float] = {self._get_target_key(h, p): 0.0 for h, p in self._targets}
-        self._health_check_task: Optional[asyncio.Task[None]] = None
+        self._connections: dict[str, WebTransportConnection] = {}
+        self._failed_targets: set[str] = set()
+        self._target_weights: dict[str, float] = {self._get_target_key(h, p): 1.0 for h, p in self._targets}
+        self._target_latencies: dict[str, float] = {self._get_target_key(h, p): 0.0 for h, p in self._targets}
+        self._health_check_task: asyncio.Task[None] | None = None
 
     @classmethod
-    def create(cls, *, targets: List[Tuple[str, int]]) -> "ConnectionLoadBalancer":
+    def create(cls, *, targets: list[tuple[str, int]]) -> Self:
         """Factory method to create a new connection load balancer instance."""
         return cls(targets=targets)
 
-    async def __aenter__(self) -> "ConnectionLoadBalancer":
-        """Enter async context, starting background tasks."""
+    async def __aenter__(self) -> Self:
+        """Enter async context, initializing resources and starting background tasks."""
+        self._lock = asyncio.Lock()
         self._start_health_check_task()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit async context, shutting down the load balancer."""
         await self.shutdown()
 
-    def __len__(self) -> int:
-        """Return the total number of configured targets."""
-        return len(self._targets)
+    async def shutdown(self) -> None:
+        """Shut down the load balancer and close all connections."""
+        logger.info("Shutting down load balancer")
+        if self._health_check_task:
+            self._health_check_task.cancel()
+            try:
+                await self._health_check_task
+            except asyncio.CancelledError:
+                pass
+        await self.close_all_connections()
+        logger.info("Load balancer shutdown complete")
 
     async def get_connection(
         self,
@@ -75,6 +86,12 @@ class ConnectionLoadBalancer:
         strategy: str = "round_robin",
     ) -> WebTransportConnection:
         """Get a connection using the specified load balancing strategy."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionLoadBalancer has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         host, port = await self._get_next_target(strategy)
         target_key = self._get_target_key(host, port)
 
@@ -96,7 +113,7 @@ class ConnectionLoadBalancer:
                 self._target_latencies[target_key] = latency
                 self._failed_targets.discard(target_key)
                 self._connections[target_key] = connection
-            logger.info(f"Connected to {host}:{port} (latency: {latency*1000:.1f}ms)")
+            logger.info(f"Connected to {host}:{port} (latency: {latency * 1000:.1f}ms)")
             return connection
         except Exception as e:
             async with self._lock:
@@ -104,20 +121,13 @@ class ConnectionLoadBalancer:
             logger.error(f"Failed to connect to {host}:{port}: {e}")
             raise
 
-    async def shutdown(self) -> None:
-        """Shut down the load balancer and close all connections."""
-        logger.info("Shutting down load balancer")
-        if self._health_check_task:
-            self._health_check_task.cancel()
-            try:
-                await self._health_check_task
-            except asyncio.CancelledError:
-                pass
-        await self.close_all_connections()
-        logger.info("Load balancer shutdown complete")
-
     async def close_all_connections(self) -> None:
         """Close all currently managed connections."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionLoadBalancer has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             connections_to_close = list(self._connections.values())
             self._connections.clear()
@@ -130,14 +140,24 @@ class ConnectionLoadBalancer:
 
     async def update_target_weight(self, *, host: str, port: int, weight: float) -> None:
         """Update the weight for a specific target."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionLoadBalancer has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         target_key = self._get_target_key(host, port)
         async with self._lock:
             if target_key in self._target_weights:
                 self._target_weights[target_key] = max(0.0, weight)
                 logger.debug(f"Updated weight for {target_key}: {weight}")
 
-    async def get_target_stats(self) -> Dict[str, Any]:
+    async def get_target_stats(self) -> dict[str, Any]:
         """Get health and performance statistics for all targets."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionLoadBalancer has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             stats = {}
             for host, port in self._targets:
@@ -153,8 +173,13 @@ class ConnectionLoadBalancer:
                 }
             return stats
 
-    async def get_load_balancer_stats(self) -> Dict[str, Any]:
+    async def get_load_balancer_stats(self) -> dict[str, Any]:
         """Get high-level statistics about the load balancer."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionLoadBalancer has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             return {
                 "total_targets": len(self._targets),
@@ -167,7 +192,13 @@ class ConnectionLoadBalancer:
         """Generate a unique key for a given host and port."""
         return f"{host}:{port}"
 
-    async def _get_next_target(self, strategy: str) -> Tuple[str, int]:
+    async def _get_next_target(self, strategy: str) -> tuple[str, int]:
+        """Get the next target based on the chosen load balancing strategy."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionLoadBalancer has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             available_targets = [
                 target for target in self._targets if self._get_target_key(*target) not in self._failed_targets
@@ -203,6 +234,8 @@ class ConnectionLoadBalancer:
 
     async def _health_check_loop(self) -> None:
         """Periodically check the health of failed targets."""
+        if self._lock is None:
+            return
         while True:
             try:
                 await asyncio.sleep(self._health_check_interval)
@@ -225,4 +258,7 @@ class ConnectionLoadBalancer:
                 break
             except Exception as e:
                 logger.error(f"Health check loop critical error: {e}", exc_info=e)
-                await asyncio.sleep(self._health_check_interval)
+
+    def __len__(self) -> int:
+        """Return the total number of configured targets."""
+        return len(self._targets)

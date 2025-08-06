@@ -2,9 +2,13 @@
 WebTransport Datagram Broadcaster.
 """
 
-import asyncio
-from typing import TYPE_CHECKING, List, Optional
+from __future__ import annotations
 
+import asyncio
+from types import TracebackType
+from typing import TYPE_CHECKING, Self, Type
+
+from pywebtransport.exceptions import DatagramError
 from pywebtransport.types import Data
 from pywebtransport.utils import get_logger
 
@@ -22,30 +26,38 @@ class DatagramBroadcaster:
 
     def __init__(self) -> None:
         """Initialize the datagram broadcaster."""
-        self._streams: List["WebTransportDatagramDuplexStream"] = []
-        self._lock = asyncio.Lock()
+        self._streams: list[WebTransportDatagramDuplexStream] = []
+        self._lock: asyncio.Lock | None = None
 
     @classmethod
-    def create(cls) -> "DatagramBroadcaster":
+    def create(cls) -> Self:
         """Factory method to create a new datagram broadcaster instance."""
         return cls()
 
-    async def add_stream(self, stream: "WebTransportDatagramDuplexStream") -> None:
-        """Add a stream to the broadcast list."""
-        async with self._lock:
-            if stream not in self._streams:
-                self._streams.append(stream)
+    async def __aenter__(self) -> Self:
+        """Enter async context, initializing asyncio resources."""
+        self._lock = asyncio.Lock()
+        return self
 
-    async def remove_stream(self, stream: "WebTransportDatagramDuplexStream") -> None:
-        """Remove a stream from the broadcast list."""
-        async with self._lock:
-            try:
-                self._streams.remove(stream)
-            except ValueError:
-                pass
+    async def __aexit__(
+        self,
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit async context, clearing the stream list."""
+        if self._lock:
+            async with self._lock:
+                self._streams.clear()
 
-    async def broadcast(self, data: Data, *, priority: int = 0, ttl: Optional[float] = None) -> int:
+    async def broadcast(self, data: Data, *, priority: int = 0, ttl: float | None = None) -> int:
         """Broadcast a datagram to all registered streams concurrently."""
+        if self._lock is None:
+            raise DatagramError(
+                "DatagramBroadcaster has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         sent_count = 0
         failed_streams = []
 
@@ -78,7 +90,36 @@ class DatagramBroadcaster:
 
         return sent_count
 
+    async def add_stream(self, stream: WebTransportDatagramDuplexStream) -> None:
+        """Add a stream to the broadcast list."""
+        if self._lock is None:
+            raise DatagramError(
+                "DatagramBroadcaster has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            if stream not in self._streams:
+                self._streams.append(stream)
+
+    async def remove_stream(self, stream: WebTransportDatagramDuplexStream) -> None:
+        """Remove a stream from the broadcast list."""
+        if self._lock is None:
+            raise DatagramError(
+                "DatagramBroadcaster has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            try:
+                self._streams.remove(stream)
+            except ValueError:
+                pass
+
     async def get_stream_count(self) -> int:
         """Get the current number of active streams safely."""
+        if self._lock is None:
+            raise DatagramError(
+                "DatagramBroadcaster has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             return len(self._streams)

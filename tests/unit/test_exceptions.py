@@ -1,6 +1,6 @@
 """Unit tests for the pywebtransport.exceptions module."""
 
-from typing import Any, Dict, Type
+from typing import Any, Type
 
 import pytest
 
@@ -40,6 +40,7 @@ from pywebtransport.exceptions import (
 class TestExceptionClasses:
     def test_webtransport_error_base(self) -> None:
         exc = WebTransportError("Base error", error_code=100, details={"info": "abc"})
+
         assert exc.message == "Base error"
         assert exc.error_code == 100
         assert exc.details == {"info": "abc"}
@@ -54,6 +55,7 @@ class TestExceptionClasses:
 
     def test_webtransport_error_defaults(self) -> None:
         exc = WebTransportError("Default error")
+
         assert exc.error_code == ErrorCodes.INTERNAL_ERROR
         assert exc.details == {}
 
@@ -133,8 +135,8 @@ class TestExceptionClasses:
     def test_subclass_exceptions(
         self,
         exc_class: Type[WebTransportError],
-        args: Dict[str, Any],
-        expected_attrs: Dict[str, Any],
+        args: dict[str, Any],
+        expected_attrs: dict[str, Any],
         default_code: ErrorCodes,
     ) -> None:
         exc = exc_class("Test message", **args)
@@ -162,6 +164,7 @@ class TestExceptionClasses:
 class TestExceptionFactories:
     def test_certificate_not_found(self) -> None:
         exc = certificate_not_found("/path/to/cert.pem")
+
         assert isinstance(exc, CertificateError)
         assert exc.certificate_path == "/path/to/cert.pem"
         assert exc.certificate_error == "file_not_found"
@@ -169,6 +172,7 @@ class TestExceptionFactories:
 
     def test_connection_timeout(self) -> None:
         exc = connection_timeout(15.5, operation="handshake")
+
         assert isinstance(exc, TimeoutError)
         assert exc.timeout_duration == 15.5
         assert exc.operation == "handshake"
@@ -176,6 +180,7 @@ class TestExceptionFactories:
 
     def test_datagram_too_large(self) -> None:
         exc = datagram_too_large(9000, 1500)
+
         assert isinstance(exc, DatagramError)
         assert exc.datagram_size == 9000
         assert exc.max_size == 1500
@@ -183,6 +188,7 @@ class TestExceptionFactories:
 
     def test_invalid_config(self) -> None:
         exc = invalid_config("retries", -1, "must be non-negative")
+
         assert isinstance(exc, ConfigurationError)
         assert exc.config_key == "retries"
         assert exc.config_value == -1
@@ -190,6 +196,7 @@ class TestExceptionFactories:
 
     def test_protocol_violation(self) -> None:
         exc = protocol_violation("Invalid frame", frame_type=0xFF)
+
         assert isinstance(exc, ProtocolError)
         assert exc.frame_type == 0xFF
         assert exc.error_code == ErrorCodes.PROTOCOL_VIOLATION
@@ -197,6 +204,7 @@ class TestExceptionFactories:
 
     def test_session_not_ready(self) -> None:
         exc = session_not_ready("sess_123", SessionState.CONNECTING)
+
         assert isinstance(exc, SessionError)
         assert exc.session_id == "sess_123"
         assert exc.session_state == SessionState.CONNECTING
@@ -204,6 +212,7 @@ class TestExceptionFactories:
 
     def test_stream_closed(self) -> None:
         exc = stream_closed(5, reason="shutdown")
+
         assert isinstance(exc, StreamError)
         assert exc.stream_id == 5
         assert exc.error_code == ErrorCodes.STREAM_STATE_ERROR
@@ -245,6 +254,7 @@ class TestHelperFunctions:
     )
     def test_is_fatal_error(self, error_code: ErrorCodes, is_fatal: bool) -> None:
         exc = WebTransportError("Test", error_code=error_code)
+
         assert is_fatal_error(exc) is is_fatal
 
     def test_is_fatal_error_with_standard_exception(self) -> None:
@@ -262,6 +272,7 @@ class TestHelperFunctions:
     )
     def test_is_retriable_error(self, error_code: ErrorCodes, is_retriable: bool) -> None:
         exc = WebTransportError("Test", error_code=error_code)
+
         assert is_retriable_error(exc) is is_retriable
 
     def test_is_retriable_error_with_standard_exception(self) -> None:

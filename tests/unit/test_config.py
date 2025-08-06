@@ -2,7 +2,7 @@
 
 import ssl
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 from pytest_mock import MockerFixture
@@ -45,6 +45,7 @@ class TestConfigHelpers:
 class TestClientConfig:
     def test_default_initialization(self) -> None:
         config = ClientConfig()
+
         assert config.connect_timeout == 30.0
         assert config.verify_mode == ssl.CERT_REQUIRED
         assert config.user_agent == f"pywebtransport/{real_version}"
@@ -52,23 +53,29 @@ class TestClientConfig:
 
     def test_post_init_normalizes_headers(self, mocker: MockerFixture) -> None:
         mock_normalize = mocker.patch("pywebtransport.config.normalize_headers", return_value={})
+
         ClientConfig(headers={"X-Custom": "Value"})
+
         mock_normalize.assert_called_once_with({"X-Custom": "Value"})
 
     def test_create_factory_method(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.config.Defaults.get_client_config", return_value={"max_retries": 1})
+
         config = ClientConfig.create(max_retries=5, debug=True)
+
         assert config.max_retries == 5
         assert config.debug is True
 
     def test_create_for_development_factory(self) -> None:
         config = ClientConfig.create_for_development(verify_ssl=False)
+
         assert config.debug is True
         assert config.log_level == "DEBUG"
         assert config.verify_mode == ssl.CERT_NONE
 
     def test_create_for_production_factory(self, mock_path_exists: Any) -> None:
         config = ClientConfig.create_for_production(ca_certs="ca.pem")
+
         assert config.debug is False
         assert config.log_level == "INFO"
         assert config.ca_certs == "ca.pem"
@@ -76,14 +83,18 @@ class TestClientConfig:
 
     def test_copy_method(self) -> None:
         config1 = ClientConfig()
+
         config2 = config1.copy()
+
         assert config1 is not config2
         config2.max_retries = 99
         assert config1.max_retries != 99
 
     def test_update_method(self) -> None:
         config = ClientConfig()
+
         new_config = config.update(connect_timeout=15.0)
+
         assert new_config.connect_timeout == 15.0
         assert config.connect_timeout == 30.0
         assert new_config is not config
@@ -93,11 +104,10 @@ class TestClientConfig:
     def test_merge_method(self, mocker: MockerFixture) -> None:
         config1 = ClientConfig(read_timeout=10, max_retries=1)
         mocker.patch.object(ClientConfig, "validate", return_value=None)
-
         invalid_max_retries: Any = None
         config2 = ClientConfig(read_timeout=20, write_timeout=25, max_retries=invalid_max_retries)
-
         mocker.stopall()
+
         merged_config = config1.merge(config2)
         assert merged_config.read_timeout == 20
         assert merged_config.write_timeout == 25
@@ -113,7 +123,9 @@ class TestClientConfig:
 
     def test_to_dict_method(self) -> None:
         config = ClientConfig(verify_mode=ssl.CERT_OPTIONAL, debug=True)
+
         data = config.to_dict()
+
         assert data["verify_mode"] == "CERT_OPTIONAL"
         assert data["debug"] is True
 
@@ -130,7 +142,7 @@ class TestClientConfig:
             ({"alpn_protocols": []}, "cannot be empty"),
         ],
     )
-    def test_validation_failures(self, invalid_attrs: Dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
+    def test_validation_failures(self, invalid_attrs: dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
         with pytest.raises(ConfigurationError, match=error_match):
             ClientConfig(**invalid_attrs)
 
@@ -143,12 +155,13 @@ class TestClientConfig:
             ({"max_retry_delay": -10.0}, "must be positive"),
         ],
     )
-    def test_validation_failures_retry_logic(self, invalid_attrs: Dict[str, Any], error_match: str) -> None:
+    def test_validation_failures_retry_logic(self, invalid_attrs: dict[str, Any], error_match: str) -> None:
         with pytest.raises(ConfigurationError, match=error_match):
             ClientConfig(**invalid_attrs)
 
     def test_validation_cert_not_found(self, mock_path_exists: Any) -> None:
         mock_path_exists.return_value = False
+
         with pytest.raises(CertificateError, match="Certificate file not found"):
             ClientConfig(certfile="nonexistent.pem", keyfile="nonexistent.key")
 
@@ -156,23 +169,28 @@ class TestClientConfig:
 class TestServerConfig:
     def test_default_initialization(self) -> None:
         config = ServerConfig()
+
         assert config.bind_host == "localhost"
         assert config.max_connections == 1000
 
     def test_create_factory_method(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.config.Defaults.get_server_config", return_value={"backlog": 1})
+
         config = ServerConfig.create(backlog=100, debug=True)
+
         assert config.backlog == 100
         assert config.debug is True
 
     def test_create_for_development_factory(self, mock_path_exists: Any) -> None:
         config = ServerConfig.create_for_development(host="devhost", certfile="c.pem", keyfile="k.pem")
+
         assert config.debug is True
         assert config.bind_host == "devhost"
         assert config.certfile == "c.pem"
 
     def test_create_for_development_factory_no_certs(self) -> None:
         config = ServerConfig.create_for_development()
+
         assert config.certfile == ""
         assert config.keyfile == ""
 
@@ -180,6 +198,7 @@ class TestServerConfig:
         config = ServerConfig.create_for_production(
             host="prodhost", port=443, certfile="c.pem", keyfile="k.pem", ca_certs="ca.pem"
         )
+
         assert config.debug is False
         assert config.bind_host == "prodhost"
         assert config.bind_port == 443
@@ -188,18 +207,23 @@ class TestServerConfig:
 
     def test_get_bind_address(self) -> None:
         config = ServerConfig(bind_host="127.0.0.1", bind_port=8888)
+
         assert config.get_bind_address() == ("127.0.0.1", 8888)
 
     def test_merge_method(self) -> None:
         config1 = ServerConfig(max_connections=100)
         config2 = ServerConfig(max_connections=200, backlog=256)
+
         merged = config1.merge(config2)
+
         assert merged.max_connections == 200
         assert merged.backlog == 256
 
     def test_to_dict_method(self) -> None:
         config = ServerConfig(verify_mode=ssl.CERT_REQUIRED, reuse_port=False)
+
         data = config.to_dict()
+
         assert data["verify_mode"] == "CERT_REQUIRED"
         assert data["reuse_port"] is False
 
@@ -213,7 +237,7 @@ class TestServerConfig:
             ({"backlog": 0}, "must be positive"),
         ],
     )
-    def test_validation_failures(self, invalid_attrs: Dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
+    def test_validation_failures(self, invalid_attrs: dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
         with pytest.raises(ConfigurationError, match=error_match):
             ServerConfig(**invalid_attrs)
 
@@ -221,6 +245,7 @@ class TestServerConfig:
 class TestConfigBuilder:
     def test_client_build_flow(self, mock_path_exists: Any) -> None:
         builder = ConfigBuilder(config_type="client")
+
         config = (
             builder.debug(log_level="INFO")
             .timeout(connect=15, read=45)
@@ -228,6 +253,7 @@ class TestConfigBuilder:
             .performance(max_streams=50, buffer_size=12345)
             .build()
         )
+
         assert isinstance(config, ClientConfig)
         assert config.debug is True
         assert config.connect_timeout == 15
@@ -235,22 +261,26 @@ class TestConfigBuilder:
 
     def test_server_build_flow(self, mock_path_exists: Any) -> None:
         builder = ConfigBuilder(config_type="server")
+
         config = (
             builder.bind("0.0.0.0", 8000)
             .performance(max_connections=500, max_streams=25)
             .security(certfile="s.pem", keyfile="s.key")
             .build()
         )
+
         assert isinstance(config, ServerConfig)
         assert config.bind_host == "0.0.0.0"
         assert config.max_connections == 500
 
     def test_builder_invalid_method_for_type(self) -> None:
         builder = ConfigBuilder(config_type="client")
+
         with pytest.raises(ConfigurationError, match="bind\\(\\) can only be used with server config"):
             builder.bind("localhost", 8080)
 
     def test_builder_unknown_type(self) -> None:
         builder = ConfigBuilder(config_type="unknown")
+
         with pytest.raises(ConfigurationError, match="Unknown config type: unknown"):
             builder.build()

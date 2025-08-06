@@ -2,10 +2,12 @@
 WebTransport connection manager implementation.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections import defaultdict
 from types import TracebackType
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Self, Type
 
 from pywebtransport.connection.connection import WebTransportConnection
 from pywebtransport.exceptions import ConnectionError
@@ -24,31 +26,27 @@ class ConnectionManager:
         """Initialize the connection manager."""
         self._max_connections = max_connections
         self._cleanup_interval = cleanup_interval
-        self._lock = asyncio.Lock()
-        self._connections: Dict[ConnectionId, WebTransportConnection] = {}
-        self._stats = {
-            "total_created": 0,
-            "total_closed": 0,
-            "current_count": 0,
-            "max_concurrent": 0,
-        }
-        self._cleanup_task: Optional[asyncio.Task[None]] = None
+        self._lock: asyncio.Lock | None = None
+        self._connections: dict[ConnectionId, WebTransportConnection] = {}
+        self._stats = {"total_created": 0, "total_closed": 0, "current_count": 0, "max_concurrent": 0}
+        self._cleanup_task: asyncio.Task[None] | None = None
 
     @classmethod
-    def create(cls, *, max_connections: int = 1000) -> "ConnectionManager":
+    def create(cls, *, max_connections: int = 1000) -> Self:
         """Factory method to create a new connection manager instance."""
         return cls(max_connections=max_connections)
 
-    async def __aenter__(self) -> "ConnectionManager":
-        """Enter async context, starting background tasks."""
+    async def __aenter__(self) -> Self:
+        """Enter async context, initializing resources and starting background tasks."""
+        self._lock = asyncio.Lock()
         self._start_cleanup_task()
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit async context, shutting down the manager."""
         await self.shutdown()
@@ -64,8 +62,55 @@ class ConnectionManager:
         await self.close_all_connections()
         logger.info("Connection manager shutdown complete")
 
+    async def add_connection(self, connection: WebTransportConnection) -> ConnectionId:
+        """Add a new connection to the manager."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            if len(self._connections) >= self._max_connections:
+                raise ConnectionError(f"Maximum connections ({self._max_connections}) exceeded")
+            connection_id = connection.connection_id
+            self._connections[connection_id] = connection
+            self._stats["total_created"] += 1
+            self._update_stats_unsafe()
+            logger.debug(f"Added connection {connection_id} (total: {len(self._connections)})")
+            return connection_id
+
+    async def remove_connection(self, connection_id: ConnectionId) -> WebTransportConnection | None:
+        """Remove a connection from the manager by its ID."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            connection = self._connections.pop(connection_id, None)
+            if connection:
+                self._stats["total_closed"] += 1
+                self._update_stats_unsafe()
+                logger.debug(f"Removed connection {connection_id} (total: {len(self._connections)})")
+            return connection
+
+    async def get_connection(self, connection_id: ConnectionId) -> WebTransportConnection | None:
+        """Retrieve a connection by its ID."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            return self._connections.get(connection_id)
+
     async def close_all_connections(self) -> None:
         """Close all currently managed connections."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             connections_to_close = list(self._connections.values())
             if not connections_to_close:
@@ -80,35 +125,13 @@ class ConnectionManager:
             self._update_stats_unsafe()
         logger.info("All connections closed")
 
-    async def add_connection(self, connection: WebTransportConnection) -> ConnectionId:
-        """Add a new connection to the manager."""
-        async with self._lock:
-            if len(self._connections) >= self._max_connections:
-                raise ConnectionError(f"Maximum connections ({self._max_connections}) exceeded")
-            connection_id = connection.connection_id
-            self._connections[connection_id] = connection
-            self._stats["total_created"] += 1
-            self._update_stats_unsafe()
-            logger.debug(f"Added connection {connection_id} (total: {len(self._connections)})")
-            return connection_id
-
-    async def remove_connection(self, connection_id: ConnectionId) -> Optional[WebTransportConnection]:
-        """Remove a connection from the manager by its ID."""
-        async with self._lock:
-            connection = self._connections.pop(connection_id, None)
-            if connection:
-                self._stats["total_closed"] += 1
-                self._update_stats_unsafe()
-                logger.debug(f"Removed connection {connection_id} (total: {len(self._connections)})")
-            return connection
-
-    async def get_connection(self, connection_id: ConnectionId) -> Optional[WebTransportConnection]:
-        """Retrieve a connection by its ID."""
-        async with self._lock:
-            return self._connections.get(connection_id)
-
-    async def get_all_connections(self) -> List[WebTransportConnection]:
+    async def get_all_connections(self) -> list[WebTransportConnection]:
         """Retrieve a list of all current connections."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             return list(self._connections.values())
 
@@ -116,10 +139,15 @@ class ConnectionManager:
         """Get the current number of active connections."""
         return len(self._connections)
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Get detailed statistics about the managed connections."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
-            states: Dict[str, int] = defaultdict(int)
+            states: dict[str, int] = defaultdict(int)
             for conn in self._connections.values():
                 states[conn.state.value] += 1
             return {
@@ -131,6 +159,11 @@ class ConnectionManager:
 
     async def cleanup_closed_connections(self) -> int:
         """Find and remove any connections that are marked as closed."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         async with self._lock:
             all_connections = list(self._connections.items())
         closed_connection_ids = [conn_id for conn_id, conn in all_connections if conn.is_closed]
@@ -151,8 +184,8 @@ class ConnectionManager:
         """Periodically run the cleanup process to remove closed connections."""
         try:
             while True:
-                await asyncio.sleep(self._cleanup_interval)
                 await self.cleanup_closed_connections()
+                await asyncio.sleep(self._cleanup_interval)
         except asyncio.CancelledError:
             pass
         except Exception as e:

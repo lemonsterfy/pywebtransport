@@ -1,6 +1,8 @@
 """Unit tests for the pywebtransport.stream.utils module."""
 
-from typing import Any, List, Optional
+from __future__ import annotations
+
+from typing import Any
 
 import pytest
 from pytest_mock import MockerFixture
@@ -10,11 +12,11 @@ from pywebtransport.stream.utils import copy_stream_data, echo_stream
 
 
 class AsyncIterator:
-    def __init__(self, items: List[bytes], exception: Optional[Exception] = None):
+    def __init__(self, items: list[bytes], exception: Exception | None = None):
         self._items = iter(items)
         self._exception = exception
 
-    def __aiter__(self) -> "AsyncIterator":
+    def __aiter__(self) -> AsyncIterator:
         return self
 
     async def __anext__(self) -> bytes:
@@ -53,6 +55,7 @@ def mock_source_stream(mocker: MockerFixture) -> Any:
 
 
 class TestCopyStreamData:
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "chunks",
         [
@@ -66,7 +69,7 @@ class TestCopyStreamData:
         self,
         mock_source_stream: Any,
         mock_destination_stream: Any,
-        chunks: List[bytes],
+        chunks: list[bytes],
     ) -> None:
         mock_source_stream.read_iter.return_value = AsyncIterator(chunks)
         expected_bytes = sum(len(c) for c in chunks)
@@ -80,6 +83,7 @@ class TestCopyStreamData:
         mock_destination_stream.close.assert_awaited_once()
         mock_destination_stream.abort.assert_not_awaited()
 
+    @pytest.mark.asyncio
     async def test_copy_source_error(
         self,
         mocker: MockerFixture,
@@ -97,6 +101,7 @@ class TestCopyStreamData:
         mock_destination_stream.abort.assert_awaited_once_with(code=1)
         mock_destination_stream.close.assert_not_awaited()
 
+    @pytest.mark.asyncio
     async def test_copy_destination_error(
         self,
         mocker: MockerFixture,
@@ -117,6 +122,7 @@ class TestCopyStreamData:
 
 
 class TestEchoStream:
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "chunks",
         [
@@ -126,7 +132,7 @@ class TestEchoStream:
         ],
         ids=["empty_stream", "single_chunk", "multiple_chunks"],
     )
-    async def test_echo_success(self, mock_bidirectional_stream: Any, chunks: List[bytes]) -> None:
+    async def test_echo_success(self, mock_bidirectional_stream: Any, chunks: list[bytes]) -> None:
         mock_bidirectional_stream.read_iter.return_value = AsyncIterator(chunks)
 
         await echo_stream(stream=mock_bidirectional_stream)
@@ -137,6 +143,7 @@ class TestEchoStream:
         mock_bidirectional_stream.close.assert_awaited_once()
         mock_bidirectional_stream.abort.assert_not_awaited()
 
+    @pytest.mark.asyncio
     async def test_echo_read_error(self, mocker: MockerFixture, mock_bidirectional_stream: Any) -> None:
         mock_logger = mocker.patch("pywebtransport.stream.utils.logger")
         read_error = StreamError("Read failed")
@@ -148,6 +155,7 @@ class TestEchoStream:
         mock_bidirectional_stream.abort.assert_awaited_once_with(code=1)
         mock_bidirectional_stream.close.assert_not_awaited()
 
+    @pytest.mark.asyncio
     async def test_echo_write_error(self, mocker: MockerFixture, mock_bidirectional_stream: Any) -> None:
         mock_logger = mocker.patch("pywebtransport.stream.utils.logger")
         mock_bidirectional_stream.read_iter.return_value = AsyncIterator([b"data"])

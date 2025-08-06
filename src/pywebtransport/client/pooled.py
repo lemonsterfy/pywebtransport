@@ -2,13 +2,16 @@
 WebTransport Pooled Client.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections import defaultdict
 from types import TracebackType
-from typing import Dict, List, Optional, Type
+from typing import Self, Type
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
+from pywebtransport.exceptions import ClientError
 from pywebtransport.session import WebTransportSession
 from pywebtransport.types import URL
 from pywebtransport.utils import get_logger, parse_webtransport_url
@@ -24,7 +27,7 @@ class PooledClient:
     def __init__(
         self,
         *,
-        config: Optional[ClientConfig] = None,
+        config: ClientConfig | None = None,
         pool_size: int = 10,
         cleanup_interval: float = 60.0,
     ):
@@ -32,23 +35,24 @@ class PooledClient:
         self._client = WebTransportClient.create(config=config)
         self._pool_size = pool_size
         self._cleanup_interval = cleanup_interval
-        self._pools: Dict[str, List[WebTransportSession]] = defaultdict(list)
-        self._lock = asyncio.Lock()
-        self._cleanup_task: Optional[asyncio.Task[None]] = None
+        self._pools: dict[str, list[WebTransportSession]] = defaultdict(list)
+        self._lock: asyncio.Lock | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
 
     @classmethod
     def create(
         cls,
         *,
-        config: Optional[ClientConfig] = None,
+        config: ClientConfig | None = None,
         pool_size: int = 10,
         cleanup_interval: float = 60.0,
-    ) -> "PooledClient":
+    ) -> Self:
         """Factory method to create a new pooled client instance."""
         return cls(config=config, pool_size=pool_size, cleanup_interval=cleanup_interval)
 
-    async def __aenter__(self) -> "PooledClient":
+    async def __aenter__(self) -> Self:
         """Enter the async context, activating the client and background tasks."""
+        self._lock = asyncio.Lock()
         await self._client.__aenter__()
         self._start_cleanup_task()
         logger.info("PooledClient started and is active.")
@@ -56,15 +60,44 @@ class PooledClient:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context, closing all resources."""
         await self.close()
 
+    async def close(self) -> None:
+        """Close all pooled sessions and the underlying client."""
+        if self._lock is None:
+            raise ClientError(
+                "PooledClient has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        logger.info("Closing PooledClient...")
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        async with self._lock:
+            close_tasks = [session.close() for sessions in self._pools.values() for session in sessions]
+            if close_tasks:
+                await asyncio.gather(*close_tasks, return_exceptions=True)
+            self._pools.clear()
+
+        await self._client.close()
+        logger.info("PooledClient has been closed.")
+
     async def get_session(self, url: URL) -> WebTransportSession:
         """Get a session from the pool or create a new one."""
+        if self._lock is None:
+            raise ClientError(
+                "PooledClient has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         pool_key = self._get_pool_key(url)
 
         async with self._lock:
@@ -82,6 +115,11 @@ class PooledClient:
 
     async def return_session(self, session: WebTransportSession) -> None:
         """Return a session to the pool for potential reuse."""
+        if self._lock is None:
+            raise ClientError(
+                "PooledClient has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         if not session.is_ready:
             await session.close()
             return
@@ -100,25 +138,6 @@ class PooledClient:
             pool.append(session)
             logger.debug(f"Returned session to pool for {pool_key}")
 
-    async def close(self) -> None:
-        """Close all pooled sessions and the underlying client."""
-        logger.info("Closing PooledClient...")
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-            try:
-                await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
-
-        async with self._lock:
-            close_tasks = [session.close() for sessions in self._pools.values() for session in sessions]
-            if close_tasks:
-                await asyncio.gather(*close_tasks, return_exceptions=True)
-            self._pools.clear()
-
-        await self._client.close()
-        logger.info("PooledClient has been closed.")
-
     def _start_cleanup_task(self) -> None:
         """Start the periodic cleanup task if not already running."""
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -126,6 +145,8 @@ class PooledClient:
 
     async def _periodic_cleanup(self) -> None:
         """Periodically check for and remove stale sessions from all pools."""
+        if self._lock is None:
+            return
         while True:
             await asyncio.sleep(self._cleanup_interval)
             logger.debug("Running stale session cleanup for all pools...")
@@ -146,7 +167,7 @@ class PooledClient:
         except Exception:
             return url
 
-    def _get_pool_key_from_session(self, session: WebTransportSession) -> Optional[str]:
+    def _get_pool_key_from_session(self, session: WebTransportSession) -> str | None:
         """Get a pool key from an active session."""
         if session.connection and session.connection.remote_address:
             host, port = session.connection.remote_address

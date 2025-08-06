@@ -2,10 +2,12 @@
 WebTransport Server Monitor.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections import deque
 from types import TracebackType
-from typing import Any, Deque, Dict, List, Optional, Type
+from typing import Any, Self, Type
 
 from pywebtransport.server.server import WebTransportServer
 from pywebtransport.utils import get_logger, get_timestamp
@@ -22,12 +24,12 @@ class ServerMonitor:
         """Initialize the server monitor."""
         self._server = server
         self._interval = monitoring_interval
-        self._monitor_task: Optional[asyncio.Task[None]] = None
-        self._metrics_history: Deque[Dict[str, Any]] = deque(maxlen=120)
-        self._alerts: Deque[Dict[str, Any]] = deque(maxlen=100)
+        self._monitor_task: asyncio.Task[None] | None = None
+        self._metrics_history: deque[dict[str, Any]] = deque(maxlen=120)
+        self._alerts: deque[dict[str, Any]] = deque(maxlen=100)
 
     @classmethod
-    def create(cls, server: WebTransportServer, *, monitoring_interval: float = 30.0) -> "ServerMonitor":
+    def create(cls, server: WebTransportServer, *, monitoring_interval: float = 30.0) -> Self:
         """Factory method to create a new server monitor instance."""
         return cls(server, monitoring_interval=monitoring_interval)
 
@@ -36,7 +38,7 @@ class ServerMonitor:
         """Check if the monitoring task is currently active."""
         return self._monitor_task is not None and not self._monitor_task.done()
 
-    async def __aenter__(self) -> "ServerMonitor":
+    async def __aenter__(self) -> Self:
         """Enter the async context and start the monitoring task."""
         if self.is_monitoring:
             return self
@@ -49,9 +51,9 @@ class ServerMonitor:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and stop the monitoring task."""
         if self._monitor_task:
@@ -62,7 +64,7 @@ class ServerMonitor:
                 pass
         logger.info("Server monitoring stopped.")
 
-    def get_health_status(self) -> Dict[str, Any]:
+    def get_health_status(self) -> dict[str, Any]:
         """Get the current server health status based on the latest metrics."""
         metrics = self.get_current_metrics()
         if not metrics:
@@ -87,15 +89,15 @@ class ServerMonitor:
 
         return {"status": "idle", "reason": "Server is running but has no active connections."}
 
-    def get_alerts(self, limit: int = 25) -> List[Dict[str, Any]]:
+    def get_alerts(self, limit: int = 25) -> list[dict[str, Any]]:
         """Get a list of recently generated alerts."""
         return list(self._alerts)[-limit:]
 
-    def get_current_metrics(self) -> Optional[Dict[str, Any]]:
+    def get_current_metrics(self) -> dict[str, Any] | None:
         """Get the latest collected metrics."""
         return self._metrics_history[-1] if self._metrics_history else None
 
-    def get_metrics_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_metrics_history(self, limit: int = 100) -> list[dict[str, Any]]:
         """Get a list of recent metrics history."""
         return list(self._metrics_history)[-limit:]
 

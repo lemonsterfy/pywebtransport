@@ -5,7 +5,7 @@ import hashlib
 import logging
 import socket
 from pathlib import Path
-from typing import Any, Coroutine, Dict, List, Optional, Tuple, Type
+from typing import Any, Coroutine, Type
 
 import pytest
 from pytest_mock import MockerFixture
@@ -51,6 +51,7 @@ from pywebtransport.utils import (
 class TestLoggingUtils:
     def test_get_logger(self) -> None:
         logger = get_logger("test")
+
         assert isinstance(logger, logging.Logger)
         assert logger.name == "pywebtransport.test"
 
@@ -87,7 +88,9 @@ class TestIdGenerators:
     def test_id_generators(self, mocker: MockerFixture, func: Any, length: int) -> None:
         mock_token = mocker.patch("pywebtransport.utils.secrets.token_urlsafe")
         mock_token.return_value = "test-id"
+
         result = func()
+
         assert result == "test-id"
         mock_token.assert_called_once_with(length)
 
@@ -95,6 +98,7 @@ class TestIdGenerators:
 class TestTimer:
     def test_timer_init(self) -> None:
         timer = Timer("my-timer")
+
         assert timer.name == "my-timer"
         assert timer.elapsed == 0.0
 
@@ -110,14 +114,17 @@ class TestTimer:
 
     def test_timer_stop_before_start(self) -> None:
         timer = Timer()
+
         with pytest.raises(RuntimeError, match="Timer not started"):
             timer.stop()
 
     def test_timer_timing(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.utils.time.time", side_effect=[1000.0, 1005.5])
         timer = Timer()
+
         timer.start()
         elapsed = timer.stop()
+
         assert elapsed == 5.5
         assert timer.elapsed == 5.5
 
@@ -125,6 +132,7 @@ class TestTimer:
 class TestTimestamp:
     def test_get_timestamp(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.utils.time.time", return_value=12345.678)
+
         assert get_timestamp() == 12345.678
 
 
@@ -140,7 +148,7 @@ class TestUrlAndAddressUtils:
         ],
     )
     def test_build_webtransport_url(
-        self, host: str, port: int, secure: bool, query_params: Optional[Dict[str, str]], expected: str
+        self, host: str, port: int, secure: bool, query_params: dict[str, str] | None, expected: str
     ) -> None:
         assert build_webtransport_url(host, port, secure=secure, query_params=query_params) == expected
 
@@ -162,8 +170,9 @@ class TestUrlAndAddressUtils:
             ("https://[::1]:9090/q?a=1#f", ("::1", 9090, "/q?a=1#f")),
         ],
     )
-    def test_parse_webtransport_url(self, mocker: MockerFixture, url: str, expected: Tuple[str, int, str]) -> None:
+    def test_parse_webtransport_url(self, mocker: MockerFixture, url: str, expected: tuple[str, int, str]) -> None:
         mocker.patch("pywebtransport.utils.WEBTRANSPORT_SCHEMES", ("https", "wss"))
+
         assert parse_webtransport_url(url) == expected
 
     @pytest.mark.parametrize(
@@ -176,6 +185,7 @@ class TestUrlAndAddressUtils:
     )
     def test_parse_webtransport_url_errors(self, mocker: MockerFixture, url: str, error_msg: str) -> None:
         mocker.patch("pywebtransport.utils.WEBTRANSPORT_SCHEMES", ("https", "wss"))
+
         with pytest.raises(ConfigurationError, match=error_msg):
             parse_webtransport_url(url)
 
@@ -183,7 +193,9 @@ class TestUrlAndAddressUtils:
     async def test_resolve_address(self, mocker: MockerFixture) -> None:
         mock_getaddrinfo = mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
         mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_DGRAM, 0, "", ("192.0.2.1", 1234))]
+
         result = await resolve_address("example.com", 1234)
+
         assert result == ("192.0.2.1", 1234)
         mock_getaddrinfo.assert_awaited_once_with("example.com", 1234, family=socket.AF_UNSPEC, type=socket.SOCK_DGRAM)
 
@@ -191,6 +203,7 @@ class TestUrlAndAddressUtils:
     async def test_resolve_address_failure(self, mocker: MockerFixture) -> None:
         mock_getaddrinfo = mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
         mock_getaddrinfo.side_effect = OSError("Resolution failed")
+
         with pytest.raises(ConfigurationError, match="Failed to resolve address"):
             await resolve_address("invalid.host", 1234)
 
@@ -207,6 +220,7 @@ class TestDataConversionAndFormatting:
     def test_format_bytes(self) -> None:
         short_data = b"short"
         long_data = b"a" * 120
+
         assert format_bytes(short_data) == "b'short'"
         assert format_bytes(long_data, max_length=50).startswith("b'aaaaaaaa")
         assert format_bytes(long_data, max_length=50).endswith("... (120 bytes total)")
@@ -222,17 +236,19 @@ class TestDataConversionAndFormatting:
         expected_iso = "2023-01-01T00:00:00"
         mock_dt_class = mocker.patch("pywebtransport.utils.datetime")
         mock_dt_class.fromtimestamp.return_value.isoformat.return_value = expected_iso
+
         assert format_timestamp(ts) == expected_iso
         mock_dt_class.fromtimestamp.assert_called_once_with(ts)
 
     def test_normalize_headers(self) -> None:
         headers = {"Content-Type": "application/json", "X-Custom": 123}
+
         expected = {"content-type": "application/json", "x-custom": "123"}
         assert normalize_headers(headers) == expected
 
 
-@pytest.mark.asyncio
 class TestAsyncUtils:
+    @pytest.mark.asyncio
     async def test_create_task_with_timeout_success(self) -> None:
         async def fast_coro() -> str:
             await asyncio.sleep(0)
@@ -240,8 +256,10 @@ class TestAsyncUtils:
 
         task = await create_task_with_timeout(fast_coro(), timeout=0.1)
         result = await task
+
         assert result == "done"
 
+    @pytest.mark.asyncio
     async def test_create_task_with_timeout_fails(self, mocker: MockerFixture) -> None:
         def close_and_raise(coro: Coroutine[Any, Any, Any], timeout: float) -> None:
             coro.close()
@@ -253,9 +271,11 @@ class TestAsyncUtils:
             return "never"
 
         task = await create_task_with_timeout(slow_coro(), timeout=0.01)
+
         with pytest.raises(asyncio.TimeoutError):
             await task
 
+    @pytest.mark.asyncio
     async def test_run_with_timeout(self, mocker: MockerFixture) -> None:
         async def sample_coro() -> str:
             return "ok"
@@ -271,9 +291,11 @@ class TestAsyncUtils:
         result = await run_with_timeout(sample_coro(), timeout=0.01, default_value="fail")
         assert result == "fail"
 
+    @pytest.mark.asyncio
     async def test_wait_for_condition(self) -> None:
         flag = [False, False, True]
         await wait_for_condition(lambda: flag.pop(0), timeout=1, interval=0.01)
+
         with pytest.raises(TimeoutError, match="Condition not met within 0.1s timeout"):
             await wait_for_condition(lambda: False, timeout=0.1, interval=0.05)
 
@@ -282,7 +304,9 @@ class TestCryptoAndCertUtils:
     def test_calculate_checksum(self) -> None:
         data = b"pywebtransport"
         expected_sha256 = hashlib.sha256(data).hexdigest()
+
         assert calculate_checksum(data, algorithm="sha256") == expected_sha256
+
         with pytest.raises(ValueError, match="Unsupported or insecure hash algorithm: nonexistent-algorithm"):
             calculate_checksum(data, algorithm="nonexistent-algorithm")
 
@@ -293,7 +317,9 @@ class TestCryptoAndCertUtils:
         mocker.patch("pywebtransport.utils.x509.DNSName")
         mocker.patch("pywebtransport.utils.x509.SubjectAlternativeName")
         mock_open = mocker.patch("builtins.open", mocker.mock_open())
+
         cert_file, key_file = generate_self_signed_cert("localhost", output_dir=str(tmp_path))
+
         expected_cert_path = tmp_path / "localhost.crt"
         expected_key_path = tmp_path / "localhost.key"
         assert cert_file == str(expected_cert_path)
@@ -304,15 +330,19 @@ class TestCryptoAndCertUtils:
     def test_load_certificate(self, mocker: MockerFixture) -> None:
         mocker.patch("pathlib.Path.exists", return_value=True)
         mock_ssl_context = mocker.patch("pywebtransport.utils.ssl.SSLContext").return_value
+
         context = load_certificate("cert.pem", "key.pem")
+
         assert context == mock_ssl_context
         mock_ssl_context.load_cert_chain.assert_called_once_with("cert.pem", "key.pem")
         mock_ssl_context.load_cert_chain.side_effect = Exception("Load failed")
+
         with pytest.raises(CertificateError, match="Failed to load certificate: Load failed"):
             load_certificate("cert.pem", "key.pem")
 
     def test_load_certificate_not_found(self, mocker: MockerFixture) -> None:
         mocker.patch("pathlib.Path.exists", side_effect=[True, False])
+
         with pytest.raises(CertificateError, match="Certificate file not found: key.pem"):
             load_certificate("cert.pem", "key.pem")
 
@@ -348,7 +378,7 @@ class TestValidationFunctions:
             ("123", False, TypeError),
         ],
     )
-    def test_validate_error_code(self, value: Any, is_valid: bool, exc_type: Optional[Type[Exception]]) -> None:
+    def test_validate_error_code(self, value: Any, is_valid: bool, exc_type: Type[Exception] | None) -> None:
         if is_valid:
             validate_error_code(value)
         else:
@@ -367,7 +397,7 @@ class TestValidationFunctions:
     @pytest.mark.parametrize(
         "value, is_valid, exc_type", [("", False, ValueError), (None, False, TypeError), ("some-id", True, None)]
     )
-    def test_validate_session_id(self, value: Any, is_valid: bool, exc_type: Optional[Type[Exception]]) -> None:
+    def test_validate_session_id(self, value: Any, is_valid: bool, exc_type: Type[Exception] | None) -> None:
         if is_valid:
             validate_session_id(value)
         else:
@@ -394,6 +424,7 @@ class TestValidationFunctions:
 
     def test_validate_url(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.utils.WEBTRANSPORT_SCHEMES", ("https", "wss"))
+
         assert validate_url("https://example.com") is True
         assert validate_url("https://[::1]:8080/path") is True
         assert validate_url("http://example.com") is False
@@ -410,15 +441,18 @@ class TestMiscUtils:
             (b"", 100, []),
         ],
     )
-    def test_chunked_read(self, data: bytes, chunk_size: int, expected: List[bytes]) -> None:
+    def test_chunked_read(self, data: bytes, chunk_size: int, expected: list[bytes]) -> None:
         assert list(chunked_read(data, chunk_size=chunk_size)) == expected
+
         with pytest.raises(ValueError, match="Chunk size must be positive"):
             list(chunked_read(b"abc", chunk_size=0))
 
     def test_merge_configs(self) -> None:
-        base: Dict[str, Any] = {"a": 1, "b": {"c": 2, "d": 3}}
+        base: dict[str, Any] = {"a": 1, "b": {"c": 2, "d": 3}}
         override = {"b": {"d": 4, "e": 5}, "f": 6}
+
         expected = {"a": 1, "b": {"c": 2, "d": 4, "e": 5}, "f": 6}
         result = merge_configs(base, override)
+
         assert result == expected
         assert base["b"]["d"] == 3

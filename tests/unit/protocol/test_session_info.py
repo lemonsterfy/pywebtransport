@@ -1,7 +1,5 @@
 """Unit tests for the pywebtransport.protocol.session_info module."""
 
-from typing import Optional
-
 import pytest
 from pytest_mock import MockerFixture
 
@@ -18,6 +16,7 @@ class TestStreamInfo:
             state=StreamState.OPEN,
             created_at=1000.0,
         )
+
         assert stream_info.stream_id == 4
         assert stream_info.session_id == "test-session"
         assert stream_info.direction == StreamDirection.BIDIRECTIONAL
@@ -40,6 +39,7 @@ class TestStreamInfo:
             bytes_sent=100,
             bytes_received=50,
         )
+
         expected_str = "Stream 8 [open] direction=send_only session=s1 sent=100b recv=50b (active: 10.50s)"
         assert str(stream_info) == expected_str
 
@@ -52,6 +52,7 @@ class TestStreamInfo:
             created_at=1000.0,
             closed_at=1005.25,
         )
+
         expected_str = "Stream 8 [closed] direction=send_only session=s1 sent=0b recv=0b (duration: 5.25s)"
         assert str(stream_info) == expected_str
 
@@ -65,7 +66,9 @@ class TestStreamInfo:
             bytes_sent=1024,
             bytes_received=512,
         )
+
         stream_dict = stream_info.to_dict()
+
         assert isinstance(stream_dict, dict)
         assert stream_dict["stream_id"] == 4
         assert stream_dict["session_id"] == "test-session"
@@ -83,6 +86,7 @@ class TestWebTransportSessionInfo:
             path="/",
             created_at=2000.0,
         )
+
         assert session_info.session_id == "test-session"
         assert session_info.path == "/"
         assert session_info.headers == {}
@@ -100,14 +104,13 @@ class TestWebTransportSessionInfo:
     def test_str_representation_scenarios(
         self,
         mocker: MockerFixture,
-        ready_at: Optional[float],
-        closed_at: Optional[float],
+        ready_at: float | None,
+        closed_at: float | None,
         timestamp: float,
         expected_duration_str: str,
     ) -> None:
         if timestamp > 0:
             mocker.patch("pywebtransport.protocol.session_info.get_timestamp", return_value=timestamp)
-
         session_info = WebTransportSessionInfo(
             session_id="s1",
             stream_id=0,
@@ -117,6 +120,7 @@ class TestWebTransportSessionInfo:
             ready_at=ready_at,
             closed_at=closed_at,
         )
+
         expected_str = f"Session s1 [connected] path=/live stream=0{expected_duration_str}"
         assert str(session_info) == expected_str
 
@@ -131,7 +135,9 @@ class TestWebTransportSessionInfo:
             headers=headers,
             ready_at=2001.0,
         )
+
         session_dict = session_info.to_dict()
+
         assert isinstance(session_dict, dict)
         assert session_dict["session_id"] == "test-session"
         assert session_dict["state"] == SessionState.CONNECTED

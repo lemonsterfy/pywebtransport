@@ -1,7 +1,6 @@
 """Unit tests for the pywebtransport.types module."""
 
 import ssl
-from typing import List, Optional
 
 import pytest
 
@@ -122,13 +121,13 @@ class TestRuntimeCheckableProtocols:
         async def write(self, data: Data) -> None:
             pass
 
-        async def writelines(self, lines: List[Data]) -> None:
+        async def writelines(self, lines: list[Data]) -> None:
             pass
 
         async def flush(self) -> None:
             pass
 
-        async def close(self, *, code: Optional[int] = None, reason: Optional[str] = None) -> None:
+        async def close(self, *, code: int | None = None, reason: str | None = None) -> None:
             pass
 
         def is_closing(self) -> bool:
@@ -139,34 +138,34 @@ class TestRuntimeCheckableProtocols:
 
     class GoodClientConfig:
         connect_timeout: float = 5.0
-        read_timeout: Optional[float] = 5.0
-        write_timeout: Optional[float] = 5.0
+        read_timeout: float | None = 5.0
+        write_timeout: float | None = 5.0
         close_timeout: float = 2.0
         max_streams: int = 100
         stream_buffer_size: int = 65536
-        verify_mode: Optional[ssl.VerifyMode] = ssl.CERT_REQUIRED
-        ca_certs: Optional[str] = None
-        certfile: Optional[str] = None
-        keyfile: Optional[str] = None
+        verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+        ca_certs: str | None = None
+        certfile: str | None = None
+        keyfile: str | None = None
         check_hostname: bool = True
-        alpn_protocols: List[str] = ["h3"]
+        alpn_protocols: list[str] = ["h3"]
         http_version: str = "HTTP/3"
         user_agent: str = "pywebtransport"
         headers: Headers = {}
 
     class BadClientConfig:
         connect_timeout: float = 5.0
-        read_timeout: Optional[float] = 5.0
-        write_timeout: Optional[float] = 5.0
+        read_timeout: float | None = 5.0
+        write_timeout: float | None = 5.0
         close_timeout: float = 2.0
         max_streams: int = 100
         stream_buffer_size: int = 65536
-        verify_mode: Optional[ssl.VerifyMode] = ssl.CERT_REQUIRED
-        ca_certs: Optional[str] = None
-        certfile: Optional[str] = None
-        keyfile: Optional[str] = None
+        verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+        ca_certs: str | None = None
+        certfile: str | None = None
+        keyfile: str | None = None
         check_hostname: bool = True
-        alpn_protocols: List[str] = ["h3"]
+        alpn_protocols: list[str] = ["h3"]
         http_version: str = "HTTP/3"
         headers: Headers = {}
 
@@ -175,14 +174,14 @@ class TestRuntimeCheckableProtocols:
         bind_port: int = 4433
         certfile: str = "cert.pem"
         keyfile: str = "key.pem"
-        ca_certs: Optional[str] = None
+        ca_certs: str | None = None
         verify_mode: ssl.VerifyMode = ssl.CERT_NONE
         max_connections: int = 1000
         max_streams_per_connection: int = 100
         connection_timeout: float = 60.0
-        read_timeout: Optional[float] = 30.0
-        write_timeout: Optional[float] = 30.0
-        alpn_protocols: List[str] = ["h3"]
+        read_timeout: float | None = 30.0
+        write_timeout: float | None = 30.0
+        alpn_protocols: list[str] = ["h3"]
         http_version: str = "HTTP/3"
         backlog: int = 100
         reuse_port: bool = False
@@ -191,14 +190,14 @@ class TestRuntimeCheckableProtocols:
     class BadServerConfig:
         bind_host: str = "localhost"
         bind_port: int = 4433
-        ca_certs: Optional[str] = None
+        ca_certs: str | None = None
         verify_mode: ssl.VerifyMode = ssl.CERT_NONE
         max_connections: int = 1000
         max_streams_per_connection: int = 100
         connection_timeout: float = 60.0
-        read_timeout: Optional[float] = 30.0
-        write_timeout: Optional[float] = 30.0
-        alpn_protocols: List[str] = ["h3"]
+        read_timeout: float | None = 30.0
+        write_timeout: float | None = 30.0
+        alpn_protocols: list[str] = ["h3"]
         http_version: str = "HTTP/3"
         backlog: int = 100
         reuse_port: bool = False
@@ -215,6 +214,7 @@ class TestRuntimeCheckableProtocols:
 
     def test_bidirectional_stream_protocol_conformance(self) -> None:
         instance = self.GoodBidirectionalStream()
+
         assert isinstance(instance, BidirectionalStreamProtocol)
         assert isinstance(instance, WritableStreamProtocol)
         assert isinstance(instance, ReadableStreamProtocol)

@@ -1,19 +1,44 @@
+# Documentation
+docs/_build/
+site/
+
+# Environment
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Package building
+.eggs/
+*.egg-info/
+build/
+dist/
+
 # Python
 __pycache__/
 *.py[cod]
 *.so
 
-# Package building
-build/
-dist/
-*.egg-info/
-.eggs/
+# SSL/TLS certificates
+*.crt
+*.key
+*.p12
+*.pem
 
 # Testing
-.pytest_cache/
+.benchmarks/
 .cache/
 .coverage*
-htmlcov/
+.htmlcov/
+.pytest_cache/
 .tox/
 
 # Type checking
@@ -22,27 +47,3 @@ htmlcov/
 # Virtual environments
 .venv/
 venv/
-
-# Documentation
-docs/_build/
-site/
-
-# IDE
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment
-.env
-.env.*
-
-# SSL/TLS certificates
-*.key
-*.crt
-*.pem
-*.p12

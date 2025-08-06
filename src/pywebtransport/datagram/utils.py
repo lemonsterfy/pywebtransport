@@ -2,8 +2,10 @@
 WebTransport Datagram Utilities.
 """
 
+from __future__ import annotations
+
 import asyncio
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from pywebtransport.utils import get_logger, get_timestamp
 
@@ -31,11 +33,11 @@ def is_heartbeat_datagram(data: bytes) -> bool:
 
 
 async def datagram_throughput_test(
-    datagram_stream: "WebTransportDatagramDuplexStream",
+    datagram_stream: WebTransportDatagramDuplexStream,
     *,
     duration: float = 10.0,
     datagram_size: int = 1000,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run a throughput test on the datagram stream."""
     if datagram_size > datagram_stream.max_datagram_size:
         raise ValueError(f"datagram_size {datagram_size} exceeds max size {datagram_stream.max_datagram_size}")
@@ -49,12 +51,11 @@ async def datagram_throughput_test(
     while get_timestamp() < end_time:
         try:
             if not await datagram_stream.try_send(test_data):
-                # Apply a small backpressure delay if the buffer is full
                 await asyncio.sleep(0.01)
             sent_count += 1
         except Exception:
             error_count += 1
-        await asyncio.sleep(0.001)  # Avoid saturating the event loop
+        await asyncio.sleep(0.001)
 
     actual_duration = get_timestamp() - start_time
     throughput_dps = sent_count / max(1, actual_duration)

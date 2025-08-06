@@ -2,12 +2,14 @@
 WebTransport Server Implementation.
 """
 
+from __future__ import annotations
+
 import asyncio
 import weakref
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Dict, List, Optional, Type, cast
+from typing import Any, Self, Type, cast
 
 from aioquic.asyncio import serve as quic_serve
 from aioquic.asyncio.protocol import QuicConnectionProtocol
@@ -42,7 +44,7 @@ class ServerStats:
     protocol_errors: int = 0
     uptime: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert statistics to a dictionary."""
         return asdict(self)
 
@@ -50,18 +52,18 @@ class ServerStats:
 class WebTransportServerProtocol(QuicConnectionProtocol):
     """An aioquic protocol wrapper that handles incoming connections and event buffering."""
 
-    _server_ref: weakref.ReferenceType["WebTransportServer"]
-    _connection_ref: Optional[weakref.ReferenceType["WebTransportConnection"]]
-    _pending_events: List[QuicEvent]
+    _server_ref: weakref.ReferenceType[WebTransportServer]
+    _connection_ref: weakref.ReferenceType[WebTransportConnection] | None
+    _pending_events: list[QuicEvent]
 
-    def __init__(self, server: "WebTransportServer", *args: Any, **kwargs: Any):
+    def __init__(self, server: WebTransportServer, *args: Any, **kwargs: Any):
         """Initialize the server protocol."""
         super().__init__(*args, **kwargs)
         self._server_ref = weakref.ref(server)
-        self._connection_ref: Optional[weakref.ReferenceType["WebTransportConnection"]] = None
+        self._connection_ref: weakref.ReferenceType[WebTransportConnection] | None = None
         self._pending_events = []
 
-    def set_connection(self, connection: "WebTransportConnection") -> None:
+    def set_connection(self, connection: WebTransportConnection) -> None:
         """Link the protocol to its WebTransportConnection and process buffered events."""
         self._connection_ref = weakref.ref(connection)
         if self._pending_events and connection.protocol_handler:
@@ -89,20 +91,20 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
 class WebTransportServer(EventEmitter):
     """The main WebTransport server, managing lifecycle and connections."""
 
-    def __init__(self, *, config: Optional[ServerConfig] = None):
+    def __init__(self, *, config: ServerConfig | None = None):
         """Initialize the WebTransport server."""
         super().__init__()
         self._config = config or ServerConfig.create()
         self._config.validate()
         self._serving, self._closing = False, False
-        self._server: Optional[QuicServer] = None
-        self._start_time: Optional[float] = None
+        self._server: QuicServer | None = None
+        self._start_time: float | None = None
         self._connection_manager = ConnectionManager.create(max_connections=self._config.max_connections)
         self._session_manager = SessionManager.create(
             max_sessions=self._config.max_connections * 10,
             cleanup_interval=getattr(self._config, "session_cleanup_interval", 300.0),
         )
-        self._background_tasks: List[asyncio.Task[Any]] = []
+        self._background_tasks: list[asyncio.Task[Any]] = []
         self._stats = ServerStats()
         self._setup_event_handlers()
         logger.info("WebTransport server initialized.")
@@ -118,13 +120,13 @@ class WebTransportServer(EventEmitter):
         return self._serving
 
     @property
-    def local_address(self) -> Optional[Address]:
+    def local_address(self) -> Address | None:
         """Get the local address the server is bound to."""
         if self._server and hasattr(self._server, "_transport") and self._server._transport:
-            return cast(Optional[Address], self._server._transport.get_extra_info("sockname"))
+            return cast(Address | None, self._server._transport.get_extra_info("sockname"))
         return None
 
-    async def __aenter__(self) -> "WebTransportServer":
+    async def __aenter__(self) -> Self:
         """Enter the async context for the server."""
         await self._connection_manager.__aenter__()
         await self._session_manager.__aenter__()
@@ -132,14 +134,14 @@ class WebTransportServer(EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and close the server."""
         await self.close()
 
-    async def listen(self, *, host: Optional[str] = None, port: Optional[int] = None) -> None:
+    async def listen(self, *, host: str | None = None, port: int | None = None) -> None:
         """Start the server and begin listening for connections."""
         if self._serving:
             raise ServerError("Server is already serving")
@@ -201,7 +203,7 @@ class WebTransportServer(EventEmitter):
         finally:
             await self.close()
 
-    async def get_server_stats(self) -> Dict[str, Any]:
+    async def get_server_stats(self) -> dict[str, Any]:
         """Get a snapshot of the server's performance statistics."""
         if self._start_time:
             self._stats.uptime = get_timestamp() - self._start_time
@@ -210,7 +212,7 @@ class WebTransportServer(EventEmitter):
         base_stats["sessions"] = await self._session_manager.get_stats()
         return base_stats
 
-    async def debug_state(self) -> Dict[str, Any]:
+    async def debug_state(self) -> dict[str, Any]:
         """Get a detailed snapshot of the server's state for debugging."""
         stats = await self.get_server_stats()
         connections = await self._connection_manager.get_all_connections()
@@ -222,9 +224,9 @@ class WebTransportServer(EventEmitter):
             "sessions": [await sess.get_session_stats() for sess in sessions],
         }
 
-    async def diagnose_issues(self) -> List[str]:
+    async def diagnose_issues(self) -> list[str]:
         """Analyze server statistics and configuration to identify potential issues."""
-        issues: List[str] = []
+        issues: list[str] = []
         stats = await self.get_server_stats()
 
         if not self.is_serving:
@@ -256,7 +258,7 @@ class WebTransportServer(EventEmitter):
         self, transport: asyncio.BaseTransport, protocol: WebTransportServerProtocol
     ) -> None:
         """Handle a new incoming connection and set up the event forwarding chain."""
-        connection: Optional[WebTransportConnection] = None
+        connection: WebTransportConnection | None = None
         try:
             connection = WebTransportConnection(self._config)
 

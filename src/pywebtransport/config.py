@@ -2,11 +2,13 @@
 WebTransport Configuration.
 """
 
+from __future__ import annotations
+
 import copy
 import ssl
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Self
 
 from pywebtransport.constants import Defaults, WebTransportConstants
 from pywebtransport.exceptions import ConfigurationError, certificate_not_found, invalid_config
@@ -21,7 +23,7 @@ __all__ = [
 ]
 
 
-def _validate_timeout(timeout: Optional[float]) -> None:
+def _validate_timeout(timeout: float | None) -> None:
     """Validate a timeout value."""
     if timeout is not None:
         if not isinstance(timeout, (int, float)):
@@ -41,19 +43,19 @@ class ClientConfig:
     """A comprehensive configuration for the WebTransport client."""
 
     connect_timeout: float = WebTransportConstants.DEFAULT_CONNECT_TIMEOUT
-    read_timeout: Optional[float] = WebTransportConstants.DEFAULT_READ_TIMEOUT
-    write_timeout: Optional[float] = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
+    read_timeout: float | None = WebTransportConstants.DEFAULT_READ_TIMEOUT
+    write_timeout: float | None = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
     close_timeout: float = WebTransportConstants.DEFAULT_CLOSE_TIMEOUT
     stream_creation_timeout: float = WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT
     max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS
     stream_buffer_size: int = WebTransportConstants.DEFAULT_BUFFER_SIZE
     max_stream_buffer_size: int = WebTransportConstants.MAX_BUFFER_SIZE
-    verify_mode: Optional[ssl.VerifyMode] = ssl.CERT_REQUIRED
-    ca_certs: Optional[str] = None
-    certfile: Optional[str] = None
-    keyfile: Optional[str] = None
+    verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+    ca_certs: str | None = None
+    certfile: str | None = None
+    keyfile: str | None = None
     check_hostname: bool = True
-    alpn_protocols: List[str] = field(default_factory=lambda: list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS))
+    alpn_protocols: list[str] = field(default_factory=lambda: list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS))
     http_version: str = "3"
     user_agent: str = f"pywebtransport/{__version__}"
     headers: Headers = field(default_factory=dict)
@@ -79,13 +81,13 @@ class ClientConfig:
         self.validate()
 
     @classmethod
-    def create(cls, **kwargs: Any) -> "ClientConfig":
+    def create(cls, **kwargs: Any) -> Self:
         """Factory method to create a client configuration with specified overrides."""
         config_dict = {**Defaults.get_client_config(), **kwargs}
         return cls.from_dict(config_dict)
 
     @classmethod
-    def create_for_development(cls, *, verify_ssl: bool = False) -> "ClientConfig":
+    def create_for_development(cls, *, verify_ssl: bool = False) -> Self:
         """Factory method to create a client configuration suitable for development."""
         return cls.create(
             connect_timeout=10.0,
@@ -97,8 +99,8 @@ class ClientConfig:
 
     @classmethod
     def create_for_production(
-        cls, *, ca_certs: Optional[str] = None, certfile: Optional[str] = None, keyfile: Optional[str] = None
-    ) -> "ClientConfig":
+        cls, *, ca_certs: str | None = None, certfile: str | None = None, keyfile: str | None = None
+    ) -> Self:
         """Factory method to create a client configuration suitable for production."""
         return cls.create(
             connect_timeout=30.0,
@@ -115,7 +117,7 @@ class ClientConfig:
         )
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "ClientConfig":
+    def from_dict(cls, config_dict: dict[str, Any]) -> Self:
         """Create a ClientConfig instance from a dictionary."""
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}
@@ -166,11 +168,11 @@ class ClientConfig:
         if self.max_retry_delay <= 0:
             raise invalid_config("max_retry_delay", self.max_retry_delay, "must be positive")
 
-    def copy(self) -> "ClientConfig":
+    def copy(self) -> Self:
         """Create a deep copy of the configuration."""
         return copy.deepcopy(self)
 
-    def update(self, **kwargs: Any) -> "ClientConfig":
+    def update(self, **kwargs: Any) -> Self:
         """Create a new config with updated values."""
         new_config = self.copy()
         for key, value in kwargs.items():
@@ -181,7 +183,7 @@ class ClientConfig:
         new_config.validate()
         return new_config
 
-    def merge(self, other: Union["ClientConfig", Dict[str, Any]]) -> "ClientConfig":
+    def merge(self, other: ClientConfig | dict[str, Any]) -> Self:
         """Merge this configuration with another config or dictionary."""
         if isinstance(other, dict):
             return self.update(**other)
@@ -194,7 +196,7 @@ class ClientConfig:
             return self.update(**update_dict)
         raise TypeError("Can only merge with ClientConfig or dict")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the configuration to a dictionary."""
         result = {}
         for field_name in self.__dataclass_fields__:
@@ -217,13 +219,13 @@ class ServerConfig:
     max_connections: int = 1000
     max_streams_per_connection: int = WebTransportConstants.DEFAULT_MAX_STREAMS
     connection_timeout: float = WebTransportConstants.DEFAULT_KEEPALIVE_TIMEOUT
-    read_timeout: Optional[float] = WebTransportConstants.DEFAULT_READ_TIMEOUT
-    write_timeout: Optional[float] = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
+    read_timeout: float | None = WebTransportConstants.DEFAULT_READ_TIMEOUT
+    write_timeout: float | None = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
     certfile: str = ""
     keyfile: str = ""
-    ca_certs: Optional[str] = None
+    ca_certs: str | None = None
     verify_mode: ssl.VerifyMode = ssl.CERT_NONE
-    alpn_protocols: List[str] = field(default_factory=lambda: list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS))
+    alpn_protocols: list[str] = field(default_factory=lambda: list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS))
     http_version: str = "3"
     backlog: int = 128
     reuse_port: bool = True
@@ -237,7 +239,7 @@ class ServerConfig:
     initial_max_stream_data_uni: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAM_DATA_UNI
     initial_max_streams_bidi: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAMS_BIDI
     initial_max_streams_uni: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAMS_UNI
-    middleware: List[Any] = field(default_factory=list)
+    middleware: list[Any] = field(default_factory=list)
     debug: bool = False
     log_level: str = "INFO"
     access_log: bool = True
@@ -247,15 +249,15 @@ class ServerConfig:
         self.validate()
 
     @classmethod
-    def create(cls, **kwargs: Any) -> "ServerConfig":
+    def create(cls, **kwargs: Any) -> Self:
         """Factory method to create a server configuration with specified overrides."""
         config_dict = {**Defaults.get_server_config(), **kwargs}
         return cls.from_dict(config_dict)
 
     @classmethod
     def create_for_development(
-        cls, *, host: str = "localhost", port: int = 4433, certfile: Optional[str] = None, keyfile: Optional[str] = None
-    ) -> "ServerConfig":
+        cls, *, host: str = "localhost", port: int = 4433, certfile: str | None = None, keyfile: str | None = None
+    ) -> Self:
         """Factory method to create a server configuration suitable for development."""
         config = cls.create(
             bind_host=host,
@@ -274,8 +276,8 @@ class ServerConfig:
 
     @classmethod
     def create_for_production(
-        cls, *, host: str, port: int, certfile: str, keyfile: str, ca_certs: Optional[str] = None
-    ) -> "ServerConfig":
+        cls, *, host: str, port: int, certfile: str, keyfile: str, ca_certs: str | None = None
+    ) -> Self:
         """Factory method to create a server configuration suitable for production."""
         return cls.create(
             bind_host=host,
@@ -291,7 +293,7 @@ class ServerConfig:
         )
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "ServerConfig":
+    def from_dict(cls, config_dict: dict[str, Any]) -> Self:
         """Create a ServerConfig instance from a dictionary."""
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}
@@ -342,11 +344,11 @@ class ServerConfig:
         if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
             raise invalid_config("max_datagram_size", self.max_datagram_size, "must be 1-65535")
 
-    def copy(self) -> "ServerConfig":
+    def copy(self) -> Self:
         """Create a deep copy of the configuration."""
         return copy.deepcopy(self)
 
-    def update(self, **kwargs: Any) -> "ServerConfig":
+    def update(self, **kwargs: Any) -> Self:
         """Create a new config with updated values."""
         new_config = self.copy()
         for key, value in kwargs.items():
@@ -357,7 +359,7 @@ class ServerConfig:
         new_config.validate()
         return new_config
 
-    def merge(self, other: Union["ServerConfig", Dict[str, Any]]) -> "ServerConfig":
+    def merge(self, other: ServerConfig | dict[str, Any]) -> Self:
         """Merge this configuration with another config or dictionary."""
         if isinstance(other, dict):
             return self.update(**other)
@@ -370,7 +372,7 @@ class ServerConfig:
             return self.update(**update_dict)
         raise TypeError("Can only merge with ServerConfig or dict")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the configuration to a dictionary."""
         result = {}
         for field_name in self.__dataclass_fields__:
@@ -394,9 +396,9 @@ class ConfigBuilder:
     def __init__(self, config_type: str = "client"):
         """Initialize the configuration builder."""
         self.config_type = config_type
-        self._config_dict: Dict[str, Any] = {}
+        self._config_dict: dict[str, Any] = {}
 
-    def bind(self, host: str, port: int) -> "ConfigBuilder":
+    def bind(self, host: str, port: int) -> Self:
         """Set the bind host and port (server only)."""
         if self.config_type != "server":
             raise ConfigurationError("bind() can only be used with server config")
@@ -404,7 +406,7 @@ class ConfigBuilder:
         self._config_dict["bind_port"] = port
         return self
 
-    def debug(self, *, enabled: bool = True, log_level: str = "DEBUG") -> "ConfigBuilder":
+    def debug(self, *, enabled: bool = True, log_level: str = "DEBUG") -> Self:
         """Set debug and logging settings."""
         self._config_dict["debug"] = enabled
         self._config_dict["log_level"] = log_level
@@ -413,10 +415,10 @@ class ConfigBuilder:
     def performance(
         self,
         *,
-        max_streams: Optional[int] = None,
-        buffer_size: Optional[int] = None,
-        max_connections: Optional[int] = None,
-    ) -> "ConfigBuilder":
+        max_streams: int | None = None,
+        buffer_size: int | None = None,
+        max_connections: int | None = None,
+    ) -> Self:
         """Set performance-related settings."""
         if max_streams is not None:
             if self.config_type == "client":
@@ -432,11 +434,11 @@ class ConfigBuilder:
     def security(
         self,
         *,
-        certfile: Optional[str] = None,
-        keyfile: Optional[str] = None,
-        ca_certs: Optional[str] = None,
-        verify_mode: Optional[ssl.VerifyMode] = None,
-    ) -> "ConfigBuilder":
+        certfile: str | None = None,
+        keyfile: str | None = None,
+        ca_certs: str | None = None,
+        verify_mode: ssl.VerifyMode | None = None,
+    ) -> Self:
         """Set security and SSL/TLS settings."""
         if certfile is not None:
             self._config_dict["certfile"] = certfile
@@ -448,9 +450,7 @@ class ConfigBuilder:
             self._config_dict["verify_mode"] = verify_mode
         return self
 
-    def timeout(
-        self, *, connect: Optional[float] = None, read: Optional[float] = None, write: Optional[float] = None
-    ) -> "ConfigBuilder":
+    def timeout(self, *, connect: float | None = None, read: float | None = None, write: float | None = None) -> Self:
         """Set timeout values for the configuration."""
         if connect is not None:
             self._config_dict["connect_timeout"] = connect
@@ -460,7 +460,7 @@ class ConfigBuilder:
             self._config_dict["write_timeout"] = write
         return self
 
-    def build(self) -> Union[ClientConfig, ServerConfig]:
+    def build(self) -> ClientConfig | ServerConfig:
         """Build and return the final configuration object."""
         if self.config_type == "client":
             return ClientConfig.create(**self._config_dict)

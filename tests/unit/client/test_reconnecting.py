@@ -18,16 +18,16 @@ class TestReconnectingClient:
         return mocker.MagicMock(spec=ClientConfig)
 
     @pytest.fixture
-    def mock_underlying_client(self, mocker: MockerFixture) -> Any:
-        client = mocker.create_autospec(WebTransportClient, instance=True)
-        client.__aenter__.return_value = client
-        return client
-
-    @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.is_ready = True
         return session
+
+    @pytest.fixture
+    def mock_underlying_client(self, mocker: MockerFixture) -> Any:
+        client = mocker.create_autospec(WebTransportClient, instance=True)
+        client.__aenter__.return_value = client
+        return client
 
     @pytest.fixture(autouse=True)
     def setup_mocks(self, mocker: MockerFixture, mock_underlying_client: Any) -> None:
@@ -39,6 +39,7 @@ class TestReconnectingClient:
 
     def test_init_with_infinite_retries(self, mocker: MockerFixture) -> None:
         client = ReconnectingClient(self.URL, max_retries=-1)
+
         assert client._max_retries == float("inf")
 
     @pytest.mark.asyncio

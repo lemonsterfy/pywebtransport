@@ -2,10 +2,12 @@
 WebTransport Client Monitor.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections import deque
 from types import TracebackType
-from typing import Any, Deque, Dict, Optional, Type
+from typing import Any, Self, Type
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.utils import get_logger, get_timestamp
@@ -22,12 +24,12 @@ class ClientMonitor:
         """Initialize the client monitor."""
         self._client = client
         self._interval = monitoring_interval
-        self._monitor_task: Optional[asyncio.Task[None]] = None
-        self._metrics_history: Deque[Dict[str, Any]] = deque(maxlen=120)
-        self._alerts: Deque[Dict[str, Any]] = deque(maxlen=100)
+        self._monitor_task: asyncio.Task[None] | None = None
+        self._metrics_history: deque[dict[str, Any]] = deque(maxlen=120)
+        self._alerts: deque[dict[str, Any]] = deque(maxlen=100)
 
     @classmethod
-    def create(cls, client: WebTransportClient, *, monitoring_interval: float = 30.0) -> "ClientMonitor":
+    def create(cls, client: WebTransportClient, *, monitoring_interval: float = 30.0) -> Self:
         """Factory method to create a new client monitor instance."""
         return cls(client, monitoring_interval=monitoring_interval)
 
@@ -36,7 +38,7 @@ class ClientMonitor:
         """Check if the monitoring task is currently active."""
         return self._monitor_task is not None and not self._monitor_task.done()
 
-    async def __aenter__(self) -> "ClientMonitor":
+    async def __aenter__(self) -> Self:
         """Enter the async context and start the monitoring task."""
         if not self.is_monitoring:
             try:
@@ -48,9 +50,9 @@ class ClientMonitor:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and stop the monitoring task."""
         if self._monitor_task:
@@ -61,7 +63,7 @@ class ClientMonitor:
                 pass
         logger.info("Client monitoring stopped.")
 
-    def get_metrics_summary(self) -> Dict[str, Any]:
+    def get_metrics_summary(self) -> dict[str, Any]:
         """Get a summary of the latest metrics and recent alerts."""
         return {
             "latest_metrics": self._metrics_history[-1] if self._metrics_history else {},
@@ -93,7 +95,7 @@ class ClientMonitor:
 
     def _check_alerts(self) -> None:
         """Analyze the latest metrics and generate alerts if thresholds are breached."""
-        metrics = self._metrics_history[-1] if self._metrics_history else None
+        metrics: dict[str, Any] | None = self._metrics_history[-1] if self._metrics_history else None
         if not metrics or not isinstance(metrics.get("stats"), dict):
             return
 

@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import deque
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 import pytest
 from pytest_mock import MockerFixture
@@ -12,12 +12,12 @@ from pywebtransport.server import ServerMonitor, WebTransportServer
 
 class TestServerMonitor:
     @pytest.fixture
-    def mock_server(self, mocker: MockerFixture) -> Any:
-        return mocker.create_autospec(WebTransportServer, instance=True)
-
-    @pytest.fixture
     def mock_logger(self, mocker: MockerFixture) -> Any:
         return mocker.patch("pywebtransport.server.monitor.logger")
+
+    @pytest.fixture
+    def mock_server(self, mocker: MockerFixture) -> Any:
+        return mocker.create_autospec(WebTransportServer, instance=True)
 
     @pytest.fixture
     def mock_timestamp(self, mocker: MockerFixture) -> Any:
@@ -164,9 +164,9 @@ class TestServerMonitor:
     ) -> None:
         monitor = ServerMonitor(mock_server)
         mock_health_status = mocker.patch.object(monitor, "get_health_status")
-
         unhealthy_status = {"status": "unhealthy", "reason": "Server is not serving."}
         mock_health_status.return_value = unhealthy_status
+
         await monitor._check_for_alerts()
 
         assert len(monitor.get_alerts()) == 1
@@ -174,6 +174,7 @@ class TestServerMonitor:
         mock_logger.warning.assert_called_once_with("Health Alert: unhealthy - Server is not serving.")
 
         await monitor._check_for_alerts()
+
         assert len(monitor.get_alerts()) == 1
         mock_logger.warning.assert_called_once()
 
@@ -232,15 +233,16 @@ class TestServerMonitor:
         mocker: MockerFixture,
         mock_server: Any,
         description: str,
-        metrics: Optional[Dict[str, Any]],
+        metrics: dict[str, Any] | None,
         is_serving: bool,
-        expected_status: Dict[str, str],
+        expected_status: dict[str, str],
     ) -> None:
         monitor = ServerMonitor(mock_server)
         mocker.patch.object(monitor, "get_current_metrics", return_value=metrics)
         type(mock_server).is_serving = mocker.PropertyMock(return_value=is_serving)
 
         health = monitor.get_health_status()
+
         assert health == expected_status
 
     def test_history_and_alert_retrieval(self, mock_server: Any) -> None:

@@ -2,9 +2,10 @@
 WebTransport Server Utilities.
 """
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
-from typing import Optional
 
 from pywebtransport.config import ServerConfig
 from pywebtransport.server.app import ServerApp
@@ -37,7 +38,7 @@ def create_development_server(*, host: str = "localhost", port: int = 4433, gene
     return ServerApp(config=config)
 
 
-def create_echo_server_app(*, config: Optional[ServerConfig] = None) -> ServerApp:
+def create_echo_server_app(*, config: ServerConfig | None = None) -> ServerApp:
     """Create a simple echo server application."""
     app = ServerApp(config=config)
     app.route("/")(echo_handler)
@@ -65,7 +66,8 @@ async def echo_handler(session: WebTransportSession) -> None:
 async def health_check_handler(session: WebTransportSession) -> None:
     """Send a simple health status datagram and close the session."""
     try:
-        await session.datagrams.send(b'{"status": "healthy"}')
+        datagrams = await session.datagrams
+        await datagrams.send(b'{"status": "healthy"}')
     except Exception as e:
         logger.error(f"Health check datagram send failed: {e}")
     finally:
@@ -75,10 +77,11 @@ async def health_check_handler(session: WebTransportSession) -> None:
 async def _echo_datagrams(session: WebTransportSession) -> None:
     """Echo datagrams received on a session."""
     try:
+        datagrams = await session.datagrams
         while not session.is_closed:
-            data = await session.datagrams.receive()
+            data = await datagrams.receive()
             if data:
-                await session.datagrams.send(b"ECHO: " + data)
+                await datagrams.send(b"ECHO: " + data)
     except asyncio.CancelledError:
         pass
     except Exception:

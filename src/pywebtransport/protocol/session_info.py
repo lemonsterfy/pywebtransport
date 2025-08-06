@@ -2,8 +2,10 @@
 WebTransport Session and Stream Information Data Classes.
 """
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pywebtransport.types import Headers, SessionId, SessionState, StreamDirection, StreamId, StreamState
 from pywebtransport.utils import get_timestamp
@@ -22,9 +24,9 @@ class StreamInfo:
     created_at: float
     bytes_sent: int = 0
     bytes_received: int = 0
-    closed_at: Optional[float] = None
-    close_code: Optional[int] = None
-    close_reason: Optional[str] = None
+    closed_at: float | None = None
+    close_code: int | None = None
+    close_reason: str | None = None
 
     def __str__(self) -> str:
         """Format stream information for protocol debugging."""
@@ -39,7 +41,7 @@ class StreamInfo:
             f"sent={self.bytes_sent}b recv={self.bytes_received}b{duration}"
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the stream information to a dictionary."""
         return asdict(self)
 
@@ -54,10 +56,10 @@ class WebTransportSessionInfo:
     path: str
     created_at: float
     headers: Headers = field(default_factory=dict)
-    ready_at: Optional[float] = None
-    closed_at: Optional[float] = None
-    close_code: Optional[int] = None
-    close_reason: Optional[str] = None
+    ready_at: float | None = None
+    closed_at: float | None = None
+    close_code: int | None = None
+    close_reason: str | None = None
 
     def __str__(self) -> str:
         """Format session information for protocol debugging."""
@@ -68,6 +70,6 @@ class WebTransportSessionInfo:
             duration = f" (active: {get_timestamp() - self.ready_at:.2f}s)"
         return f"Session {self.session_id} [{self.state.value}] " f"path={self.path} stream={self.stream_id}{duration}"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the session information to a dictionary."""
         return asdict(self)

@@ -2,9 +2,11 @@
 WebTransport Proxy Client.
 """
 
+from __future__ import annotations
+
 import asyncio
 from types import TracebackType
-from typing import Optional, Type
+from typing import Self, Type
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -22,29 +24,30 @@ logger = get_logger("client.proxy")
 class WebTransportProxy:
     """Tunnels WebTransport connections through an HTTP CONNECT proxy."""
 
-    def __init__(self, *, proxy_url: URL, config: Optional[ClientConfig] = None):
+    def __init__(self, *, proxy_url: URL, config: ClientConfig | None = None):
         """Initialize the WebTransport proxy client."""
         self._proxy_url = proxy_url
         self._client = WebTransportClient.create(config=config)
-        self._proxy_session: Optional[WebTransportSession] = None
-        self._proxy_connect_lock = asyncio.Lock()
+        self._proxy_session: WebTransportSession | None = None
+        self._proxy_connect_lock: asyncio.Lock | None = None
 
     @classmethod
-    def create(cls, *, proxy_url: URL, config: Optional[ClientConfig] = None) -> "WebTransportProxy":
+    def create(cls, *, proxy_url: URL, config: ClientConfig | None = None) -> Self:
         """Factory method to create a new proxy client instance."""
         return cls(proxy_url=proxy_url, config=config)
 
-    async def __aenter__(self) -> "WebTransportProxy":
+    async def __aenter__(self) -> Self:
         """Enter the async context for the proxy client."""
+        self._proxy_connect_lock = asyncio.Lock()
         await self._client.__aenter__()
         logger.info("WebTransportProxy started and is active.")
         return self
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context and close the proxy client."""
         await self.close()
@@ -54,10 +57,16 @@ class WebTransportProxy:
         self,
         target_url: URL,
         *,
-        proxy_headers: Optional[Headers] = None,
+        proxy_headers: Headers | None = None,
         timeout: float = 10.0,
     ) -> WebTransportStream:
         """Establish a tunnel to a target URL through the proxy."""
+        if self._proxy_connect_lock is None:
+            raise ClientError(
+                "WebTransportProxy has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         await self._ensure_proxy_session(headers=proxy_headers, timeout=timeout)
 
         if self._proxy_session is None:
@@ -89,14 +98,26 @@ class WebTransportProxy:
 
     async def close(self) -> None:
         """Close the proxy client and the main session to the proxy server."""
+        if self._proxy_connect_lock is None:
+            raise ClientError(
+                "WebTransportProxy has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         logger.info("Closing proxy connection.")
         await self._client.close()
         self._proxy_session = None
 
-    async def _ensure_proxy_session(self, headers: Optional[Headers], timeout: float) -> None:
+    async def _ensure_proxy_session(self, headers: Headers | None, timeout: float) -> None:
         """Ensure the connection to the proxy server is established, using a lock."""
         if self._proxy_session and self._proxy_session.is_ready:
             return
+
+        if self._proxy_connect_lock is None:
+            raise ClientError(
+                "WebTransportProxy has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
 
         async with self._proxy_connect_lock:
             if self._proxy_session and self._proxy_session.is_ready:

@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.datagram.monitor module."""
 
 import asyncio
-from typing import Any, Coroutine, Dict, List, NoReturn
+from typing import Any, Coroutine, NoReturn
 
 import pytest
 from _pytest.logging import LogCaptureFixture
@@ -11,30 +11,29 @@ from pywebtransport import WebTransportDatagramDuplexStream
 from pywebtransport.datagram import DatagramMonitor
 
 
-@pytest.fixture
-def mock_stream(mocker: MockerFixture) -> Any:
-    stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
-    stream.session_id = "test-session-id-12345678"
-    stream.outgoing_high_water_mark = 100
-    stats_dict = {
-        "datagrams_sent": 100,
-        "datagrams_received": 95,
-        "send_success_rate": 0.99,
-        "avg_send_time": 0.01,
-    }
-    stream.stats.get.side_effect = lambda key, default=None: stats_dict.get(key, default)
-    stream.get_queue_stats = mocker.MagicMock(return_value={"outgoing": {"size": 10}, "incoming": {"size": 5}})
-    return stream
-
-
-@pytest.fixture
-def monitor(mock_stream: Any) -> DatagramMonitor:
-    return DatagramMonitor(mock_stream)
-
-
 class TestDatagramMonitor:
+    @pytest.fixture
+    def monitor(self, mock_stream: Any) -> DatagramMonitor:
+        return DatagramMonitor(mock_stream)
+
+    @pytest.fixture
+    def mock_stream(self, mocker: MockerFixture) -> Any:
+        stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
+        stream.session_id = "test-session-id-12345678"
+        stream.outgoing_high_water_mark = 100
+        stats_dict = {
+            "datagrams_sent": 100,
+            "datagrams_received": 95,
+            "send_success_rate": 0.99,
+            "avg_send_time": 0.01,
+        }
+        stream.stats.get.side_effect = lambda key, default=None: stats_dict.get(key, default)
+        stream.get_queue_stats = mocker.MagicMock(return_value={"outgoing": {"size": 10}, "incoming": {"size": 5}})
+        return stream
+
     def test_initialization(self, mock_stream: Any) -> None:
         mon = DatagramMonitor(mock_stream)
+
         assert mon._stream is mock_stream
         assert mon._interval == 5.0
         assert mon._samples.maxlen == 100
@@ -42,6 +41,7 @@ class TestDatagramMonitor:
 
     def test_create_factory(self, mock_stream: Any) -> None:
         mon = DatagramMonitor.create(mock_stream, monitoring_interval=10.0)
+
         assert isinstance(mon, DatagramMonitor)
         assert mon._interval == 10.0
 
@@ -49,8 +49,8 @@ class TestDatagramMonitor:
     async def test_lifecycle_and_context_manager(self, monitor: DatagramMonitor, mocker: MockerFixture) -> None:
         create_task_spy = mocker.spy(asyncio, "create_task")
         mocker.patch("asyncio.sleep")
-
         assert not monitor.is_monitoring
+
         async with monitor:
             assert monitor.is_monitoring
             create_task_spy.assert_called_once()  # type: ignore[unreachable]
@@ -73,6 +73,7 @@ class TestDatagramMonitor:
     @pytest.mark.asyncio
     async def test_aexit_no_task(self, monitor: DatagramMonitor) -> None:
         await monitor.__aexit__(None, None, None)
+
         assert monitor._monitor_task is None
 
     @pytest.mark.asyncio
@@ -86,6 +87,7 @@ class TestDatagramMonitor:
         mocker.patch("asyncio.create_task", side_effect=mock_create_task_with_error)
 
         await monitor.__aenter__()
+
         assert not monitor.is_monitoring
         assert "Failed to start datagram monitor" in caplog.text
 
@@ -95,7 +97,9 @@ class TestDatagramMonitor:
 
     def test_get_samples_with_limit(self, monitor: DatagramMonitor) -> None:
         monitor._samples.extend([{"id": 1}, {"id": 2}, {"id": 3}])
+
         samples = monitor.get_samples(limit=2)
+
         assert len(samples) == 2
         assert samples[0]["id"] == 2
         assert samples[1]["id"] == 3
@@ -122,13 +126,15 @@ class TestDatagramMonitor:
         self, monitor: DatagramMonitor, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
         mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock, side_effect=ValueError("Test Exception"))
+
         await monitor._monitor_loop()
+
         assert "Monitor loop error: Test Exception" in caplog.text
 
     @pytest.mark.asyncio
     async def test_check_alerts_high_queue_size(self, monitor: DatagramMonitor, mock_stream: Any) -> None:
         mock_stream.get_queue_stats.return_value = {"outgoing": {"size": 95}}
-        sample: Dict[str, Any] = {
+        sample: dict[str, Any] = {
             "outgoing_queue_size": 95,
             "send_success_rate": 1.0,
             "timestamp": 123,
@@ -144,7 +150,7 @@ class TestDatagramMonitor:
 
     @pytest.mark.asyncio
     async def test_check_alerts_low_success_rate(self, monitor: DatagramMonitor) -> None:
-        sample: Dict[str, Any] = {
+        sample: dict[str, Any] = {
             "outgoing_queue_size": 10,
             "send_success_rate": 0.7,
             "timestamp": 123,
@@ -163,7 +169,7 @@ class TestDatagramMonitor:
         monitor._samples.extend(
             [{"avg_send_time": 0.01} for _ in range(5)] + [{"avg_send_time": 0.05} for _ in range(5)]
         )
-        sample: Dict[str, Any] = {
+        sample: dict[str, Any] = {
             "outgoing_queue_size": 10,
             "send_success_rate": 1.0,
             "avg_send_time": 0.05,
@@ -179,13 +185,15 @@ class TestDatagramMonitor:
 
     @pytest.mark.asyncio
     async def test_check_alerts_no_issues(self, monitor: DatagramMonitor) -> None:
-        sample: Dict[str, Any] = {
+        sample: dict[str, Any] = {
             "outgoing_queue_size": 10,
             "send_success_rate": 0.99,
             "timestamp": 123,
             "avg_send_time": 0.01,
         }
+
         await monitor._check_alerts(sample)
+
         assert len(monitor.get_alerts()) == 0
 
     @pytest.mark.parametrize(
@@ -199,12 +207,16 @@ class TestDatagramMonitor:
             ([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], "increasing"),
         ],
     )
-    def test_analyze_trend(self, monitor: DatagramMonitor, values: List[float], expected_trend: str) -> None:
+    def test_analyze_trend(self, monitor: DatagramMonitor, values: list[float], expected_trend: str) -> None:
         monitor._trend_analysis_window = len(values)
+
         trend = monitor._analyze_trend(values)
+
         assert trend == expected_trend
 
     def test_analyze_trend_insufficient_data(self, monitor: DatagramMonitor) -> None:
         monitor._trend_analysis_window = 10
+
         trend = monitor._analyze_trend([1.0] * 9)
+
         assert trend == "stable"

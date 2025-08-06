@@ -2,9 +2,12 @@
 WebTransport Middleware Framework.
 """
 
-import asyncio
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from __future__ import annotations
 
+import asyncio
+from typing import Any, Awaitable, Callable, Self
+
+from pywebtransport.exceptions import ServerError
 from pywebtransport.session import WebTransportSession
 from pywebtransport.types import Headers
 from pywebtransport.utils import get_logger, get_timestamp
@@ -26,7 +29,7 @@ class MiddlewareManager:
 
     def __init__(self) -> None:
         """Initialize the middleware manager."""
-        self._middleware: List[Callable[[WebTransportSession], Awaitable[bool]]] = []
+        self._middleware: list[Callable[[WebTransportSession], Awaitable[bool]]] = []
 
     def add_middleware(self, middleware: Callable[[WebTransportSession], Awaitable[bool]]) -> None:
         """Add a middleware to the chain."""
@@ -67,12 +70,13 @@ class RateLimiter:
         self._max_requests = max_requests
         self._window_seconds = window_seconds
         self._cleanup_interval = cleanup_interval
-        self._requests: Dict[str, List[float]] = {}
-        self._lock = asyncio.Lock()
-        self._cleanup_task: Optional[asyncio.Task[None]] = None
+        self._requests: dict[str, list[float]] = {}
+        self._lock: asyncio.Lock | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
 
-    async def __aenter__(self) -> "RateLimiter":
-        """Start the background cleanup task."""
+    async def __aenter__(self) -> Self:
+        """Enter async context, initializing resources and starting the background cleanup task."""
+        self._lock = asyncio.Lock()
         self._start_cleanup_task()
         return self
 
@@ -87,6 +91,11 @@ class RateLimiter:
 
     async def __call__(self, session: WebTransportSession) -> bool:
         """Apply rate limiting to an incoming session."""
+        if self._lock is None:
+            raise ServerError(
+                "RateLimiter has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         if not session.connection or not session.connection.remote_address:
             return True
 
@@ -113,6 +122,10 @@ class RateLimiter:
 
     async def _periodic_cleanup(self) -> None:
         """Periodically remove stale IP entries from the tracker."""
+        if self._lock is None:
+            logger.error("RateLimiter cleanup task cannot run without a lock.")
+            return
+
         while True:
             await asyncio.sleep(self._cleanup_interval)
             async with self._lock:
@@ -144,7 +157,7 @@ def create_auth_middleware(
 
 def create_cors_middleware(
     *,
-    allowed_origins: List[str],
+    allowed_origins: list[str],
 ) -> Callable[[WebTransportSession], Awaitable[bool]]:
     """Create a CORS middleware to validate the Origin header."""
     allowed_set = set(allowed_origins)

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned for v0.3.0
+
+- **[Feature]** Introduce a high-performance, concurrent event processing model using `asyncio.TaskGroup`.
+- **[BREAKING CHANGE]** The execution of asynchronous event handlers will change from sequential to concurrent. **Note:** The order of handler execution will no longer be guaranteed.
+
+### Potential Future Work
+
+- Address any bugs discovered after the `v0.2.0` release in subsequent patch versions (`0.2.x`).
+
+## [0.2.0] - 2025-08-06
+
+This is a major release focused on enhancing runtime safety and modernizing the library for Python 3.11 and newer. It introduces significant, backward-incompatible changes to the asynchronous object lifecycle.
+
+### BREAKING CHANGE
+
+- Core components (e.g., Streams, Managers, Pools) now require activation via an `async with` block or a dedicated factory. Direct instantiation and use without proper initialization will raise a runtime error. This change is fundamental to ensuring runtime safety and event loop independence.
+
+### Added
+
+- Integrated `pip-tools` to manage and lock development dependencies, ensuring fully reproducible environments.
+
+### Changed
+
+- **Upgraded the minimum required Python version from 3.8 to 3.11.**
+- Modernized the entire codebase to use modern type hint syntax (`X | Y`, built-in generics, `typing.Self`) available in Python 3.11+.
+- Refactored all core components to defer the initialization of `asyncio` primitives until runtime, decoupling object instantiation from a running event loop.
+- Introduced an `initialize()` pattern for resource-like objects (Streams, Sessions) to restore a convenient "get-and-use" API while maintaining runtime safety.
+- Updated project documentation, including user guides, the API reference (`docs/`), and the contributor guide (`CONTRIBUTING.md`), to reflect the new asynchronous object lifecycle and initialization patterns.
+- Overhauled the unit test suite to use asynchronous fixtures, aligning with the new component lifecycle contracts.
+- Refactored CI/CD pipelines to use the locked `dev-requirements.txt` for improved reliability and efficiency.
+- Consolidated development tool configurations (e.g., from `tox.ini`) into `pyproject.toml`.
+
+### Fixed
+
+- Eliminated a critical race condition by atomically delivering the first data payload with the stream opening event, preventing data loss.
+- Resolved a lifecycle violation in the server application framework where sessions were not being properly initialized.
+- Replaced the deprecated `datetime.utcnow()` with the timezone-aware `datetime.now(timezone.utc)`.
+- Corrected improper `await` usage for asynchronous properties throughout the test suite.
+
 ## [0.1.2] - 2025-07-30
 
 ### Added
@@ -59,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/lemonsterfy/pywebtransport/releases/tag/v0.1.0

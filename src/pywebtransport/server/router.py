@@ -2,8 +2,10 @@
 WebTransport Request Router.
 """
 
+from __future__ import annotations
+
 import re
-from typing import Any, Dict, List, Optional, Pattern, Tuple
+from typing import Any, Pattern
 
 from pywebtransport.session import WebTransportSession
 from pywebtransport.types import SessionHandler
@@ -19,14 +21,14 @@ class RequestRouter:
 
     def __init__(self) -> None:
         """Initialize the request router."""
-        self._routes: Dict[str, SessionHandler] = {}
-        self._pattern_routes: List[Tuple[Pattern[str], SessionHandler]] = []
-        self._default_handler: Optional[SessionHandler] = None
+        self._routes: dict[str, SessionHandler] = {}
+        self._pattern_routes: list[tuple[Pattern[str], SessionHandler]] = []
+        self._default_handler: SessionHandler | None = None
 
-    def route_request(self, session: WebTransportSession) -> Optional[SessionHandler]:
+    def route_request(self, session: WebTransportSession) -> SessionHandler | None:
         """Route a request to the appropriate handler based on the session's path."""
         path = session.path
-        handler: Optional[SessionHandler] = None
+        handler: SessionHandler | None = None
 
         if path in self._routes:
             handler = self._routes[path]
@@ -66,15 +68,15 @@ class RequestRouter:
         self._default_handler = handler
         logger.debug("Set default handler")
 
-    def get_route_handler(self, path: str) -> Optional[SessionHandler]:
+    def get_route_handler(self, path: str) -> SessionHandler | None:
         """Get the handler for a specific path (exact match only)."""
         return self._routes.get(path)
 
-    def get_all_routes(self) -> Dict[str, SessionHandler]:
+    def get_all_routes(self) -> dict[str, SessionHandler]:
         """Get a copy of all registered exact-match routes."""
         return self._routes.copy()
 
-    def get_route_stats(self) -> Dict[str, Any]:
+    def get_route_stats(self) -> dict[str, Any]:
         """Get statistics about the configured routes."""
         return {
             "exact_routes": len(self._routes),

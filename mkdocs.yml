@@ -1,5 +1,5 @@
 site_name: PyWebTransport
-site_description: Modern Python WebTransport library
+site_description: A high-performance, async-native WebTransport implementation for Python.
 site_url: https://pywebtransport.readthedocs.io
 repo_url: https://github.com/lemonsterfy/pywebtransport
 repo_name: lemonsterfy/pywebtransport
@@ -29,9 +29,6 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quick Start: quickstart.md
-  - User Guide:
-      - Client Development: user-guide/client.md
-      - Server Development: user-guide/server.md
   - API Reference:
       - Overview: api-reference/index.md
       - Client: api-reference/client.md

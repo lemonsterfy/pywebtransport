@@ -2,9 +2,11 @@
 WebTransport Reconnecting Client.
 """
 
+from __future__ import annotations
+
 import asyncio
 from types import TracebackType
-from typing import Optional, Type
+from typing import Self, Type
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -26,7 +28,7 @@ class ReconnectingClient(EventEmitter):
         self,
         url: URL,
         *,
-        config: Optional[ClientConfig] = None,
+        config: ClientConfig | None = None,
         max_retries: int = 5,
         retry_delay: float = 1.0,
         backoff_factor: float = 2.0,
@@ -39,8 +41,8 @@ class ReconnectingClient(EventEmitter):
         self._retry_delay = retry_delay
         self._backoff_factor = backoff_factor
         self._client = WebTransportClient.create(config=self._config)
-        self._session: Optional[WebTransportSession] = None
-        self._reconnect_task: Optional[asyncio.Task[None]] = None
+        self._session: WebTransportSession | None = None
+        self._reconnect_task: asyncio.Task[None] | None = None
         self._closed = False
 
     @classmethod
@@ -48,11 +50,11 @@ class ReconnectingClient(EventEmitter):
         cls,
         url: URL,
         *,
-        config: Optional[ClientConfig] = None,
+        config: ClientConfig | None = None,
         max_retries: int = 5,
         retry_delay: float = 1.0,
         backoff_factor: float = 2.0,
-    ) -> "ReconnectingClient":
+    ) -> Self:
         """Factory method to create a new reconnecting client instance."""
         return cls(
             url,
@@ -67,7 +69,7 @@ class ReconnectingClient(EventEmitter):
         """Check if the client is currently connected with a ready session."""
         return self._session is not None and self._session.is_ready
 
-    async def __aenter__(self) -> "ReconnectingClient":
+    async def __aenter__(self) -> Self:
         """Enter the async context, activating the client and starting the reconnect loop."""
         if self._closed:
             raise ClientError("Client is already closed")
@@ -79,14 +81,14 @@ class ReconnectingClient(EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         """Exit the async context, ensuring the client is closed."""
         await self.close()
 
-    async def get_session(self) -> Optional[WebTransportSession]:
+    async def get_session(self) -> WebTransportSession | None:
         """Get the current session if connected, waiting briefly for connection."""
         for _ in range(50):
             if self.is_connected:

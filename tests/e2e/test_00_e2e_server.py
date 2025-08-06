@@ -18,10 +18,8 @@ from pywebtransport.stream import WebTransportReceiveStream, WebTransportStream
 from pywebtransport.types import EventType
 from pywebtransport.utils import generate_self_signed_cert
 
-# Module-level constants
 DEBUG_MODE = "--debug" in sys.argv
 
-# Module-level configuration and variables
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
@@ -160,7 +158,8 @@ async def health_handler(session: WebTransportSession) -> None:
             "active_sessions": len(server_stats.active_sessions),
             "active_streams": len(server_stats.active_streams),
         }
-        await session.datagrams.send_json(health_data)
+        datagrams = await session.datagrams
+        await datagrams.send_json(health_data)
         logger.info(f"Sent health status: {health_data['status']}")
     except Exception as e:
         logger.error(f"Health handler error: {e}")
@@ -173,9 +172,10 @@ async def handle_datagrams(session: WebTransportSession) -> None:
     session_id = session.session_id
     logger.info(f"Starting datagram handler for session {session_id}")
     try:
+        datagrams = await session.datagrams
         while not session.is_closed:
             try:
-                data = await asyncio.wait_for(session.datagrams.receive(), timeout=1.0)
+                data = await asyncio.wait_for(datagrams.receive(), timeout=1.0)
                 if not data:
                     continue
 
@@ -184,7 +184,7 @@ async def handle_datagrams(session: WebTransportSession) -> None:
                 logger.info(f"Received datagram: {len(data)} bytes")
 
                 echo_data = b"ECHO: " + data
-                await session.datagrams.send(echo_data)
+                await datagrams.send(echo_data)
                 server_stats.record_bytes(len(echo_data))
                 logger.info(f"Echoed datagram: {len(echo_data)} bytes")
 
