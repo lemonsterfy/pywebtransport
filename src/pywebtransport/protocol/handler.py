@@ -434,8 +434,6 @@ class WebTransportProtocolHandler(EventEmitter):
 
             session_id = self._session_control_streams.get(session_control_stream_id)
             if not session_id:
-                if self._quic._state not in (QuicConnectionState.CLOSING, QuicConnectionState.DRAINING):
-                    logger.warning(f"Received WT stream for unknown session control stream {session_control_stream_id}")
                 return
 
             direction = protocol_utils.get_stream_direction_from_id(stream_id, is_client=self._is_client)
@@ -460,9 +458,6 @@ class WebTransportProtocolHandler(EventEmitter):
         session_id = self._session_control_streams.get(event.stream_id)
         if session_id and self._sessions.get(session_id):
             await self.emit(EventType.DATAGRAM_RECEIVED, data={"session_id": session_id, "data": event.data})
-        else:
-            if self._quic._state not in (QuicConnectionState.CLOSING, QuicConnectionState.DRAINING):
-                logger.warning(f"Received datagram for unknown session control stream {event.stream_id}")
 
     def _register_session(self, session_id: SessionId, session_info: WebTransportSessionInfo) -> None:
         """Add a new session to internal tracking."""

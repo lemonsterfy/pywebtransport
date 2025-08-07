@@ -14,7 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Potential Future Work
 
-- Address any bugs discovered after the `v0.2.0` release in subsequent patch versions (`0.2.x`).
+- Address any bugs discovered after the `v0.2.1` release in subsequent patch versions (`0.2.x`).
+
+## [0.2.1] - 2025-08-07
+
+This is a patch release focused on improving the reliability of the protocol handler and the CI/CD pipeline.
+
+### Fixed
+
+- **Eliminated race condition warnings during session shutdown.** A race condition that occurred during rapid connection teardown would cause false positive warnings for late-arriving packets (both datagrams and streams). The handler now correctly and silently drops these packets, aligning with best practices and improving log clarity.
+
+### Changed
+
+- **Hardened the CI/CD pipeline** by fixing parallel coverage reporting, resolving Codecov repository detection issues, and ensuring the GitHub sync step is more robust.
+- **Refined development dependencies** by removing `pre-commit` from the core dev setup to simplify the environment and updated the `dev-requirements.txt` lock file.
+- **Improved package metadata** in `pyproject.toml` for better discoverability on PyPI.
 
 ## [0.2.0] - 2025-08-06
 
@@ -98,7 +112,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.0...v0.1.1

@@ -41,15 +41,15 @@ test:
     - pip install -r dev-requirements.txt
     - pip install -e .
   script:
-    - pytest --cov=pywebtransport --cov-report=term --cov-report=xml
+    - pytest --cov=pywebtransport --cov-report=term --cov-report=xml:coverage.${PYTHON_VERSION}.xml
   coverage: '/TOTAL.*\s+(\d+%)$/'
   artifacts:
     paths:
-      - coverage.xml
+      - coverage.*.xml
     reports:
       coverage_report:
         coverage_format: cobertura
-        path: coverage.xml
+        path: coverage.*.xml
     expire_in: 1 week
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
@@ -65,7 +65,7 @@ codecov:
   script:
     - wget https://uploader.codecov.io/latest/linux/codecov
     - chmod +x codecov
-    - ./codecov -t $CODECOV_TOKEN -f coverage.xml
+    - ./codecov -t $CODECOV_TOKEN -s "lemonsterfy/pywebtransport"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
@@ -114,6 +114,7 @@ deploy:
     - git tag "v$VERSION"
     - git push origin "v$VERSION"
     - git remote add github https://$GITHUB_TOKEN@github.com/lemonsterfy/pywebtransport.git
+    - git checkout $CI_COMMIT_BRANCH
     - git push github $CI_COMMIT_BRANCH --tags || echo "GitHub sync failed (release still successful)"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
