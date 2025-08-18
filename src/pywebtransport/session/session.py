@@ -8,7 +8,7 @@ import asyncio
 import weakref
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, AsyncIterator, Type
+from typing import Any, AsyncIterator, Self, Type
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection import WebTransportConnection
@@ -87,13 +87,17 @@ class WebTransportSession(EventEmitter):
         *,
         connection: WebTransportConnection,
         session_id: SessionId,
-        max_streams: int = 100,
-        max_incoming_streams: int = 100,
+        max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS,
+        max_incoming_streams: int = WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS,
+        stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
     ):
         """Initialize the WebTransport session."""
         super().__init__()
         self._connection = weakref.ref(connection)
         self._session_id = session_id
+        self._max_streams = max_streams
+        self._cleanup_interval = stream_cleanup_interval
+        self._config = connection.config
         self._control_stream_id: StreamId | None = None
         self._state: SessionState = SessionState.CONNECTING
         self._protocol_handler: WebTransportProtocolHandler | None = connection.protocol_handler
@@ -164,7 +168,7 @@ class WebTransportSession(EventEmitter):
             await self._datagrams.initialize()
         return self._datagrams
 
-    async def __aenter__(self) -> WebTransportSession:
+    async def __aenter__(self) -> Self:
         """Enter async context, initializing and waiting for the session to be ready."""
         if not self._is_initialized:
             await self.initialize()
@@ -186,7 +190,11 @@ class WebTransportSession(EventEmitter):
         if self._is_initialized:
             return
 
-        self.stream_manager = StreamManager.create(session=self, max_streams=100)
+        self.stream_manager = StreamManager.create(
+            session=self,
+            max_streams=self._max_streams,
+            stream_cleanup_interval=self._cleanup_interval,
+        )
         await self.stream_manager.__aenter__()
         self._incoming_streams = asyncio.Queue(maxsize=self._max_incoming_streams)
         self._ready_event = asyncio.Event()
@@ -215,7 +223,7 @@ class WebTransportSession(EventEmitter):
             logger.error(f"Session {self._session_id} ready timeout after {timeout}s")
             raise TimeoutError(f"Session ready timeout after {timeout}s") from None
 
-    async def close(self, *, code: int = 0, reason: str = "") -> None:
+    async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None:
         """Close the session and all associated streams."""
         if self._state in (SessionState.CLOSING, SessionState.CLOSED):
             return
@@ -240,6 +248,11 @@ class WebTransportSession(EventEmitter):
                 await self._incoming_streams.put(None)
             if self._protocol_handler:
                 self._protocol_handler.close_webtransport_session(self._session_id, code=code, reason=reason)
+
+            if close_connection:
+                if connection := self.connection:
+                    if not connection.is_closed:
+                        await connection.close()
         finally:
             self._teardown_event_handlers()
             self._state = SessionState.CLOSED
@@ -275,8 +288,8 @@ class WebTransportSession(EventEmitter):
         effective_timeout: float
         if timeout is not None:
             effective_timeout = timeout
-        elif isinstance(connection.config, ClientConfig):
-            effective_timeout = connection.config.stream_creation_timeout
+        elif isinstance(self._config, ClientConfig):
+            effective_timeout = self._config.stream_creation_timeout
         else:
             effective_timeout = WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT
 
@@ -304,8 +317,8 @@ class WebTransportSession(EventEmitter):
         effective_timeout: float
         if timeout is not None:
             effective_timeout = timeout
-        elif isinstance(connection.config, ClientConfig):
-            effective_timeout = connection.config.stream_creation_timeout
+        elif isinstance(self._config, ClientConfig):
+            effective_timeout = self._config.stream_creation_timeout
         else:
             effective_timeout = WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT
 
@@ -504,6 +517,15 @@ class WebTransportSession(EventEmitter):
         else:
             logger.warning(f"No protocol handler available for session {self._session_id}")
 
+        if connection := self.connection:
+            if connection.is_closed:
+                logger.warning(f"Session {self.session_id} created on an already closed connection.")
+                asyncio.create_task(
+                    self.close(reason="Connection already closed upon session creation", close_connection=False)
+                )
+            else:
+                connection.once(EventType.CONNECTION_CLOSED, self._on_connection_closed)
+
     def _teardown_event_handlers(self) -> None:
         """Unsubscribe from all events to prevent memory leaks."""
         if self.protocol_handler:
@@ -511,6 +533,9 @@ class WebTransportSession(EventEmitter):
             self.protocol_handler.off(EventType.SESSION_CLOSED, self._on_session_closed)
             self.protocol_handler.off(EventType.STREAM_OPENED, self._on_stream_opened)
             self.protocol_handler.off(EventType.DATAGRAM_RECEIVED, self._on_datagram_received)
+
+        if connection := self.connection:
+            connection.off(EventType.CONNECTION_CLOSED, self._on_connection_closed)
 
     async def _on_session_ready(self, event: Event) -> None:
         """Handle the event indicating the session is ready."""
@@ -535,6 +560,12 @@ class WebTransportSession(EventEmitter):
             if self._state not in (SessionState.CLOSING, SessionState.CLOSED):
                 logger.warning(f"Session {self._session_id} closed remotely.")
                 await self.close(code=event.data.get("code", 0), reason=event.data.get("reason", ""))
+
+    async def _on_connection_closed(self, event: Event) -> None:
+        """Handle the underlying connection being closed."""
+        if self._state not in (SessionState.CLOSING, SessionState.CLOSED):
+            logger.warning(f"Session {self._session_id} closing due to underlying connection loss.")
+            asyncio.create_task(self.close(reason="Underlying connection closed", close_connection=False))
 
     async def _on_stream_opened(self, event: Event) -> None:
         """Handle an incoming stream initiated by the remote peer."""

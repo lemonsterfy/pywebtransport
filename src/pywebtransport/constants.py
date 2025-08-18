@@ -54,7 +54,6 @@ class WebTransportConstants:
 
     BIDIRECTIONAL_STREAM: int = 0x0
     UNIDIRECTIONAL_STREAM: int = 0x2
-
     WEBTRANSPORT_H3_BIDI_STREAM_TYPE: int = 0x41
     WEBTRANSPORT_H3_UNI_STREAM_TYPE: int = 0x54
     CLOSE_WEBTRANSPORT_SESSION_TYPE: int = 0x2843
@@ -75,16 +74,26 @@ class WebTransportConstants:
 
     MAX_STREAM_ID: int = 2**62 - 1
     MAX_DATAGRAM_SIZE: int = 65535
-    DEFAULT_MAX_STREAMS: int = 100
     DEFAULT_BUFFER_SIZE: int = 65536
     MAX_BUFFER_SIZE: int = 1024 * 1024
+    DEFAULT_MAX_STREAMS: int = 100
+    DEFAULT_MAX_INCOMING_STREAMS: int = 100
+    DEFAULT_CLIENT_MAX_CONNECTIONS: int = 100
+    DEFAULT_SERVER_MAX_CONNECTIONS: int = 3000
+    DEFAULT_MAX_STREAMS_PER_CONNECTION: int = 100
+    DEFAULT_MAX_SESSIONS: int = 10000
 
     DEFAULT_CONNECT_TIMEOUT: float = 30.0
     DEFAULT_READ_TIMEOUT: float = 60.0
     DEFAULT_WRITE_TIMEOUT: float = 30.0
     DEFAULT_CLOSE_TIMEOUT: float = 5.0
-    DEFAULT_KEEPALIVE_TIMEOUT: float = 300.0
     DEFAULT_STREAM_CREATION_TIMEOUT: float = 10.0
+    DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT: float = 30.0
+    DEFAULT_CONNECTION_CLEANUP_INTERVAL: float = 30.0
+    DEFAULT_CONNECTION_IDLE_TIMEOUT: float = 60.0
+    DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL: float = 5.0
+    DEFAULT_SESSION_CLEANUP_INTERVAL: float = 60.0
+    DEFAULT_STREAM_CLEANUP_INTERVAL: float = 15.0
 
     DEFAULT_INITIAL_MAX_DATA: int = 1024 * 1024
     DEFAULT_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL: int = 256 * 1024
@@ -153,13 +162,22 @@ class ClientConfigDefaults(TypedDict):
     read_timeout: float
     write_timeout: float
     close_timeout: float
+    stream_creation_timeout: float
+    connection_keepalive_timeout: float
+    connection_cleanup_interval: float
+    connection_idle_timeout: float
+    connection_idle_check_interval: float
+    stream_cleanup_interval: float
+    max_connections: int
     max_streams: int
+    max_incoming_streams: int
     stream_buffer_size: int
     alpn_protocols: list[str]
     http_version: str
     verify_mode: None
     check_hostname: bool
     user_agent: str
+    keep_alive: bool
 
 
 class ServerConfigDefaults(TypedDict):
@@ -168,8 +186,15 @@ class ServerConfigDefaults(TypedDict):
     bind_host: str
     bind_port: int
     max_connections: int
+    max_sessions: int
     max_streams_per_connection: int
-    connection_timeout: float
+    max_incoming_streams: int
+    connection_keepalive_timeout: float
+    connection_cleanup_interval: float
+    connection_idle_timeout: float
+    connection_idle_check_interval: float
+    session_cleanup_interval: float
+    stream_cleanup_interval: float
     read_timeout: float
     write_timeout: float
     alpn_protocols: list[str]
@@ -184,21 +209,37 @@ _DEFAULT_CLIENT_CONFIG: ClientConfigDefaults = {
     "read_timeout": WebTransportConstants.DEFAULT_READ_TIMEOUT,
     "write_timeout": WebTransportConstants.DEFAULT_WRITE_TIMEOUT,
     "close_timeout": WebTransportConstants.DEFAULT_CLOSE_TIMEOUT,
+    "stream_creation_timeout": WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT,
+    "connection_keepalive_timeout": WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
+    "connection_cleanup_interval": WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL,
+    "connection_idle_timeout": WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT,
+    "connection_idle_check_interval": WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
+    "stream_cleanup_interval": WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
+    "max_connections": WebTransportConstants.DEFAULT_CLIENT_MAX_CONNECTIONS,
     "max_streams": WebTransportConstants.DEFAULT_MAX_STREAMS,
+    "max_incoming_streams": WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS,
     "stream_buffer_size": WebTransportConstants.DEFAULT_BUFFER_SIZE,
     "alpn_protocols": list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS),
     "http_version": "3",
     "verify_mode": None,
     "check_hostname": True,
     "user_agent": f"pywebtransport/{__version__}",
+    "keep_alive": True,
 }
 
 _DEFAULT_SERVER_CONFIG: ServerConfigDefaults = {
     "bind_host": "localhost",
     "bind_port": WebTransportConstants.DEFAULT_DEV_PORT,
-    "max_connections": 1000,
-    "max_streams_per_connection": WebTransportConstants.DEFAULT_MAX_STREAMS,
-    "connection_timeout": WebTransportConstants.DEFAULT_KEEPALIVE_TIMEOUT,
+    "max_connections": WebTransportConstants.DEFAULT_SERVER_MAX_CONNECTIONS,
+    "max_sessions": WebTransportConstants.DEFAULT_MAX_SESSIONS,
+    "max_streams_per_connection": WebTransportConstants.DEFAULT_MAX_STREAMS_PER_CONNECTION,
+    "max_incoming_streams": WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS,
+    "connection_keepalive_timeout": WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
+    "connection_cleanup_interval": WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL,
+    "connection_idle_timeout": WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT,
+    "connection_idle_check_interval": WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
+    "session_cleanup_interval": WebTransportConstants.DEFAULT_SESSION_CLEANUP_INTERVAL,
+    "stream_cleanup_interval": WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
     "read_timeout": WebTransportConstants.DEFAULT_READ_TIMEOUT,
     "write_timeout": WebTransportConstants.DEFAULT_WRITE_TIMEOUT,
     "alpn_protocols": list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS),

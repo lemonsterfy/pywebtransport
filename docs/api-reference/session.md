@@ -19,7 +19,7 @@ The primary user-facing class that represents a single, long-lived logical conne
 - **`async def incoming_streams(self) -> AsyncIterator[StreamType]`**: Returns an async iterator that yields incoming streams initiated by the remote peer.
 - **`async def initialize(self) -> None`**: Initializes asyncio resources for the session.
 - **`async def ready(self, *, timeout: float = 30.0) -> None`**: Waits until the session is fully established and ready for communication.
-- **`async def close(self, *, code: int = 0, reason: str = "") -> None`**: Closes the session and all its associated streams and datagrams.
+- **`async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None`**: Closes the session. If `close_connection` is `True`, the underlying connection will also be closed.
 - **`async def wait_closed(self) -> None`**: Waits until the session is fully closed.
 - **`async def get_session_stats(self) -> dict[str, Any]`**: Returns a dictionary of current, detailed statistics for the session.
 - **`async def get_summary(self) -> dict[str, Any]`**: Returns a structured summary of the session, suitable for monitoring dashboards.
@@ -50,7 +50,7 @@ A helper class for managing the lifecycle of multiple `WebTransportSession` obje
 
 #### Constructor
 
-- **`__init__(self, *, max_sessions: int = 1000, cleanup_interval: float = 300.0)`**: Initializes the session manager.
+- **`__init__(self, *, max_sessions: int = 10000, cleanup_interval: float = 60.0)`**: Initializes the session manager.
 
 #### Key Methods
 

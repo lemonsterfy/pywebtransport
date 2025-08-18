@@ -9,6 +9,7 @@ from pywebtransport import __version__ as project_version
 from pywebtransport.constants import (
     DEFAULT_LOG_LEVEL,
     ORIGIN_HEADER,
+    USER_AGENT_HEADER,
     WEBTRANSPORT_SCHEMES,
     Defaults,
     ErrorCodes,
@@ -20,11 +21,12 @@ class TestConstantsValues:
     def test_module_level_constants(self) -> None:
         assert DEFAULT_LOG_LEVEL == "INFO"
         assert ORIGIN_HEADER == "origin"
+        assert USER_AGENT_HEADER == "user-agent"
         assert WEBTRANSPORT_SCHEMES == ("https", "wss")
 
     def test_webtransport_constants_class(self) -> None:
         assert WebTransportConstants.DEFAULT_SECURE_PORT == 443
-        assert WebTransportConstants.DRAFT_VERSION == 13
+        assert WebTransportConstants.DEFAULT_SERVER_MAX_CONNECTIONS == 3000
         assert WebTransportConstants.DEFAULT_VERSION == "h3"
         assert WebTransportConstants.WEBTRANSPORT_H3_BIDI_STREAM_TYPE == 0x41
         assert WebTransportConstants.SETTINGS_ENABLE_WEBTRANSPORT == 0x2B603742
@@ -40,10 +42,12 @@ class TestErrorCodes:
         [
             (ErrorCodes.NO_ERROR, 0x0),
             (ErrorCodes.INTERNAL_ERROR, 0x1),
+            (ErrorCodes.STREAM_LIMIT_ERROR, 0x4),
             (ErrorCodes.PROTOCOL_VIOLATION, 0xA),
             (ErrorCodes.H3_NO_ERROR, 0x100),
             (ErrorCodes.H3_GENERAL_PROTOCOL_ERROR, 0x101),
             (ErrorCodes.H3_SETTINGS_ERROR, 0x109),
+            (ErrorCodes.H3_INTERNAL_ERROR, 0x102),
             (ErrorCodes.APP_CONNECTION_TIMEOUT, 0x1000),
             (ErrorCodes.APP_AUTHENTICATION_FAILED, 0x1001),
             (ErrorCodes.APP_SERVICE_UNAVAILABLE, 0x1005),
@@ -62,13 +66,22 @@ class TestDefaults:
                 "read_timeout": WebTransportConstants.DEFAULT_READ_TIMEOUT,
                 "write_timeout": WebTransportConstants.DEFAULT_WRITE_TIMEOUT,
                 "close_timeout": WebTransportConstants.DEFAULT_CLOSE_TIMEOUT,
+                "stream_creation_timeout": WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT,
+                "connection_keepalive_timeout": WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
+                "connection_cleanup_interval": WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL,
+                "connection_idle_timeout": WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT,
+                "connection_idle_check_interval": WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
+                "stream_cleanup_interval": WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
+                "max_connections": WebTransportConstants.DEFAULT_CLIENT_MAX_CONNECTIONS,
                 "max_streams": WebTransportConstants.DEFAULT_MAX_STREAMS,
+                "max_incoming_streams": WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS,
                 "stream_buffer_size": WebTransportConstants.DEFAULT_BUFFER_SIZE,
                 "alpn_protocols": list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS),
                 "http_version": "3",
                 "verify_mode": None,
                 "check_hostname": True,
                 "user_agent": f"pywebtransport/{project_version}",
+                "keep_alive": True,
             },
         )
 
@@ -91,7 +104,7 @@ class TestDefaults:
 
         assert config["bind_host"] == "localhost"
         assert config["bind_port"] == WebTransportConstants.DEFAULT_DEV_PORT
-        assert config["connection_timeout"] == WebTransportConstants.DEFAULT_KEEPALIVE_TIMEOUT
+        assert config["connection_keepalive_timeout"] == WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
 
     def test_get_server_config_returns_copy(self) -> None:
         config1 = Defaults.get_server_config()
@@ -99,4 +112,4 @@ class TestDefaults:
 
         assert config1 is not config2
         config1["max_connections"] = 9999
-        assert Defaults.get_server_config()["max_connections"] == 1000
+        assert Defaults.get_server_config()["max_connections"] == 3000

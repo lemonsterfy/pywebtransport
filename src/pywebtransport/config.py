@@ -47,7 +47,14 @@ class ClientConfig:
     write_timeout: float | None = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
     close_timeout: float = WebTransportConstants.DEFAULT_CLOSE_TIMEOUT
     stream_creation_timeout: float = WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT
+    connection_keepalive_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
+    connection_cleanup_interval: float = WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL
+    connection_idle_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT
+    connection_idle_check_interval: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
+    stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL
+    max_connections: int = WebTransportConstants.DEFAULT_CLIENT_MAX_CONNECTIONS
     max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS
+    max_incoming_streams: int = WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS
     stream_buffer_size: int = WebTransportConstants.DEFAULT_BUFFER_SIZE
     max_stream_buffer_size: int = WebTransportConstants.MAX_BUFFER_SIZE
     verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
@@ -55,17 +62,12 @@ class ClientConfig:
     certfile: str | None = None
     keyfile: str | None = None
     check_hostname: bool = True
+    keep_alive: bool = True
     alpn_protocols: list[str] = field(default_factory=lambda: list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS))
     http_version: str = "3"
     user_agent: str = f"pywebtransport/{__version__}"
     headers: Headers = field(default_factory=dict)
     max_datagram_size: int = WebTransportConstants.MAX_DATAGRAM_SIZE
-    initial_max_data: int = WebTransportConstants.DEFAULT_INITIAL_MAX_DATA
-    initial_max_stream_data_bidi_local: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
-    initial_max_stream_data_bidi_remote: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
-    initial_max_stream_data_uni: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAM_DATA_UNI
-    initial_max_streams_bidi: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAMS_BIDI
-    initial_max_streams_uni: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAMS_UNI
     max_retries: int = 3
     retry_delay: float = 1.0
     retry_backoff: float = 2.0
@@ -131,10 +133,19 @@ class ClientConfig:
             _validate_timeout(self.write_timeout)
             _validate_timeout(self.stream_creation_timeout)
             _validate_timeout(self.close_timeout)
+            _validate_timeout(self.connection_keepalive_timeout)
+            _validate_timeout(self.connection_cleanup_interval)
+            _validate_timeout(self.connection_idle_timeout)
+            _validate_timeout(self.connection_idle_check_interval)
+            _validate_timeout(self.stream_cleanup_interval)
         except ValueError as e:
             raise invalid_config("timeout", str(e), "invalid timeout value") from e
+        if self.max_connections <= 0:
+            raise invalid_config("max_connections", self.max_connections, "must be positive")
         if self.max_streams <= 0:
             raise invalid_config("max_streams", self.max_streams, "must be positive")
+        if self.max_incoming_streams <= 0:
+            raise invalid_config("max_incoming_streams", self.max_incoming_streams, "must be positive")
         if self.stream_buffer_size <= 0:
             raise invalid_config("stream_buffer_size", self.stream_buffer_size, "must be positive")
         if self.max_stream_buffer_size < self.stream_buffer_size:
@@ -216,9 +227,16 @@ class ServerConfig:
 
     bind_host: str = "localhost"
     bind_port: int = WebTransportConstants.DEFAULT_DEV_PORT
-    max_connections: int = 1000
-    max_streams_per_connection: int = WebTransportConstants.DEFAULT_MAX_STREAMS
-    connection_timeout: float = WebTransportConstants.DEFAULT_KEEPALIVE_TIMEOUT
+    max_connections: int = WebTransportConstants.DEFAULT_SERVER_MAX_CONNECTIONS
+    max_sessions: int = WebTransportConstants.DEFAULT_MAX_SESSIONS
+    max_streams_per_connection: int = WebTransportConstants.DEFAULT_MAX_STREAMS_PER_CONNECTION
+    max_incoming_streams: int = WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS
+    connection_keepalive_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
+    connection_cleanup_interval: float = WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL
+    connection_idle_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT
+    connection_idle_check_interval: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
+    session_cleanup_interval: float = WebTransportConstants.DEFAULT_SESSION_CLEANUP_INTERVAL
+    stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL
     read_timeout: float | None = WebTransportConstants.DEFAULT_READ_TIMEOUT
     write_timeout: float | None = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
     certfile: str = ""
@@ -233,12 +251,6 @@ class ServerConfig:
     stream_buffer_size: int = WebTransportConstants.DEFAULT_BUFFER_SIZE
     max_stream_buffer_size: int = WebTransportConstants.MAX_BUFFER_SIZE
     max_datagram_size: int = WebTransportConstants.MAX_DATAGRAM_SIZE
-    initial_max_data: int = WebTransportConstants.DEFAULT_INITIAL_MAX_DATA
-    initial_max_stream_data_bidi_local: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
-    initial_max_stream_data_bidi_remote: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
-    initial_max_stream_data_uni: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAM_DATA_UNI
-    initial_max_streams_bidi: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAMS_BIDI
-    initial_max_streams_uni: int = WebTransportConstants.DEFAULT_INITIAL_MAX_STREAMS_UNI
     middleware: list[Any] = field(default_factory=list)
     debug: bool = False
     log_level: str = "INFO"
@@ -286,8 +298,8 @@ class ServerConfig:
             keyfile=keyfile,
             ca_certs=ca_certs,
             verify_mode=ssl.CERT_OPTIONAL if ca_certs else ssl.CERT_NONE,
-            max_connections=1000,
-            max_streams_per_connection=100,
+            max_connections=WebTransportConstants.DEFAULT_SERVER_MAX_CONNECTIONS,
+            max_streams_per_connection=WebTransportConstants.DEFAULT_MAX_STREAMS_PER_CONNECTION,
             debug=False,
             log_level="INFO",
         )
@@ -309,10 +321,19 @@ class ServerConfig:
             raise invalid_config("bind_port", self.bind_port, str(e)) from e
         if self.max_connections <= 0:
             raise invalid_config("max_connections", self.max_connections, "must be positive")
+        if self.max_sessions <= 0:
+            raise invalid_config("max_sessions", self.max_sessions, "must be positive")
         if self.max_streams_per_connection <= 0:
             raise invalid_config("max_streams_per_connection", self.max_streams_per_connection, "must be positive")
+        if self.max_incoming_streams <= 0:
+            raise invalid_config("max_incoming_streams", self.max_incoming_streams, "must be positive")
         try:
-            _validate_timeout(self.connection_timeout)
+            _validate_timeout(self.connection_keepalive_timeout)
+            _validate_timeout(self.connection_cleanup_interval)
+            _validate_timeout(self.connection_idle_timeout)
+            _validate_timeout(self.connection_idle_check_interval)
+            _validate_timeout(self.session_cleanup_interval)
+            _validate_timeout(self.stream_cleanup_interval)
             _validate_timeout(self.read_timeout)
             _validate_timeout(self.write_timeout)
         except ValueError as e:

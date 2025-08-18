@@ -5,11 +5,12 @@ WebTransport Protocol Handler.
 from __future__ import annotations
 
 import asyncio
+import weakref
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Self
 
 from aioquic.quic.connection import QuicConnection, QuicConnectionState
-from aioquic.quic.events import QuicEvent
+from aioquic.quic.events import QuicEvent, StreamReset
 
 from pywebtransport.events import Event, EventEmitter
 from pywebtransport.exceptions import ConnectionError, ProtocolError, TimeoutError
@@ -67,16 +68,13 @@ class WebTransportProtocolHandler(EventEmitter):
         super().__init__()
         self._quic = quic_connection
         self._is_client = is_client
-        self._connection = connection
-
+        self._connection_ref = weakref.ref(connection) if connection else None
         self._h3 = H3Connection(quic=self._quic, enable_webtransport=True)
-
         self._sessions: dict[SessionId, WebTransportSessionInfo] = {}
         self._streams: dict[StreamId, StreamInfo] = {}
         self._session_control_streams: dict[StreamId, SessionId] = {}
         self._data_stream_to_session: dict[StreamId, SessionId] = {}
         self._session_owned_streams: dict[SessionId, set[StreamId]] = defaultdict(set)
-
         self._connection_state: ConnectionState = ConnectionState.IDLE
         self._last_activity = get_timestamp()
         self._stats: dict[str, Any] = {
@@ -103,14 +101,19 @@ class WebTransportProtocolHandler(EventEmitter):
         return cls(quic_connection, is_client=is_client, connection=connection)
 
     @property
+    def is_connected(self) -> bool:
+        """Check if the underlying connection is established."""
+        return self._connection_state == ConnectionState.CONNECTED
+
+    @property
     def connection_state(self) -> ConnectionState:
         """Get the current state of the underlying connection."""
         return self._connection_state
 
     @property
-    def is_connected(self) -> bool:
-        """Check if the underlying connection is established."""
-        return self._connection_state == ConnectionState.CONNECTED
+    def connection(self) -> WebTransportConnection | None:
+        """Get the parent WebTransportConnection via a weak reference."""
+        return self._connection_ref() if self._connection_ref else None
 
     @property
     def quic_connection(self) -> QuicConnection:
@@ -130,8 +133,18 @@ class WebTransportProtocolHandler(EventEmitter):
             logger.info("Connection established.")
             self._trigger_transmission()
 
+    async def close(self) -> None:
+        """Close the protocol handler and clean up its resources."""
+        if self._connection_state == ConnectionState.CLOSED:
+            return
+        self._connection_state = ConnectionState.CLOSED
+        await super().close()
+
     async def handle_quic_event(self, event: QuicEvent) -> None:
         """Process a QUIC event through the H3 engine and handle results."""
+        if isinstance(event, StreamReset):
+            asyncio.create_task(self._handle_stream_reset(event))
+
         h3_events = self._h3.handle_event(event)
         for h3_event in h3_events:
             await self._handle_h3_event(h3_event)
@@ -236,13 +249,6 @@ class WebTransportProtocolHandler(EventEmitter):
         if end_stream:
             self._update_stream_state_on_send_end(stream_id)
 
-    def abort_stream(self, stream_id: StreamId, error_code: int) -> None:
-        """Abort a stream immediately."""
-        logger.warning(f"Aborting stream {stream_id} with error code {error_code}")
-        self._quic.reset_stream(stream_id, error_code)
-        self._trigger_transmission()
-        self._cleanup_stream(stream_id)
-
     def send_webtransport_datagram(self, session_id: SessionId, data: bytes) -> None:
         """Send a WebTransport datagram for a session."""
         session_info = self._sessions.get(session_id)
@@ -253,6 +259,13 @@ class WebTransportProtocolHandler(EventEmitter):
         self._stats["bytes_sent"] += len(data)
         self._stats["datagrams_sent"] += 1
         self._trigger_transmission()
+
+    def abort_stream(self, stream_id: StreamId, error_code: int) -> None:
+        """Abort a stream immediately."""
+        logger.warning(f"Aborting stream {stream_id} with error code {error_code}")
+        self._quic.reset_stream(stream_id, error_code)
+        self._trigger_transmission()
+        self._cleanup_stream(stream_id)
 
     def get_session_info(self, session_id: SessionId) -> WebTransportSessionInfo | None:
         """Get information about a specific session."""
@@ -299,22 +312,6 @@ class WebTransportProtocolHandler(EventEmitter):
                     await asyncio.sleep(2**attempt)
         return False
 
-    def write_stream_chunked(self, *, stream_id: StreamId, data: Data, chunk_size: int = 8192) -> int:
-        """Send data on a stream in managed chunks."""
-        validate_stream_id(stream_id)
-        data_bytes = ensure_bytes(data)
-        total_sent = 0
-        for i in range(0, len(data_bytes), chunk_size):
-            chunk = data_bytes[i : i + chunk_size]
-            is_last_chunk = (i + chunk_size) >= len(data_bytes)
-            try:
-                self.send_webtransport_stream_data(stream_id, chunk, end_stream=is_last_chunk)
-                total_sent += len(chunk)
-            except Exception as e:
-                logger.error(f"Error sending chunk {i // chunk_size + 1} for stream {stream_id}: {e}")
-                break
-        return total_sent
-
     async def read_stream_complete(self, *, stream_id: StreamId, timeout: float = 30.0) -> bytes:
         """Receive all data from a stream until it is ended."""
         chunks: list[bytes] = []
@@ -337,6 +334,22 @@ class WebTransportProtocolHandler(EventEmitter):
         finally:
             self.off(event_name, data_handler)
         return b"".join(chunks)
+
+    def write_stream_chunked(self, *, stream_id: StreamId, data: Data, chunk_size: int = 8192) -> int:
+        """Send data on a stream in managed chunks."""
+        validate_stream_id(stream_id)
+        data_bytes = ensure_bytes(data)
+        total_sent = 0
+        for i in range(0, len(data_bytes), chunk_size):
+            chunk = data_bytes[i : i + chunk_size]
+            is_last_chunk = (i + chunk_size) >= len(data_bytes)
+            try:
+                self.send_webtransport_stream_data(stream_id, chunk, end_stream=is_last_chunk)
+                total_sent += len(chunk)
+            except Exception as e:
+                logger.error(f"Error sending chunk {i // chunk_size + 1} for stream {stream_id}: {e}")
+                break
+        return total_sent
 
     def get_health_status(self) -> dict[str, Any]:
         """Get the overall health status of the protocol handler."""
@@ -378,8 +391,21 @@ class WebTransportProtocolHandler(EventEmitter):
         else:
             logger.debug(f"Ignoring unhandled H3 event: {type(event)}")
 
+    async def _handle_stream_reset(self, event: StreamReset) -> None:
+        """Handle a reset stream event."""
+        if session_id := self._session_control_streams.get(event.stream_id):
+            logger.info(f"Session {session_id} closed due to control stream {event.stream_id} reset.")
+            await self.emit(
+                EventType.SESSION_CLOSED,
+                data={"session_id": session_id, "code": event.error_code, "reason": "Control stream reset"},
+            )
+            self._cleanup_session(session_id)
+
     async def _handle_session_headers(self, event: HeadersReceived) -> None:
         """Handle HEADERS frames for session negotiation."""
+        if connection := self.connection:
+            if hasattr(connection, "record_activity"):
+                connection.record_activity()
         self._last_activity = get_timestamp()
         headers_dict = dict(event.headers)
         logger.debug(f"H3 headers received on stream {event.stream_id}: {headers_dict}")
@@ -414,13 +440,16 @@ class WebTransportProtocolHandler(EventEmitter):
                 )
                 self._register_session(session_id, session_info)
                 event_data = session_info.to_dict()
-                if self._connection:
-                    event_data["connection"] = self._connection
+                if connection := self.connection:
+                    event_data["connection"] = connection
                 logger.info(f"Received WebTransport session request: {session_id} for path '{session_info.path}'")
                 await self.emit(EventType.SESSION_REQUEST, data=event_data)
 
     async def _handle_webtransport_stream_data(self, event: WebTransportStreamDataReceived) -> None:
         """Handle data received on a WebTransport data stream."""
+        if connection := self.connection:
+            if hasattr(connection, "record_activity"):
+                connection.record_activity()
         stream_id = event.stream_id
         session_id = self._data_stream_to_session.get(stream_id)
 
@@ -451,6 +480,9 @@ class WebTransportProtocolHandler(EventEmitter):
 
     async def _handle_datagram_received(self, event: DatagramReceived) -> None:
         """Handle a datagram received from the H3 engine."""
+        if connection := self.connection:
+            if hasattr(connection, "record_activity"):
+                connection.record_activity()
         self._last_activity = get_timestamp()
         self._stats["bytes_received"] += len(event.data)
         self._stats["datagrams_received"] += 1
@@ -525,5 +557,6 @@ class WebTransportProtocolHandler(EventEmitter):
 
     def _trigger_transmission(self) -> None:
         """Trigger the underlying QUIC connection to send pending data."""
-        if self._connection and hasattr(self._connection, "_transmit"):
-            self._connection._transmit()
+        if connection := self.connection:
+            if hasattr(connection, "_transmit"):
+                connection._transmit()

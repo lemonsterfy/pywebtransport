@@ -133,7 +133,10 @@ class TestClientConfig:
         "invalid_attrs, error_match",
         [
             ({"connect_timeout": -1}, "invalid timeout value"),
+            ({"connection_idle_timeout": 0}, "invalid timeout value"),
+            ({"max_connections": 0}, "must be positive"),
             ({"max_streams": 0}, "must be positive"),
+            ({"max_incoming_streams": -1}, "must be positive"),
             ({"stream_buffer_size": -10}, "must be positive"),
             ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
             ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
@@ -171,7 +174,7 @@ class TestServerConfig:
         config = ServerConfig()
 
         assert config.bind_host == "localhost"
-        assert config.max_connections == 1000
+        assert config.max_connections == 3000
 
     def test_create_factory_method(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.config.Defaults.get_server_config", return_value={"backlog": 1})
@@ -233,6 +236,10 @@ class TestServerConfig:
             ({"bind_host": ""}, "cannot be empty"),
             ({"bind_port": 0}, "Port must be an integer"),
             ({"max_connections": 0}, "must be positive"),
+            ({"max_sessions": 0}, "must be positive"),
+            ({"max_streams_per_connection": 0}, "must be positive"),
+            ({"max_incoming_streams": 0}, "must be positive"),
+            ({"connection_keepalive_timeout": 0}, "invalid timeout value"),
             ({"certfile": "a.pem", "keyfile": ""}, "certfile and keyfile must be provided together"),
             ({"backlog": 0}, "must be positive"),
         ],

@@ -32,7 +32,10 @@ def mock_asyncio_infra(
 @pytest.fixture
 def mock_client_config(mocker: MockerFixture) -> ClientConfig:
     mocker.patch("pywebtransport.config.ClientConfig.validate", return_value=None)
-    return ClientConfig(certfile="test.crt", keyfile="test.key", ca_certs="ca.crt")
+    config = ClientConfig(certfile="test.crt", keyfile="test.key", ca_certs="ca.crt")
+    config.keep_alive = True
+    config.connection_keepalive_timeout = 30.0
+    return config
 
 
 @pytest.fixture
@@ -58,10 +61,8 @@ def mock_protocol_handler(mocker: MockerFixture) -> Any:
         "errors": 1,
         "last_activity": 12345.0,
     }
-    mock_instance.create_webtransport_session.return_value = (
-        "session_123",
-        mocker.MagicMock(),
-    )
+    mock_instance.create_webtransport_session = mocker.AsyncMock(return_value=("session_123", mocker.MagicMock()))
+    mock_instance.close = mocker.AsyncMock()
     return mock_instance
 
 
@@ -79,7 +80,9 @@ def mock_quic_connection(mocker: MockerFixture) -> Any:
 @pytest.fixture
 def mock_server_config(mocker: MockerFixture) -> ServerConfig:
     mocker.patch("pywebtransport.config.ServerConfig.validate", return_value=None)
-    return ServerConfig(certfile="test.crt", keyfile="test.key")
+    config = ServerConfig(certfile="test.crt", keyfile="test.key")
+    config.connection_idle_timeout = 60.0
+    return config
 
 
 @pytest.fixture
@@ -129,6 +132,7 @@ class TestWebTransportConnection:
         assert not connection.is_connected
         assert connection.config is not None
         assert connection.connection_id.startswith("conn_")
+        assert connection.last_activity_time == 0.0
 
     @pytest.mark.parametrize(
         "state, expected",
@@ -197,6 +201,7 @@ class TestWebTransportConnection:
     ) -> None:
         emit_spy = mocker.AsyncMock()
         connection.on(EventType.CONNECTION_ESTABLISHED, emit_spy)
+        mocker.patch.object(connection, "_start_background_tasks")
 
         await connection.connect(host="localhost", port=4433)
 
@@ -204,7 +209,7 @@ class TestWebTransportConnection:
         assert connection.is_connected
         mock_loop.create_datagram_endpoint.assert_awaited_once()
         mock_quic_connection.connect.assert_called_once()
-        assert mock_protocol_handler.create_webtransport_session.called
+        mock_protocol_handler.create_webtransport_session.assert_awaited_once()
         emit_spy.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -238,23 +243,22 @@ class TestWebTransportConnection:
 
     @pytest.mark.asyncio
     async def test_accept_success(
-        self,
-        mock_server_config: ServerConfig,
-        mocker: MockerFixture,
-        mock_loop: Any,
-        mock_utils: None,
+        self, mock_server_config: ServerConfig, mocker: MockerFixture, mock_loop: Any, mock_utils: None
     ) -> None:
         connection = WebTransportConnection(config=mock_server_config)
         mock_transport = mocker.create_autospec(asyncio.DatagramTransport)
         mock_protocol = mocker.MagicMock()
         mock_protocol._quic = mocker.MagicMock()
         mock_protocol._quic.get_timer.return_value = None
+        mock_record_activity = mocker.patch.object(connection, "record_activity")
+        mocker.patch.object(connection, "_start_background_tasks")
 
         await connection.accept(transport=mock_transport, protocol=mock_protocol)
 
         assert connection.state == ConnectionState.CONNECTED
         assert connection.is_connected
         assert connection._transport is mock_transport
+        mock_record_activity.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_accept_failure_during_init(
@@ -273,10 +277,14 @@ class TestWebTransportConnection:
         self,
         connection: WebTransportConnection,
         mock_quic_connection: Any,
+        mock_protocol_handler: Any,
         mocker: MockerFixture,
         mock_utils: None,
     ) -> None:
         connection._state = ConnectionState.CONNECTED
+        connection._protocol_handler = mock_protocol_handler
+        mock_super_close = mocker.patch("pywebtransport.events.EventEmitter.close", new_callable=mocker.AsyncMock)
+        mock_emit = mocker.patch.object(connection, "emit", new_callable=mocker.AsyncMock)
 
         async def dummy_coro() -> None:
             pass
@@ -292,7 +300,10 @@ class TestWebTransportConnection:
         assert connection.state == ConnectionState.CLOSED
         assert mock_task.cancelled()
         timer_handle.cancel.assert_called_once()
+        mock_protocol_handler.close.assert_awaited_once()
         mock_quic_connection.close.assert_called_once_with(error_code=1, reason_phrase="test")
+        mock_super_close.assert_awaited_once()
+        mock_emit.assert_awaited_with(EventType.CONNECTION_CLOSED, data={"connection_id": connection.connection_id})
         assert connection._closed_future is not None
         assert connection._closed_future.done()
 
@@ -408,6 +419,7 @@ class TestWebTransportConnection:
         mock_quic.datagrams_to_send.return_value = [(b"data", ("addr", 1))]
         mock_quic.get_timer.return_value = None
         mock_transport, _ = await mock_loop.create_datagram_endpoint()
+        mock_transport.is_closing.return_value = False
         mock_transport.sendto.side_effect = OSError("Socket closed")
         connection._quic_connection = mock_quic
         connection._transport = mock_transport

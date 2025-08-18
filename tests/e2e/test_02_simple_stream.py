@@ -1,17 +1,20 @@
 """
-E2E Test 02: Simple bidirectional stream operations.
-Verifies stream creation and basic data exchange after connection.
+E2E test for simple bidirectional stream operations.
 """
 
 import asyncio
 import logging
 import ssl
 import sys
+from collections.abc import Awaitable, Callable
+from typing import Final
 
-from pywebtransport.client import WebTransportClient
-from pywebtransport.config import ClientConfig
+from pywebtransport import ClientConfig, ConnectionError, StreamError, TimeoutError, WebTransportClient
 
-DEBUG_MODE = "--debug" in sys.argv
+SERVER_HOST: Final[str] = "127.0.0.1"
+SERVER_PORT: Final[int] = 4433
+SERVER_URL: Final[str] = f"https://{SERVER_HOST}:{SERVER_PORT}/"
+DEBUG_MODE: Final[bool] = "--debug" in sys.argv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
@@ -23,154 +26,130 @@ logger = logging.getLogger("test_simple_stream")
 
 
 async def test_stream_creation() -> bool:
-    """Tests the stream creation functionality."""
+    """Tests the ability to create and inspect a bidirectional stream."""
     logger.info("Test 02A: Stream Creation")
     logger.info("-" * 30)
-
-    server_url = "https://127.0.0.1:4433/"
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, debug=True)
+    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
         async with WebTransportClient.create(config=config) as client:
-            logger.info("Connecting to server...")
-            session = await client.connect(server_url)
-            logger.info(f"Connected, session: {session.session_id}")
+            logger.info(f"Connecting to {SERVER_URL}...")
+            session = await client.connect(SERVER_URL)
+            logger.info(f"Connected, session ID: {session.session_id}")
 
             logger.info("Creating bidirectional stream...")
             stream = await session.create_bidirectional_stream()
 
             logger.info("Stream created successfully!")
-            logger.info(f"   Stream ID: {stream.stream_id}")
-            logger.info(f"   Stream direction: {stream.direction}")
-            logger.info(f"   Stream state: {stream.state}")
-            logger.info(f"   Is readable: {stream.is_readable}")
-            logger.info(f"   Is writable: {stream.is_writable}")
+            logger.info(f"   - Stream ID: {stream.stream_id}")
+            logger.info(f"   - Stream state: {stream.state.value}")
+            logger.info(f"   - Readable: {stream.is_readable}, Writable: {stream.is_writable}")
 
-            logger.info("Closing stream...")
             await stream.close()
-            logger.info("Stream closed")
-
-            await session.close()
-            logger.info("Session closed")
+            logger.info("Stream closed.")
             return True
 
+    except (TimeoutError, ConnectionError) as e:
+        logger.error(f"FAILURE: Connection failed: {e}")
+        return False
+    except StreamError as e:
+        logger.error(f"FAILURE: Stream creation failed: {e}", exc_info=True)
+        return False
     except Exception as e:
-        logger.error(f"Stream creation failed: {e}", exc_info=True)
+        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
         return False
 
 
 async def test_simple_echo() -> bool:
-    """Tests the simple echo functionality on a bidirectional stream."""
+    """Tests sending data and receiving an echo on a single stream."""
     logger.info("Test 02B: Simple Echo")
     logger.info("-" * 30)
-
-    server_url = "https://127.0.0.1:4433/"
-    config = ClientConfig.create(
-        verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0, write_timeout=5.0, debug=True
-    )
+    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
 
     try:
         async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(server_url)
-            logger.info(f"Connected, session: {session.session_id}")
-
+            session = await client.connect(SERVER_URL)
             stream = await session.create_bidirectional_stream()
-            logger.info(f"Stream created: {stream.stream_id}")
+            logger.info(f"Stream {stream.stream_id} created for echo test.")
 
             test_message = b"Hello, WebTransport!"
             logger.info(f"Sending: {test_message!r}")
-
             await stream.write_all(test_message)
-            logger.info("Data sent and write end closed")
 
             logger.info("Waiting for echo response...")
             response_data = await stream.read_all()
-            logger.info(f"Complete response: {response_data!r}")
+            logger.info(f"Received response: {response_data!r}")
 
             expected_response = b"ECHO: " + test_message
             if response_data == expected_response:
-                logger.info("SUCCESS: Echo response matches expected!")
-                logger.info(f"   Data length: {len(test_message)} bytes")
-                logger.info(f"   Response length: {len(response_data)} bytes")
-                await session.close()
-                logger.info("Cleanup completed")
+                logger.info("SUCCESS: Echo response matches expected content.")
                 return True
             else:
-                logger.error("FAILED: Echo response mismatch!")
-                logger.error(f"   Expected: {expected_response!r}")
-                logger.error(f"   Received: {response_data!r}")
+                logger.error("FAILURE: Echo response mismatch!")
+                logger.error(f"   - Expected: {expected_response!r}")
+                logger.error(f"   - Received: {response_data!r}")
                 return False
 
-    except asyncio.TimeoutError:
-        logger.error("FAILED: Timeout waiting for echo response")
-        logger.error("Server might not be implementing echo correctly")
+    except (TimeoutError, ConnectionError) as e:
+        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
         return False
     except Exception as e:
-        logger.error(f"Simple echo failed: {e}", exc_info=True)
+        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
         return False
 
 
 async def test_multiple_messages() -> bool:
-    """Tests sending multiple messages, each on a separate stream."""
+    """Tests sending multiple messages, each on a separate stream, within one session."""
     logger.info("Test 02C: Multiple Messages")
     logger.info("-" * 30)
-
-    server_url = "https://127.0.0.1:4433/"
-    config = ClientConfig.create(
-        verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0, write_timeout=5.0, debug=True
-    )
+    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
 
     try:
         async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(server_url)
-
+            session = await client.connect(SERVER_URL)
             messages = [b"Message 1", b"Message 2", b"Message 3"]
             success_count = 0
 
             for i, message in enumerate(messages):
-                logger.info(f"Sending message {i + 1}: {message!r}")
+                logger.info(f"Processing message {i + 1}/{len(messages)}: {message!r}")
                 stream = await session.create_bidirectional_stream()
                 try:
                     await stream.write_all(message)
                     response_data = await stream.read_all()
-
                     expected = b"ECHO: " + message
                     if response_data == expected:
-                        logger.info(f"Message {i + 1} echo successful")
+                        logger.info(f"   - Echo for message {i + 1} successful.")
                         success_count += 1
                     else:
-                        logger.error(f"Message {i + 1} echo failed")
-                        logger.error(f"   Expected: {expected!r}")
-                        logger.error(f"   Received: {response_data!r}")
+                        logger.error(f"   - FAILURE: Echo for message {i + 1} mismatch!")
                 finally:
                     if not stream.is_closed:
                         await stream.close()
 
             if success_count == len(messages):
                 logger.info(f"SUCCESS: All {len(messages)} messages echoed correctly!")
+                return True
             else:
-                logger.error(f"FAILED: Only {success_count}/{len(messages)} messages successful")
+                logger.error(f"FAILURE: Only {success_count}/{len(messages)} messages were successful.")
                 return False
 
-            await session.close()
-            return True
-
+    except (TimeoutError, ConnectionError) as e:
+        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Multiple messages test failed: {e}", exc_info=True)
+        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
         return False
 
 
 async def main() -> int:
     """Main entry point for the simple stream operations test."""
     logger.info("Starting Test 02: Simple Stream Operations")
-    logger.info("")
 
-    tests = [
+    tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
         ("Stream Creation", test_stream_creation),
         ("Simple Echo", test_simple_echo),
         ("Multiple Messages", test_multiple_messages),
     ]
-
     passed = 0
     total = len(tests)
 
@@ -201,12 +180,13 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    exit_code = 1
     try:
         exit_code = asyncio.run(main())
-        sys.exit(exit_code)
     except KeyboardInterrupt:
-        logger.info("Test interrupted by user")
-        sys.exit(130)
+        logger.warning("\nTest interrupted by user.")
+        exit_code = 130
     except Exception as e:
-        logger.error(f"Test crashed: {e}", exc_info=True)
-        sys.exit(1)
+        logger.critical(f"Test suite crashed with an unhandled exception: {e}", exc_info=True)
+    finally:
+        sys.exit(exit_code)

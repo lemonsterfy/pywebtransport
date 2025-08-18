@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import StreamState, WebTransportSendStream, WebTransportStream
+from pywebtransport import StreamError, StreamState, WebTransportSendStream, WebTransportStream
 from pywebtransport.stream import StreamManager
 from pywebtransport.stream.manager import StreamType
 from pywebtransport.types import StreamId
@@ -31,7 +31,7 @@ class TestStreamManager:
     def mock_stream(self, mocker: MockerFixture) -> Any:
         stream = mocker.create_autospec(WebTransportStream, instance=True)
         stream.stream_id = TEST_STREAM_ID
-        stream.is_closed = False
+        type(stream).is_closed = mocker.PropertyMock(return_value=False)
         stream.close = mocker.AsyncMock()
         stream.state = StreamState.OPEN
         stream.direction = "bidirectional"
@@ -42,8 +42,9 @@ class TestStreamManager:
         assert manager._max_streams == 50
         assert manager._creation_semaphore is None
 
-        manager_from_factory = StreamManager.create(mock_session, max_streams=20)
+        manager_from_factory = StreamManager.create(mock_session, max_streams=20, stream_cleanup_interval=10.0)
         assert manager_from_factory._max_streams == 20
+        assert manager_from_factory._cleanup_interval == 10.0
 
     @pytest.mark.asyncio
     async def test_len_and_contains(self, manager: StreamManager, mock_stream: Any) -> None:
@@ -160,13 +161,11 @@ class TestStreamManager:
             mock_session._create_stream_on_protocol.return_value = 1
             stream1 = await manager.create_unidirectional_stream()
 
-            with pytest.raises(asyncio.TimeoutError):
-                create_task = asyncio.create_task(manager.create_unidirectional_stream())
-                await asyncio.wait_for(create_task, timeout=0.01)
+            with pytest.raises(StreamError, match=r"Cannot create new stream: stream limit \(1\) reached."):
+                await manager.create_unidirectional_stream()
 
-            create_task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await create_task
+            assert manager._creation_semaphore is not None
+            assert manager._creation_semaphore.locked()
 
             await manager.remove_stream(stream1.stream_id)
 
@@ -186,10 +185,10 @@ class TestStreamManager:
     async def test_cleanup_closed_streams(self, manager: StreamManager, mocker: MockerFixture) -> None:
         stream_open = mocker.create_autospec(WebTransportStream, instance=True)
         stream_open.stream_id = 1
-        stream_open.is_closed = False
+        type(stream_open).is_closed = mocker.PropertyMock(return_value=False)
         stream_closed = mocker.create_autospec(WebTransportStream, instance=True)
         stream_closed.stream_id = 2
-        stream_closed.is_closed = True
+        type(stream_closed).is_closed = mocker.PropertyMock(return_value=True)
         await manager.add_stream(stream_open)
         await manager.add_stream(stream_closed)
         assert len(manager) == 2
@@ -220,7 +219,7 @@ class TestStreamManager:
 
         cleanup_mock = mocker.patch.object(StreamManager, "cleanup_closed_streams", side_effect=cleanup_side_effect)
 
-        async with StreamManager(mock_session, cleanup_interval=0.01):
+        async with StreamManager(mock_session, stream_cleanup_interval=0.01):
             try:
                 await asyncio.wait_for(cleanup_called_event.wait(), timeout=1)
             except asyncio.TimeoutError:
@@ -231,35 +230,13 @@ class TestStreamManager:
     @pytest.mark.asyncio
     async def test_periodic_cleanup_handles_exception(self, mock_session: Any, mocker: MockerFixture) -> None:
         mocker.patch.object(StreamManager, "cleanup_closed_streams", side_effect=ValueError("Cleanup failed"))
-        error_logged_event = asyncio.Event()
+        mock_logger_error = mocker.patch("pywebtransport.stream.manager.logger.error")
 
-        def log_side_effect(*args: Any, **kwargs: Any) -> None:
-            error_logged_event.set()
+        async with StreamManager(mock_session, stream_cleanup_interval=0.01):
+            await asyncio.sleep(0.05)
 
-        mock_logger_error = mocker.patch("pywebtransport.stream.manager.logger.error", side_effect=log_side_effect)
-
-        async with StreamManager(mock_session, cleanup_interval=0.01) as manager:
-            try:
-                await asyncio.wait_for(error_logged_event.wait(), timeout=1)
-            except asyncio.TimeoutError:
-                pytest.fail("Periodic cleanup task did not log the error as expected.")
-
-            mock_logger_error.assert_called_once()
-            assert "Cleanup failed" in str(mock_logger_error.call_args)
-            assert manager._cleanup_task is not None
-
-    @pytest.mark.asyncio
-    async def test_start_cleanup_task_no_loop(self, mock_session: Any, mocker: MockerFixture) -> None:
-        mock_periodic_cleanup = mocker.MagicMock()
-        mocker.patch.object(StreamManager, "_periodic_cleanup", new=mock_periodic_cleanup)
-        mocker.patch("asyncio.create_task", side_effect=RuntimeError("no loop"))
-        mock_logger_warning = mocker.patch("pywebtransport.stream.manager.logger.warning")
-
-        manager = StreamManager(mock_session)
-        manager._start_cleanup_task()
-
-        mock_periodic_cleanup.assert_called_once()
-        mock_logger_warning.assert_called_once_with("Could not start cleanup task: no running event loop.")
+        assert mock_logger_error.call_count > 0
+        mock_logger_error.assert_any_call("Stream cleanup cycle failed: Cleanup failed", exc_info=mock.ANY)
 
     @pytest.mark.asyncio
     async def test_shutdown(self, manager: StreamManager, mocker: MockerFixture) -> None:

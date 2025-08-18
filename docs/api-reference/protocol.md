@@ -19,6 +19,7 @@ This is the core class of the protocol layer. It orchestrates WebTransport sessi
 ##### Connection & Session Management
 
 - **`connection_established(self) -> None`**: Signals that the QUIC connection is established, moving the handler to the `CONNECTED` state.
+- **`async def close(self) -> None`**: Closes the protocol handler, cleaning up all its internal resources and event listeners.
 - **`async def create_webtransport_session(self, path: str, *, headers: Headers | None = None) -> tuple[SessionId, StreamId]`**: (Client-only) Initiates a new WebTransport session by sending a CONNECT request.
 - **`async def establish_session(self, *, path: str, headers: Headers | None = None, timeout: float = 30.0) -> tuple[SessionId, StreamId]`**: (Client-only) A high-level utility that creates a session and waits for it to become ready.
 - **`accept_webtransport_session(self, stream_id: StreamId, session_id: SessionId) -> None`**: (Server-only) Accepts a pending session request by sending a `200 OK` response.
@@ -43,6 +44,7 @@ This is the core class of the protocol layer. It orchestrates WebTransport sessi
 
 - `connection_state` (`ConnectionState`): The current state of the underlying QUIC connection.
 - `is_connected` (`bool`): `True` if the connection state is `CONNECTED`.
+- `connection` (`"WebTransportConnection" | None`): A weak reference to the parent `WebTransportConnection` object.
 - `quic_connection` (`QuicConnection`): The underlying `aioquic` connection object.
 - `stats` (`dict[str, Any]`): A dictionary containing connection statistics.
 

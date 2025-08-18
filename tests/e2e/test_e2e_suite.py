@@ -4,7 +4,7 @@ import asyncio
 import ssl
 import subprocess
 import sys
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import pytest
 

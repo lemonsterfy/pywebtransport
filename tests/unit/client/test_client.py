@@ -68,6 +68,13 @@ class TestWebTransportClient:
         mock.connect_timeout = 10.0
         mock.to_dict.return_value = {"timeout": 10}
         mock.update.return_value = mock
+        mock.max_connections = 100
+        mock.connection_cleanup_interval = 30.0
+        mock.connection_idle_check_interval = 5.0
+        mock.connection_idle_timeout = 60.0
+        mock.max_streams = 100
+        mock.max_incoming_streams = 100
+        mock.stream_cleanup_interval = 15.0
         return mock
 
     @pytest.fixture
@@ -125,7 +132,12 @@ class TestWebTransportClient:
         client = WebTransportClient()
 
         assert client.config is mock_client_config
-        mock_cm_create.assert_called_once_with(max_connections=100)
+        mock_cm_create.assert_called_once_with(
+            max_connections=mock_client_config.max_connections,
+            connection_cleanup_interval=mock_client_config.connection_cleanup_interval,
+            connection_idle_check_interval=mock_client_config.connection_idle_check_interval,
+            connection_idle_timeout=mock_client_config.connection_idle_timeout,
+        )
         assert not client.is_closed
 
     def test_initialization_custom_config(self) -> None:
@@ -200,11 +212,13 @@ class TestWebTransportClient:
     @pytest.mark.asyncio
     async def test_connect_success(
         self,
+        mocker: MockerFixture,
         mock_connection_manager: Any,
         mock_webtransport_connection: Any,
         mock_session: Any,
         mock_create_client: Any,
     ) -> None:
+        mock_session_class = mocker.patch("pywebtransport.client.client.WebTransportSession", return_value=mock_session)
         client = WebTransportClient()
 
         session: Any = await client.connect("https://example.com")
@@ -213,6 +227,13 @@ class TestWebTransportClient:
         mock_create_client.assert_awaited_once()
         mock_webtransport_connection.wait_for_ready_session.assert_awaited_once()
         assert session is mock_session
+        mock_session_class.assert_called_once_with(
+            connection=mock_webtransport_connection,
+            session_id="session-123",
+            max_streams=client.config.max_streams,
+            max_incoming_streams=client.config.max_incoming_streams,
+            stream_cleanup_interval=client.config.stream_cleanup_interval,
+        )
         mock_session.initialize.assert_awaited_once()
         stats = client._stats
         assert stats.connections_attempted == 1

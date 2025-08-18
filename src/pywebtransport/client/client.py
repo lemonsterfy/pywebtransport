@@ -76,7 +76,12 @@ class WebTransportClient(EventEmitter):
         """Initialize the WebTransport client."""
         super().__init__()
         self._config = config or ClientConfig.create()
-        self._connection_manager = ConnectionManager.create(max_connections=100)
+        self._connection_manager = ConnectionManager.create(
+            max_connections=self._config.max_connections,
+            connection_cleanup_interval=self._config.connection_cleanup_interval,
+            connection_idle_check_interval=self._config.connection_idle_check_interval,
+            connection_idle_timeout=self._config.connection_idle_timeout,
+        )
         self._default_headers: Headers = {}
         self._closed = False
         self._stats = ClientStats()
@@ -165,7 +170,13 @@ class WebTransportClient(EventEmitter):
                 except asyncio.TimeoutError as e:
                     raise TimeoutError(f"Session ready timeout after {connect_timeout}s") from e
 
-                session = WebTransportSession(connection=connection, session_id=session_id)
+                session = WebTransportSession(
+                    connection=connection,
+                    session_id=session_id,
+                    max_streams=conn_config.max_streams,
+                    max_incoming_streams=conn_config.max_incoming_streams,
+                    stream_cleanup_interval=conn_config.stream_cleanup_interval,
+                )
                 await session.initialize()
 
                 connect_time = timer.elapsed

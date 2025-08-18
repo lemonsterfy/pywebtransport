@@ -5,13 +5,15 @@ WebTransport session manager implementation.
 from __future__ import annotations
 
 import asyncio
+import weakref
 from collections import defaultdict
 from types import TracebackType
 from typing import Any, Self, Type
 
+from pywebtransport.constants import WebTransportConstants
 from pywebtransport.exceptions import SessionError
 from pywebtransport.session.session import WebTransportSession
-from pywebtransport.types import SessionId, SessionState
+from pywebtransport.types import EventType, SessionId, SessionState
 from pywebtransport.utils import get_logger
 
 __all__ = ["SessionManager"]
@@ -25,12 +27,12 @@ class SessionManager:
     def __init__(
         self,
         *,
-        max_sessions: int = 1000,
-        cleanup_interval: float = 300.0,
+        max_sessions: int = WebTransportConstants.DEFAULT_MAX_SESSIONS,
+        session_cleanup_interval: float = WebTransportConstants.DEFAULT_SESSION_CLEANUP_INTERVAL,
     ):
         """Initialize the session manager."""
         self._max_sessions = max_sessions
-        self._cleanup_interval = cleanup_interval
+        self._cleanup_interval = session_cleanup_interval
         self._lock: asyncio.Lock | None = None
         self._sessions: dict[SessionId, WebTransportSession] = {}
         self._stats = {
@@ -42,9 +44,14 @@ class SessionManager:
         self._cleanup_task: asyncio.Task[None] | None = None
 
     @classmethod
-    def create(cls, *, max_sessions: int = 1000, cleanup_interval: float = 300.0) -> Self:
+    def create(
+        cls,
+        *,
+        max_sessions: int = WebTransportConstants.DEFAULT_MAX_SESSIONS,
+        session_cleanup_interval: float = WebTransportConstants.DEFAULT_SESSION_CLEANUP_INTERVAL,
+    ) -> Self:
         """Factory method to create a new session manager instance."""
-        return cls(max_sessions=max_sessions, cleanup_interval=cleanup_interval)
+        return cls(max_sessions=max_sessions, session_cleanup_interval=session_cleanup_interval)
 
     async def __aenter__(self) -> Self:
         """Enter async context, initializing resources and starting background tasks."""
@@ -85,6 +92,16 @@ class SessionManager:
                 raise SessionError(f"Maximum sessions ({self._max_sessions}) exceeded")
             session_id = session.session_id
             self._sessions[session_id] = session
+
+            manager_ref = weakref.ref(self)
+
+            async def on_close(event: Any) -> None:
+                manager = manager_ref()
+                if manager:
+                    await manager.remove_session(event.data["session_id"])
+
+            session.once(EventType.SESSION_CLOSED, on_close)
+
             self._stats["total_created"] += 1
             self._update_stats_unsafe()
             logger.debug(f"Added session {session_id} (total: {len(self._sessions)})")
@@ -116,25 +133,26 @@ class SessionManager:
             return self._sessions.get(session_id)
 
     async def close_all_sessions(self) -> None:
-        """Close all currently managed sessions."""
+        """Close and remove all currently managed sessions."""
         if self._lock is None:
             raise SessionError(
                 "SessionManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
+
         async with self._lock:
             sessions_to_close = list(self._sessions.values())
             if not sessions_to_close:
                 return
-            logger.info(f"Closing {len(sessions_to_close)} sessions")
+            logger.info(f"Closing and removing {len(sessions_to_close)} managed sessions.")
 
-        close_tasks = [session.close() for session in sessions_to_close]
-        await asyncio.gather(*close_tasks, return_exceptions=True)
+        close_tasks = [session.close() for session in sessions_to_close if not session.is_closed]
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
 
-        async with self._lock:
-            self._sessions.clear()
-            self._update_stats_unsafe()
-        logger.info("All sessions closed")
+        session_ids = [session.session_id for session in sessions_to_close]
+        remove_tasks = [self.remove_session(session_id) for session_id in session_ids]
+        await asyncio.gather(*remove_tasks, return_exceptions=True)
 
     async def get_all_sessions(self) -> list[WebTransportSession]:
         """Retrieve a list of all current sessions."""
@@ -165,7 +183,10 @@ class SessionManager:
             )
         async with self._lock:
             all_sessions = list(self._sessions.items())
-        closed_session_ids = [session_id for session_id, session in all_sessions if session.is_closed]
+        closed_session_ids = []
+        for session_id, session in all_sessions:
+            if session.is_closed:
+                closed_session_ids.append(session_id)
 
         if not closed_session_ids:
             return 0
@@ -203,15 +224,17 @@ class SessionManager:
             self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
     async def _periodic_cleanup(self) -> None:
-        """Periodically run the cleanup process."""
+        """Periodically run the cleanup process to remove closed sessions."""
         try:
             while True:
-                await self.cleanup_closed_sessions()
+                try:
+                    await self.cleanup_closed_sessions()
+                except Exception as e:
+                    logger.error(f"Session cleanup cycle failed: {e}", exc_info=e)
+
                 await asyncio.sleep(self._cleanup_interval)
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            logger.error(f"Session cleanup error: {e}")
 
     def _update_stats_unsafe(self) -> None:
         """Update internal statistics (must be called within a lock)."""

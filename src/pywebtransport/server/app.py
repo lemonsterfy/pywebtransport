@@ -174,11 +174,28 @@ class ServerApp:
                 logger.error(f"Session info not found for session {session_id}")
                 return
 
-            session = WebTransportSession(connection=connection, session_id=session_id)
+            config = connection.config
+            if not isinstance(config, ServerConfig):
+                logger.error(f"Connection {connection.connection_id} has a non-server config, which is unexpected.")
+                connection.protocol_handler.close_webtransport_session(
+                    session_id, code=1, reason="Internal server configuration error"
+                )
+                return
+
+            session = WebTransportSession(
+                connection=connection,
+                session_id=session_id,
+                max_streams=config.max_streams_per_connection,
+                max_incoming_streams=config.max_incoming_streams,
+                stream_cleanup_interval=config.stream_cleanup_interval,
+            )
             await session.initialize()
             session._path = session_info.path
             session._headers = session_info.headers
             session._control_stream_id = stream_id
+
+            if self.server.session_manager:
+                await self.server.session_manager.add_session(session)
 
             logger.info(f"Processing session request for path '{session.path}'")
             if not await self._middleware_manager.process_request(session):
@@ -196,16 +213,7 @@ class ServerApp:
 
             logger.info(f"Routing session request for path '{session.path}' to handler '{handler.__name__}'")
             connection.protocol_handler.accept_webtransport_session(stream_id=stream_id, session_id=session_id)
-
-            try:
-                await asyncio.wait_for(session.ready(), timeout=5.0)
-                logger.info(f"Session {session_id} is ready")
-            except asyncio.TimeoutError:
-                logger.error(f"Session {session_id} ready timeout after 5 seconds")
-                await session.close(code=1, reason="Session ready timeout")
-                return
-
-            logger.info(f"Starting handler for session {session_id}")
+            logger.info(f"Handler task created for session {session_id}")
 
             async def run_handler(h: SessionHandler, s: WebTransportSession) -> None:
                 try:
@@ -220,7 +228,7 @@ class ServerApp:
                         await s.close()
 
             asyncio.create_task(run_handler(handler, session))
-            logger.info(f"Handler task created for session {session_id}")
+
         except Exception as e:
             logger.error(f"Error handling session request for session {session_id}: {e}", exc_info=True)
             try:
