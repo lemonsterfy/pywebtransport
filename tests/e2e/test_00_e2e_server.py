@@ -9,16 +9,24 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Set
+from typing import Any, Final
 
-from pywebtransport.config import ServerConfig
-from pywebtransport.server import ServerApp
-from pywebtransport.session import WebTransportSession
-from pywebtransport.stream import WebTransportReceiveStream, WebTransportStream
-from pywebtransport.types import EventType
+from pywebtransport import (
+    ConnectionError,
+    EventType,
+    ServerApp,
+    ServerConfig,
+    WebTransportReceiveStream,
+    WebTransportSession,
+    WebTransportStream,
+)
 from pywebtransport.utils import generate_self_signed_cert
 
-DEBUG_MODE = "--debug" in sys.argv
+CERT_PATH: Final[Path] = Path("localhost.crt")
+KEY_PATH: Final[Path] = Path("localhost.key")
+DEBUG_MODE: Final[bool] = "--debug" in sys.argv
+SERVER_HOST: Final[str] = "::"
+SERVER_PORT: Final[int] = 4433
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 if DEBUG_MODE:
@@ -40,10 +48,10 @@ class ServerStatistics:
         self.streams_total = 0
         self.datagrams_total = 0
         self.bytes_transferred = 0
-        self.active_sessions: Set[str] = set()
-        self.active_streams: Set[int] = set()
+        self.active_sessions: set[str] = set()
+        self.active_streams: set[int] = set()
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Returns a dictionary of all current server statistics."""
         uptime = time.time() - self.start_time
         return {
@@ -89,9 +97,6 @@ class ServerStatistics:
         self.bytes_transferred += byte_count
 
 
-server_stats = ServerStatistics()
-
-
 class E2EServerApp(ServerApp):
     """E2E test server application with full test support."""
 
@@ -100,7 +105,15 @@ class E2EServerApp(ServerApp):
         super().__init__(**kwargs)
         self.server.on(EventType.CONNECTION_ESTABLISHED, self._on_connection_established)
         self.server.on(EventType.SESSION_REQUEST, self._on_session_request)
+        self._register_handlers()
         logger.info("E2E Server initialized with full test support")
+
+    def _register_handlers(self) -> None:
+        """Centralized method for registering all server routes."""
+        self.route("/")(echo_handler)
+        self.route("/echo")(echo_handler)
+        self.route("/stats")(stats_handler)
+        self.route("/health")(health_handler)
 
     async def _on_connection_established(self, event: Any) -> None:
         """Handles connection established events."""
@@ -115,6 +128,9 @@ class E2EServerApp(ServerApp):
             logger.info(f"Session request: {session_id} for path '{path}'")
 
 
+server_stats = ServerStatistics()
+
+
 async def echo_handler(session: WebTransportSession) -> None:
     """Main handler for echoing streams and datagrams."""
     session_id = session.session_id
@@ -125,6 +141,8 @@ async def echo_handler(session: WebTransportSession) -> None:
         datagram_task = asyncio.create_task(handle_datagrams(session))
         stream_task = asyncio.create_task(handle_incoming_streams(session))
         await asyncio.gather(datagram_task, stream_task, return_exceptions=True)
+    except asyncio.CancelledError:
+        pass
     except Exception as e:
         logger.error(f"Handler error for session {session_id}: {e}", exc_info=True)
     finally:
@@ -144,7 +162,8 @@ async def stats_handler(session: WebTransportSession) -> None:
     except Exception as e:
         logger.error(f"Stats handler error: {e}")
     finally:
-        await session.close()
+        if not session.is_closed:
+            await session.close()
 
 
 async def health_handler(session: WebTransportSession) -> None:
@@ -164,60 +183,49 @@ async def health_handler(session: WebTransportSession) -> None:
     except Exception as e:
         logger.error(f"Health handler error: {e}")
     finally:
-        await session.close()
+        if not session.is_closed:
+            await session.close()
 
 
 async def handle_datagrams(session: WebTransportSession) -> None:
     """Receives and echoes datagrams for a session."""
     session_id = session.session_id
-    logger.info(f"Starting datagram handler for session {session_id}")
+    logger.debug(f"Starting datagram handler for session {session_id}")
     try:
         datagrams = await session.datagrams
         while not session.is_closed:
             try:
                 data = await asyncio.wait_for(datagrams.receive(), timeout=1.0)
-                if not data:
-                    continue
-
                 server_stats.record_datagram()
                 server_stats.record_bytes(len(data))
-                logger.info(f"Received datagram: {len(data)} bytes")
-
                 echo_data = b"ECHO: " + data
                 await datagrams.send(echo_data)
                 server_stats.record_bytes(len(echo_data))
-                logger.info(f"Echoed datagram: {len(echo_data)} bytes")
-
             except asyncio.TimeoutError:
                 continue
-            except Exception as e:
-                logger.error(f"Datagram handling error: {e}")
-                break
-    except asyncio.CancelledError:
-        logger.info(f"Datagram handler cancelled for session {session_id}")
+    except (asyncio.CancelledError, ConnectionError):
+        pass
     except Exception as e:
-        logger.error(f"Datagram handler error for session {session_id}: {e}")
+        logger.error(f"Datagram handler error for session {session_id}: {e}", exc_info=True)
 
 
 async def handle_incoming_streams(session: WebTransportSession) -> None:
     """Listens for and handles all incoming streams for a session."""
     session_id = session.session_id
-    logger.info(f"Starting stream handler for session {session_id}")
+    logger.debug(f"Starting stream handler for session {session_id}")
     try:
         async for stream in session.incoming_streams():
-            logger.info(f"New incoming stream: {stream.stream_id}")
             server_stats.record_stream_start(stream.stream_id)
             asyncio.create_task(handle_single_stream(stream, session_id))
-    except asyncio.CancelledError:
-        logger.info(f"Stream handler cancelled for session {session_id}")
+    except (asyncio.CancelledError, ConnectionError):
+        pass
     except Exception as e:
-        logger.error(f"Stream handler error for session {session_id}: {e}")
+        logger.error(f"Stream handler error for session {session_id}: {e}", exc_info=True)
 
 
 async def handle_single_stream(stream: Any, session_id: str) -> None:
     """Processes a single stream based on its type."""
     stream_id = stream.stream_id
-    logger.info(f"Processing stream {stream_id} for session {session_id}")
     try:
         if isinstance(stream, WebTransportStream):
             await handle_bidirectional_stream(stream)
@@ -229,76 +237,54 @@ async def handle_single_stream(stream: Any, session_id: str) -> None:
         logger.error(f"Error processing stream {stream_id}: {e}", exc_info=True)
     finally:
         server_stats.record_stream_end(stream_id)
-        logger.info(f"Stream {stream_id} processing completed")
 
 
 async def handle_bidirectional_stream(stream: WebTransportStream) -> None:
     """Handles echo logic for a bidirectional stream."""
-    stream_id = stream.stream_id
-    total_bytes_received = 0
-    total_bytes_sent = 0
-
     try:
-        logger.info(f"Reading all data from bidirectional stream {stream_id}.")
         request_data = await stream.read_all()
-        total_bytes_received = len(request_data)
-        server_stats.record_bytes(total_bytes_received)
-        logger.info(f"Stream {stream_id}: received a total of {total_bytes_received} bytes.")
-
+        server_stats.record_bytes(len(request_data))
         echo_data = b"ECHO: " + request_data
         await stream.write_all(echo_data)
-        total_bytes_sent = len(echo_data)
-        server_stats.record_bytes(total_bytes_sent)
-        logger.info(f"Stream {stream_id} finished processing {total_bytes_received} -> {total_bytes_sent} bytes")
+        server_stats.record_bytes(len(echo_data))
+    except (asyncio.CancelledError, ConnectionError):
+        pass
     except Exception as e:
-        logger.error(f"Bidirectional stream {stream_id} error: {e}", exc_info=True)
-        try:
-            await stream.abort(code=1)
-        except Exception:
-            pass
+        logger.error(f"Bidirectional stream {stream.stream_id} error: {e}", exc_info=True)
+        await stream.abort(code=1)
     finally:
-        server_stats.record_stream_end(stream_id)
+        if not stream.is_closed:
+            await stream.close()
 
 
 async def handle_receive_stream(stream: WebTransportReceiveStream) -> None:
     """Handles data from a receive-only stream."""
-    stream_id = stream.stream_id
-    total_bytes = 0
     try:
-        logger.info(f"Reading from receive-only stream {stream_id}")
         all_data = await stream.read_all()
-        total_bytes = len(all_data)
-        logger.info(f"Receive-only stream {stream_id}: total received {total_bytes} bytes")
-        server_stats.record_bytes(total_bytes)
+        server_stats.record_bytes(len(all_data))
+    except (asyncio.CancelledError, ConnectionError):
+        pass
     except Exception as e:
-        logger.error(f"Receive stream {stream_id} error: {e}")
+        logger.error(f"Receive stream {stream.stream_id} error: {e}", exc_info=True)
 
 
 async def main() -> None:
     """Configures and starts the WebTransport E2E test server."""
-    logger.info("Starting WebTransport E2E Server")
-    cert_path = Path("localhost.crt")
-    key_path = Path("localhost.key")
-    hostname = "localhost"
+    logger.info("Starting WebTransport E2E Test Server...")
 
-    if not cert_path.exists() or not key_path.exists():
-        logger.info("Generating self-signed certificate...")
-        generate_self_signed_cert(hostname)
+    if not CERT_PATH.exists() or not KEY_PATH.exists():
+        logger.info(f"Generating self-signed certificate for {CERT_PATH.stem}...")
+        generate_self_signed_cert(CERT_PATH.stem, output_dir=".")
 
     config = ServerConfig.create(
-        bind_host="::",
-        bind_port=4433,
-        certfile=str(cert_path),
-        keyfile=str(key_path),
+        bind_host=SERVER_HOST,
+        bind_port=SERVER_PORT,
+        certfile=str(CERT_PATH),
+        keyfile=str(KEY_PATH),
         debug=DEBUG_MODE,
         log_level="DEBUG" if DEBUG_MODE else "INFO",
     )
-
     app = E2EServerApp(config=config)
-    app.route("/")(echo_handler)
-    app.route("/echo")(echo_handler)
-    app.route("/stats")(stats_handler)
-    app.route("/health")(health_handler)
 
     logger.info(f"Server binding to {config.bind_host}:{config.bind_port}")
     if DEBUG_MODE:
@@ -308,15 +294,15 @@ async def main() -> None:
     try:
         async with app:
             await app.serve()
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
-    except Exception as e:
-        logger.error(f"Server error: {e}", exc_info=True)
+    except asyncio.CancelledError:
+        pass
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server stopped gracefully by user.")
     except Exception as e:
-        logger.error(f"Failed to start server: {e}", exc_info=True)
+        logger.critical(f"Server crashed unexpectedly: {e}", exc_info=True)
         sys.exit(1)

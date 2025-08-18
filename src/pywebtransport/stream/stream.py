@@ -21,6 +21,7 @@ from pywebtransport.utils import ensure_bytes, format_duration, get_logger, get_
 if TYPE_CHECKING:
     from pywebtransport.session import WebTransportSession
 
+
 __all__ = [
     "StreamBuffer",
     "StreamStats",
@@ -98,7 +99,6 @@ class StreamBuffer:
         """Initialize asyncio resources for the buffer."""
         if self._lock is not None:
             return
-
         self._lock = asyncio.Lock()
         self._data_available = asyncio.Event()
 
@@ -199,13 +199,11 @@ class _StreamBase:
                 f"{self.__class__.__name__} is not initialized."
                 "Its factory should call 'await stream.initialize()' before use."
             )
-
         await self._closed_future
 
     def get_summary(self) -> dict[str, Any]:
         """Get a structured summary of a stream for monitoring."""
         stats = self._stats.to_dict()
-
         return {
             "stream_id": self.stream_id,
             "state": self.state.value,
@@ -239,7 +237,6 @@ class _StreamBase:
         """Format a concise, human-readable summary of the stream."""
         stats = self._stats
         uptime_str = format_duration(stats.uptime) if stats.uptime > 0 else "0s"
-
         return (
             f"Stream({self.stream_id}, state={self.state.value}, direction={self.direction}, "
             f"uptime={uptime_str}, sent={stats.bytes_sent}, received={stats.bytes_received})"
@@ -258,7 +255,6 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
         self._direction = StreamDirection.RECEIVE_ONLY
         self._stats = StreamStats(stream_id=stream_id, created_at=get_timestamp())
         self._buffer: StreamBuffer | None = None
-
         config = session.connection.config if session and session.connection else None
         self._buffer_size = getattr(config, "stream_buffer_size", WebTransportConstants.DEFAULT_BUFFER_SIZE)
         self._read_timeout: float | None = getattr(config, "read_timeout", None)
@@ -394,7 +390,6 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
         session = self._session()
         if session and session.protocol_handler:
             session.protocol_handler.abort_stream(stream_id=self._stream_id, error_code=code)
-
         self._set_state(StreamState.RESET_SENT)
 
     def _set_state(self, new_state: StreamState) -> None:
@@ -423,9 +418,7 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
 
     async def _on_data_received(self, event: Event) -> None:
         """Handle incoming data events from the protocol layer."""
-        if self._buffer is None:
-            return
-        if not event.data:
+        if self._buffer is None or not event.data:
             return
 
         data = event.data.get("data", b"")
@@ -458,12 +451,10 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
         self._stats = StreamStats(stream_id=stream_id, created_at=get_timestamp())
         self._write_buffer: deque[dict[str, Any]] = deque()
         self._write_buffer_size = 0
-
         config = session.connection.config if session and session.connection else None
         self._max_buffer_size = getattr(config, "max_stream_buffer_size", WebTransportConstants.MAX_BUFFER_SIZE)
         self._write_timeout: float | None = getattr(config, "write_timeout", None)
         self._backpressure_limit = self._max_buffer_size * 0.8
-
         self._backpressure_event: asyncio.Event | None = None
         self._flushed_event: asyncio.Event | None = None
         self._writer_task: asyncio.Task[None] | None = None
@@ -502,7 +493,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
 
         self._is_initialized = True
 
-    async def write(self, data: Data, *, end_stream: bool = False) -> None:
+    async def write(self, data: Data, *, end_stream: bool = False, wait_flush: bool = True) -> None:
         """Write data to the stream, handling backpressure and chunking."""
         if not self._is_initialized:
             raise StreamError(
@@ -530,7 +521,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                 chunk = data_bytes[offset : offset + self._WRITE_CHUNK_SIZE]
                 offset += len(chunk)
                 is_last_chunk = offset >= data_len
-                future_for_this_chunk = completion_future if is_last_chunk else None
+                future_for_this_chunk = completion_future if (wait_flush or (end_stream and is_last_chunk)) else None
 
                 await self._wait_for_buffer_space(len(chunk))
 
@@ -543,7 +534,8 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                 if self._write_buffer_size > self._backpressure_limit:
                     self._backpressure_event.clear()
 
-        await asyncio.wait_for(completion_future, timeout=self._write_timeout)
+        if wait_flush or end_stream:
+            await asyncio.wait_for(completion_future, timeout=self._write_timeout)
 
         write_time = time.time() - start_time
         self._stats.writes_count += 1
@@ -556,7 +548,8 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
         try:
             for i in range(0, len(data), chunk_size):
                 chunk = data[i : i + chunk_size]
-                await self.write(chunk)
+                await self.write(chunk, wait_flush=False)
+            await self.flush()
             await self.close()
         except StreamError as e:
             logger.error(f"Error writing bytes to stream: {e}")
@@ -584,10 +577,12 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
             return
 
         try:
-            await self.write(b"", end_stream=True)
-            await self.flush()
+            await self.write(b"", end_stream=True, wait_flush=True)
         except StreamError as e:
-            logger.warning(f"Ignoring error during stream close: {e}")
+            if "Writer loop terminated" in str(e):
+                logger.debug(f"Ignoring error during stream close: {e}")
+            else:
+                logger.warning(f"Ignoring error during stream close: {e}")
 
     async def abort(self, *, code: int = 0) -> None:
         """Abort the writing side of the stream immediately."""
@@ -718,12 +713,10 @@ class WebTransportStream(WebTransportReceiveStream, WebTransportSendStream):
         self._stats = StreamStats(stream_id=stream_id, created_at=get_timestamp())
         self._is_initialized = False
         self._closed_future: asyncio.Future[None] | None = None
-
         config = session.connection.config if session and session.connection else None
         self._buffer_size = getattr(config, "stream_buffer_size", WebTransportConstants.DEFAULT_BUFFER_SIZE)
         self._read_timeout: float | None = getattr(config, "read_timeout", None)
         self._buffer: StreamBuffer | None = None
-
         self._max_buffer_size = getattr(config, "max_stream_buffer_size", WebTransportConstants.MAX_BUFFER_SIZE)
         self._write_timeout: float | None = getattr(config, "write_timeout", None)
         self._backpressure_limit = self._max_buffer_size * 0.8

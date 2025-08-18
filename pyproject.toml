@@ -37,6 +37,8 @@ dev = [
     "flake8>=7.2.0,<8.0.0",
     "mypy>=1.16.1,<2.0.0",
     "isort>=6.0.1,<7.0.0",
+    "psutil>=7.0.0,<8.0.0",
+    "types-psutil==7.0.0.20250801",
     "pytest>=8.4.1,<9.0.0",
     "pytest-asyncio>=1.0.0,<2.0.0",
     "pytest-cov>=6.2.1,<7.0.0",
@@ -44,6 +46,8 @@ dev = [
     "pytest-mock>=3.14.1,<4.0.0",
 ]
 test = [
+    "psutil>=7.0.0,<8.0.0",
+    "types-psutil==7.0.0.20250801",
     "pytest>=8.4.1,<9.0.0",
     "pytest-asyncio>=1.0.0,<2.0.0",
     "pytest-cov>=6.2.1,<7.0.0",
@@ -113,7 +117,7 @@ strict_equality = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["aioquic.*", "cryptography.*"]
+module = ["aioquic.*", "pytest_benchmark.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -121,6 +125,7 @@ pythonpath = ["src"]
 minversion = "8.4"
 addopts = "-ra -q --strict-markers --strict-config --ignore-glob='tests/e2e/test_0*.py'"
 testpaths = ["tests"]
+norecursedirs = "tests/performance"
 asyncio_mode = "auto"
 markers = [
     "unit: Unit tests",

@@ -9,6 +9,7 @@ from collections import defaultdict
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, AsyncIterator, Self, Type
 
+from pywebtransport.constants import WebTransportConstants
 from pywebtransport.exceptions import StreamError
 from pywebtransport.stream.stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
 from pywebtransport.types import StreamId
@@ -32,13 +33,13 @@ class StreamManager:
         self,
         session: WebTransportSession,
         *,
-        max_streams: int = 100,
-        cleanup_interval: float = 60.0,
+        max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS,
+        stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
     ):
         """Initialize the stream manager."""
         self._session = session
         self._max_streams = max_streams
-        self._cleanup_interval = cleanup_interval
+        self._cleanup_interval = stream_cleanup_interval
         self._streams: dict[StreamId, StreamType] = {}
         self._lock: asyncio.Lock | None = None
         self._creation_semaphore: asyncio.Semaphore | None = None
@@ -50,11 +51,11 @@ class StreamManager:
         cls,
         session: WebTransportSession,
         *,
-        max_streams: int = 100,
-        cleanup_interval: float = 60.0,
+        max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS,
+        stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
     ) -> Self:
         """Factory method to create a new stream manager instance."""
-        return cls(session, max_streams=max_streams, cleanup_interval=cleanup_interval)
+        return cls(session, max_streams=max_streams, stream_cleanup_interval=stream_cleanup_interval)
 
     async def __aenter__(self) -> Self:
         """Enter the asynchronous context, initializing resources and starting background tasks."""
@@ -71,28 +72,6 @@ class StreamManager:
     ) -> None:
         """Exit the asynchronous context, shutting down the manager."""
         await self.shutdown()
-
-    def __len__(self) -> int:
-        """Return the current number of managed streams."""
-        return len(self._streams)
-
-    def __contains__(self, stream_id: object) -> bool:
-        """Check if a stream ID is being managed."""
-        if not isinstance(stream_id, int):
-            return False
-        return stream_id in self._streams
-
-    async def __aiter__(self) -> AsyncIterator[StreamType]:
-        """Return an async iterator over a snapshot of the managed streams."""
-        if self._lock is None:
-            raise StreamError(
-                "StreamManager has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-        async with self._lock:
-            streams_copy = list(self._streams.values())
-        for stream in streams_copy:
-            yield stream
 
     async def shutdown(self) -> None:
         """Shut down the manager and all associated tasks and streams."""
@@ -113,6 +92,10 @@ class StreamManager:
                 "StreamManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
+
+        if self._creation_semaphore.locked():
+            raise StreamError(f"Cannot create new stream: stream limit ({self._max_streams}) reached.")
+
         await self._creation_semaphore.acquire()
         try:
             stream_id = await self._session._create_stream_on_protocol(is_unidirectional=False)
@@ -130,6 +113,10 @@ class StreamManager:
                 "StreamManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
+
+        if self._creation_semaphore.locked():
+            raise StreamError(f"Cannot create new stream: stream limit ({self._max_streams}) reached.")
+
         await self._creation_semaphore.acquire()
         try:
             stream_id = await self._session._create_stream_on_protocol(is_unidirectional=True)
@@ -182,23 +169,28 @@ class StreamManager:
             return self._streams.get(stream_id)
 
     async def close_all_streams(self) -> None:
-        """Close all currently managed streams."""
+        """Close and remove all currently managed streams."""
         if self._lock is None:
             raise StreamError(
                 "StreamManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
+
         async with self._lock:
             streams_to_close = list(self._streams.values())
             if not streams_to_close:
                 return
-            logger.info(f"Closing {len(streams_to_close)} managed streams.")
+            logger.info(f"Closing and removing {len(streams_to_close)} managed streams.")
 
         close_tasks = [stream.close() for stream in streams_to_close if not stream.is_closed]
-        await asyncio.gather(*close_tasks, return_exceptions=True)
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
+
+        stream_ids = [stream.stream_id for stream in streams_to_close]
+        remove_tasks = [self.remove_stream(stream_id) for stream_id in stream_ids]
+        await asyncio.gather(*remove_tasks, return_exceptions=True)
 
         async with self._lock:
-            self._streams.clear()
             self._update_stats_unsafe()
 
     async def get_all_streams(self) -> list[StreamType]:
@@ -271,15 +263,39 @@ class StreamManager:
         """Periodically run the cleanup process to remove closed streams."""
         try:
             while True:
-                await self.cleanup_closed_streams()
+                try:
+                    await self.cleanup_closed_streams()
+                except Exception as e:
+                    logger.error(f"Stream cleanup cycle failed: {e}", exc_info=e)
+
                 await asyncio.sleep(self._cleanup_interval)
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            logger.error(f"Stream cleanup task error: {e}", exc_info=e)
 
     def _update_stats_unsafe(self) -> None:
         """Update internal statistics (must be called within a lock)."""
         count = len(self._streams)
         self._stats["current_count"] = count
         self._stats["max_concurrent"] = max(self._stats["max_concurrent"], count)
+
+    def __len__(self) -> int:
+        """Return the current number of managed streams."""
+        return len(self._streams)
+
+    def __contains__(self, stream_id: object) -> bool:
+        """Check if a stream ID is being managed."""
+        if not isinstance(stream_id, int):
+            return False
+        return stream_id in self._streams
+
+    async def __aiter__(self) -> AsyncIterator[StreamType]:
+        """Return an async iterator over a snapshot of the managed streams."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            streams_copy = list(self._streams.values())
+        for stream in streams_copy:
+            yield stream

@@ -66,6 +66,7 @@ The core server class that manages the QUIC transport, connection lifecycle, and
 
 - `is_serving` (`bool`): `True` if the server is currently listening.
 - `local_address` (`tuple[str, int]`): The `(host, port)` tuple the server is bound to.
+- `session_manager` (`SessionManager`): The server's session manager instance, which tracks all active sessions.
 
 ### RequestRouter Class
 

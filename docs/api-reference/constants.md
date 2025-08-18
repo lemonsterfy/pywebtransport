@@ -36,19 +36,32 @@ A centralized class containing fundamental constants related to the WebTransport
 - `SETTINGS_H3_DATAGRAM` (`int`): 0x33
 - `SETTINGS_ENABLE_WEBTRANSPORT` (`int`): 0x2B603742
 
-#### Limits & Timeouts
+#### Limits & Sizing
 
 - `MAX_STREAM_ID` (`int`): 2\*\*62 - 1
 - `MAX_DATAGRAM_SIZE` (`int`): 65535
-- `DEFAULT_MAX_STREAMS` (`int`): 100
 - `DEFAULT_BUFFER_SIZE` (`int`): 65536 (64KB)
 - `MAX_BUFFER_SIZE` (`int`): 1048576 (1MB)
+- `DEFAULT_MAX_STREAMS` (`int`): 100
+- `DEFAULT_MAX_INCOMING_STREAMS` (`int`): 100
+- `DEFAULT_CLIENT_MAX_CONNECTIONS` (`int`): 100
+- `DEFAULT_SERVER_MAX_CONNECTIONS` (`int`): 3000
+- `DEFAULT_MAX_STREAMS_PER_CONNECTION` (`int`): 100
+- `DEFAULT_MAX_SESSIONS` (`int`): 10000
+
+#### Timeouts & Intervals
+
 - `DEFAULT_CONNECT_TIMEOUT` (`float`): 30.0 seconds
 - `DEFAULT_READ_TIMEOUT` (`float`): 60.0 seconds
 - `DEFAULT_WRITE_TIMEOUT` (`float`): 30.0 seconds
 - `DEFAULT_CLOSE_TIMEOUT` (`float`): 5.0 seconds
-- `DEFAULT_KEEPALIVE_TIMEOUT` (`float`): 300.0 seconds
 - `DEFAULT_STREAM_CREATION_TIMEOUT` (`float`): 10.0 seconds
+- `DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT` (`float`): 30.0 seconds
+- `DEFAULT_CONNECTION_CLEANUP_INTERVAL` (`float`): 30.0 seconds
+- `DEFAULT_CONNECTION_IDLE_TIMEOUT` (`float`): 60.0 seconds
+- `DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL` (`float`): 5.0 seconds
+- `DEFAULT_SESSION_CLEANUP_INTERVAL` (`float`): 60.0 seconds
+- `DEFAULT_STREAM_CLEANUP_INTERVAL` (`float`): 15.0 seconds
 
 #### Flow Control Constants
 

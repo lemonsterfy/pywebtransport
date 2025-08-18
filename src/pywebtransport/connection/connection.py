@@ -76,6 +76,12 @@ class WebTransportConnection(EventEmitter):
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._timer_handle: asyncio.TimerHandle | None = None
 
+        self.last_activity_time: float = 0.0
+        if isinstance(config, ServerConfig):
+            self.idle_timeout: float | None = config.connection_idle_timeout
+        else:
+            self.idle_timeout = None
+
     @classmethod
     async def create_client(cls, *, config: ClientConfig, host: str, port: int, path: str = "/") -> Self:
         """Create a WebTransportConnection instance for client use."""
@@ -216,6 +222,7 @@ class WebTransportConnection(EventEmitter):
             self._transmit()
             self._set_state(ConnectionState.CONNECTED)
             self._info.established_at = get_timestamp()
+            self.record_activity()
             logger.info(f"Accepted connection from {self.remote_address}")
             await self.emit(EventType.CONNECTION_ESTABLISHED, data={"connection_id": self._connection_id})
         except Exception as e:
@@ -242,6 +249,10 @@ class WebTransportConnection(EventEmitter):
 
         if self._timer_handle:
             self._timer_handle.cancel()
+
+        if self._protocol_handler:
+            await self._protocol_handler.close()
+
         try:
             if self._quic_connection:
                 self._quic_connection.close(error_code=code, reason_phrase=reason or "")
@@ -251,6 +262,8 @@ class WebTransportConnection(EventEmitter):
             self._set_state(ConnectionState.CLOSED)
             if self._closed_future and not self._closed_future.done():
                 self._closed_future.set_result(None)
+            await super().close()
+            await self.emit(EventType.CONNECTION_CLOSED, data={"connection_id": self._connection_id})
             logger.info(f"Connection {self._connection_id} closed.")
 
     async def wait_closed(self) -> None:
@@ -371,6 +384,19 @@ class WebTransportConnection(EventEmitter):
                 issues.append(f"RTT check failed: {e}")
         return diagnosis
 
+    def record_activity(self) -> None:
+        """Record activity on the connection by updating the timestamp."""
+        self.last_activity_time = get_timestamp()
+
+    def _set_state(self, new_state: ConnectionState) -> None:
+        """Set a new state for the connection and log the change."""
+        if self._state == new_state:
+            return
+        old_state = self._state
+        self._state = new_state
+        self._info.state = new_state
+        logger.debug(f"Connection {self._connection_id} state: {old_state.value} -> {new_state.value}")
+
     async def _establish_quic_connection(self, host: str, port: int) -> None:
         """Internal helper to set up the QUIC transport and protocol."""
         loop = asyncio.get_running_loop()
@@ -422,6 +448,11 @@ class WebTransportConnection(EventEmitter):
         if not is_client:
             self._protocol_handler.on(EventType.SESSION_REQUEST, self._forward_session_request_from_handler)
 
+    def _start_background_tasks(self) -> None:
+        """Start any background tasks like keep-alives."""
+        if self._config.keep_alive:
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
     async def _initiate_webtransport_handshake(self, path: str) -> None:
         """Internal helper to start the WebTransport CONNECT handshake."""
         if not self._protocol_handler or not isinstance(self._config, ClientConfig):
@@ -434,50 +465,9 @@ class WebTransportConnection(EventEmitter):
         except Exception as e:
             raise HandshakeError(f"WebTransport handshake failed: {e}") from e
 
-    async def _forward_session_request_from_handler(self, event: Event) -> None:
-        """Forward a session request event from the handler to this connection."""
-        logger.debug(f"Forwarding SESSION_REQUEST from handler to connection {self.connection_id}")
-        await self.emit(EventType.SESSION_REQUEST, data=event.data)
-
-    def _start_background_tasks(self) -> None:
-        """Start any background tasks like keep-alives."""
-        if isinstance(self._config, ClientConfig) and getattr(self._config, "keep_alive", False):
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-
-    async def _heartbeat_loop(self) -> None:
-        """Periodically send PING frames to keep the connection alive."""
-        interval = getattr(self._config, "keep_alive_interval", 30.0)
-        try:
-            while self.is_connected:
-                await asyncio.sleep(interval)
-                if self._quic_connection:
-                    self._ping_uid_counter += 1
-                    self._quic_connection.send_ping(uid=self._ping_uid_counter)
-                self._transmit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Heartbeat loop error: {e}", exc_info=e)
-
-    def _on_connection_lost(self, exc: Exception | None) -> None:
-        """Handle an unexpected connection loss."""
-        if self._state in [ConnectionState.CLOSING, ConnectionState.CLOSED]:
-            return
-        logger.warning(f"Connection lost: {exc}")
-        asyncio.create_task(self.close(reason=f"Connection lost: {exc}"))
-
-    def _set_state(self, new_state: ConnectionState) -> None:
-        """Set a new state for the connection and log the change."""
-        if self._state == new_state:
-            return
-        old_state = self._state
-        self._state = new_state
-        self._info.state = new_state
-        logger.debug(f"Connection {self._connection_id} state: {old_state.value} -> {new_state.value}")
-
     def _transmit(self) -> None:
         """Send all pending datagrams from the QUIC connection."""
-        if self._quic_connection and self._transport:
+        if self._quic_connection and self._transport and not self._transport.is_closing():
             for data, addr in self._quic_connection.datagrams_to_send(now=asyncio.get_event_loop().time()):
                 try:
                     self._transport.sendto(data, addr)
@@ -493,6 +483,33 @@ class WebTransportConnection(EventEmitter):
             timer_at = self._quic_connection.get_timer()
             if timer_at is not None:
                 self._timer_handle = asyncio.get_event_loop().call_at(timer_at, self._transmit)
+
+    def _on_connection_lost(self, exc: Exception | None) -> None:
+        """Handle an unexpected connection loss."""
+        if self._state in [ConnectionState.CLOSING, ConnectionState.CLOSED]:
+            return
+        logger.warning(f"Connection lost: {exc}")
+        asyncio.create_task(self.close(reason=f"Connection lost: {exc}"))
+
+    async def _heartbeat_loop(self) -> None:
+        """Periodically send PING frames to keep the connection alive."""
+        interval = self._config.connection_keepalive_timeout
+        try:
+            while self.is_connected:
+                await asyncio.sleep(interval)
+                if self._quic_connection:
+                    self._ping_uid_counter += 1
+                    self._quic_connection.send_ping(uid=self._ping_uid_counter)
+                self._transmit()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Heartbeat loop error: {e}", exc_info=e)
+
+    async def _forward_session_request_from_handler(self, event: Event) -> None:
+        """Forward a session request event from the handler to this connection."""
+        logger.debug(f"Forwarding SESSION_REQUEST from handler to connection {self.connection_id}")
+        await self.emit(EventType.SESSION_REQUEST, data=event.data)
 
     async def _get_rtt(self) -> float:
         """Helper to get the latest RTT from the underlying QUIC connection."""

@@ -104,6 +104,7 @@ class EventType(Enum):
     CONNECTION_ESTABLISHED = "connection_established"
     CONNECTION_LOST = "connection_lost"
     CONNECTION_FAILED = "connection_failed"
+    CONNECTION_CLOSED = "connection_closed"
     SESSION_REQUEST = "session_request"
     SESSION_READY = "session_ready"
     SESSION_CLOSED = "session_closed"

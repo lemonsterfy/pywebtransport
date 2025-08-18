@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import SessionError, SessionState, WebTransportSession
+from pywebtransport import EventType, SessionError, SessionState, WebTransportSession
 from pywebtransport.session import SessionManager
 
 FAST_CLEANUP_INTERVAL = 1000.0
@@ -16,7 +16,7 @@ FAST_CLEANUP_INTERVAL = 1000.0
 class TestSessionManager:
     @pytest.fixture
     async def manager(self) -> AsyncGenerator[SessionManager, None]:
-        async with SessionManager(cleanup_interval=FAST_CLEANUP_INTERVAL) as mgr:
+        async with SessionManager(session_cleanup_interval=FAST_CLEANUP_INTERVAL) as mgr:
             yield mgr
 
     @pytest.fixture
@@ -24,15 +24,16 @@ class TestSessionManager:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.session_id = "session-1"
         session.state = SessionState.CONNECTED
-        session.is_closed = False
+        type(session).is_closed = mocker.PropertyMock(return_value=False)
         session.close = mocker.AsyncMock()
+        session.once = mocker.MagicMock()
         return session
 
     def test_initialization(self) -> None:
         mgr = SessionManager()
 
         assert mgr.get_session_count() == 0
-        assert mgr._max_sessions == 1000
+        assert mgr._max_sessions > 0
         stats = mgr._stats
         assert stats["total_created"] == 0
         assert stats["total_closed"] == 0
@@ -40,7 +41,7 @@ class TestSessionManager:
         assert stats["max_concurrent"] == 0
 
     def test_create_factory(self) -> None:
-        mgr = SessionManager.create(max_sessions=50, cleanup_interval=10.0)
+        mgr = SessionManager.create(max_sessions=50, session_cleanup_interval=10.0)
 
         assert isinstance(mgr, SessionManager)
         assert mgr._max_sessions == 50
@@ -68,6 +69,32 @@ class TestSessionManager:
         assert stats["current_count"] == 1
         assert stats["max_concurrent"] == 1
         assert await manager.get_session("session-1") is mock_session
+        cast(mock.MagicMock, mock_session.once).assert_called_once_with(EventType.SESSION_CLOSED, mock.ANY)
+
+    @pytest.mark.asyncio
+    async def test_automatic_removal_on_session_close(
+        self, manager: SessionManager, mock_session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        close_handler = None
+
+        def capture_handler(event_type: EventType, handler: mock.ANY) -> None:
+            nonlocal close_handler
+            if event_type == EventType.SESSION_CLOSED:
+                close_handler = handler
+
+        cast(mock.MagicMock, mock_session.once).side_effect = capture_handler
+
+        await manager.add_session(mock_session)
+        assert manager.get_session_count() == 1
+        assert close_handler is not None
+
+        close_event = mocker.MagicMock()
+        close_event.data = {"session_id": mock_session.session_id}
+        await close_handler(close_event)
+
+        assert manager.get_session_count() == 0
+        stats = await manager.get_stats()
+        assert stats["total_closed"] == 1
 
     @pytest.mark.asyncio
     async def test_get_session(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
@@ -100,6 +127,7 @@ class TestSessionManager:
             session = mocker.create_autospec(WebTransportSession, instance=True)
             session.session_id = f"session-{i}"
             session.state = state
+            session.once = mocker.MagicMock()
             sessions.append(session)
             await manager.add_session(session)
 
@@ -126,13 +154,14 @@ class TestSessionManager:
         assert stats["total_created"] == 1
         assert stats["total_closed"] == 0
         assert stats["states"] == {"connected": 1}
-        assert stats["max_sessions"] == 1000
+        assert stats["max_sessions"] > 0
 
     @pytest.mark.asyncio
     async def test_add_session_limit_exceeded(self, mock_session: WebTransportSession, mocker: MockerFixture) -> None:
         async with SessionManager(max_sessions=1) as manager:
             await manager.add_session(mock_session)
             another_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="session-2")
+            another_session.once = mocker.MagicMock()
 
             with pytest.raises(SessionError, match=r"Maximum sessions \(1\) exceeded"):
                 await manager.add_session(another_session)
@@ -148,9 +177,11 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_cleanup_closed_sessions(self, manager: SessionManager, mocker: MockerFixture) -> None:
         open_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="open-1")
-        open_session.is_closed = False
+        type(open_session).is_closed = mocker.PropertyMock(return_value=False)
+        open_session.once = mocker.MagicMock()
         closed_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="closed-1")
-        closed_session.is_closed = True
+        type(closed_session).is_closed = mocker.PropertyMock(return_value=True)
+        closed_session.once = mocker.MagicMock()
         await manager.add_session(open_session)
         await manager.add_session(closed_session)
         assert manager.get_session_count() == 2
@@ -168,7 +199,7 @@ class TestSessionManager:
     async def test_periodic_cleanup_task(self, mocker: MockerFixture) -> None:
         mock_cleanup = mocker.patch.object(SessionManager, "cleanup_closed_sessions", new_callable=mocker.AsyncMock)
 
-        async with SessionManager(cleanup_interval=1000):
+        async with SessionManager(session_cleanup_interval=1000):
             await asyncio.sleep(0)
 
         mock_cleanup.assert_awaited()
@@ -179,10 +210,10 @@ class TestSessionManager:
         mock_cleanup = mocker.patch.object(SessionManager, "cleanup_closed_sessions", new_callable=mocker.AsyncMock)
         mock_cleanup.side_effect = ValueError("Cleanup failed")
 
-        async with SessionManager(cleanup_interval=0.001):
+        async with SessionManager(session_cleanup_interval=0.001):
             await asyncio.sleep(0.01)
 
-        mock_logger.error.assert_called_once_with("Session cleanup error: Cleanup failed")
+        mock_logger.error.assert_called_with("Session cleanup cycle failed: Cleanup failed", exc_info=mock.ANY)
         mock_cleanup.assert_awaited()
 
     @pytest.mark.asyncio

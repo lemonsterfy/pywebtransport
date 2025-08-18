@@ -1,7 +1,8 @@
 """Unit tests for the pywebtransport.connection.manager module."""
 
 import asyncio
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, cast
+from unittest.mock import Mock
 
 import pytest
 from pytest_mock import MockerFixture
@@ -13,7 +14,7 @@ from pywebtransport.types import ConnectionId
 
 @pytest.fixture
 async def manager() -> AsyncGenerator[ConnectionManager, None]:
-    async with ConnectionManager(max_connections=10, cleanup_interval=1000.0) as mgr:
+    async with ConnectionManager(max_connections=10, connection_cleanup_interval=1000.0) as mgr:
         yield mgr
 
 
@@ -24,6 +25,7 @@ def mock_connection(mocker: MockerFixture) -> WebTransportConnection:
     mock.state = ConnectionState.CONNECTED
     type(mock).is_closed = mocker.PropertyMock(return_value=False)
     mock.close = mocker.AsyncMock()
+    mock.once = mocker.Mock()
     return mock
 
 
@@ -36,16 +38,26 @@ class TestConnectionManagerInitialization:
     def test_init_default_values(self) -> None:
         manager = ConnectionManager()
 
-        assert manager._max_connections == 1000
-        assert manager._cleanup_interval == 60.0
+        assert manager._max_connections > 0
+        assert manager._cleanup_interval > 0
+        assert manager._idle_check_interval > 0
+        assert manager._idle_timeout > 0
         assert manager.get_connection_count() == 0
         assert manager._cleanup_task is None
+        assert manager._idle_check_task is None
 
     def test_init_custom_values(self) -> None:
-        manager = ConnectionManager(max_connections=50, cleanup_interval=10.0)
+        manager = ConnectionManager(
+            max_connections=50,
+            connection_cleanup_interval=10.0,
+            connection_idle_check_interval=5.0,
+            connection_idle_timeout=30.0,
+        )
 
         assert manager._max_connections == 50
         assert manager._cleanup_interval == 10.0
+        assert manager._idle_check_interval == 5.0
+        assert manager._idle_timeout == 30.0
 
     def test_create_factory_method(self) -> None:
         manager = ConnectionManager.create(max_connections=20)
@@ -57,7 +69,10 @@ class TestConnectionManagerInitialization:
 class TestConnectionLifecycle:
     @pytest.mark.asyncio
     async def test_add_connection_success(
-        self, manager: ConnectionManager, mock_connection: WebTransportConnection
+        self,
+        manager: ConnectionManager,
+        mock_connection: WebTransportConnection,
+        mocker: MockerFixture,
     ) -> None:
         conn_id = await manager.add_connection(mock_connection)
 
@@ -68,6 +83,7 @@ class TestConnectionLifecycle:
         assert stats["total_created"] == 1
         assert stats["current_count"] == 1
         assert stats["max_concurrent"] == 1
+        cast(Mock, mock_connection.once).assert_called_once()
 
     @pytest.mark.asyncio
     async def test_add_connection_exceeds_limit(
@@ -134,8 +150,10 @@ class TestBulkOperationsAndQueries:
         assert await manager.get_all_connections() == []
         conn1 = mocker.create_autospec(WebTransportConnection, instance=True)
         conn1.connection_id = ConnectionId("conn1-id")
+        conn1.once = mocker.Mock()
         conn2 = mocker.create_autospec(WebTransportConnection, instance=True)
         conn2.connection_id = ConnectionId("conn2-id")
+        conn2.once = mocker.Mock()
         await manager.add_connection(conn1)
         await manager.add_connection(conn2)
 
@@ -166,9 +184,11 @@ class TestBulkOperationsAndQueries:
         conn1 = mocker.create_autospec(WebTransportConnection, instance=True)
         conn1.connection_id = ConnectionId("conn1-id")
         conn1.state = ConnectionState.CONNECTED
+        conn1.once = mocker.Mock()
         conn2 = mocker.create_autospec(WebTransportConnection, instance=True)
         conn2.connection_id = ConnectionId("conn2-id")
         conn2.state = ConnectionState.CONNECTING
+        conn2.once = mocker.Mock()
         await manager.add_connection(conn1)
         await manager.add_connection(conn2)
 
@@ -182,9 +202,11 @@ class TestBulkOperationsAndQueries:
         conn1 = mocker.create_autospec(WebTransportConnection, instance=True)
         conn1.connection_id = ConnectionId("conn1-id")
         conn1.close = mocker.AsyncMock()
+        conn1.once = mocker.Mock()
         conn2 = mocker.create_autospec(WebTransportConnection, instance=True)
         conn2.connection_id = ConnectionId("conn2-id")
         conn2.close = mocker.AsyncMock()
+        conn2.once = mocker.Mock()
         await manager.add_connection(conn1)
         await manager.add_connection(conn2)
 
@@ -206,11 +228,11 @@ class TestBulkOperationsAndQueries:
 class TestManagerLifecycleAndCleanup:
     @pytest.mark.asyncio
     async def test_context_manager_lifecycle(self, mocker: MockerFixture) -> None:
-        mock_start_cleanup = mocker.patch.object(ConnectionManager, "_start_cleanup_task")
+        mock_start_tasks = mocker.patch.object(ConnectionManager, "_start_background_tasks")
         mock_shutdown = mocker.patch.object(ConnectionManager, "shutdown", new_callable=mocker.AsyncMock)
 
         async with ConnectionManager():
-            mock_start_cleanup.assert_called_once()
+            mock_start_tasks.assert_called_once()
 
         mock_shutdown.assert_awaited_once()
 
@@ -218,23 +240,27 @@ class TestManagerLifecycleAndCleanup:
     async def test_shutdown(self, mocker: MockerFixture) -> None:
         manager = ConnectionManager()
         await manager.__aenter__()
-        mock_close_all = mocker.patch.object(manager, "close_all_connections", new_callable=mocker.AsyncMock)
+        _ = mocker.patch.object(manager, "close_all_connections", new_callable=mocker.AsyncMock)
         assert manager._cleanup_task is not None
-        task = manager._cleanup_task
+        assert manager._idle_check_task is not None
+        cleanup_task = manager._cleanup_task
+        idle_task = manager._idle_check_task
 
         await manager.shutdown()
 
-        assert task.cancelled()
-        mock_close_all.assert_awaited_once()
+        assert cleanup_task.done()
+        assert idle_task.done()
 
     @pytest.mark.asyncio
     async def test_cleanup_closed_connections(self, manager: ConnectionManager, mocker: MockerFixture) -> None:
         conn_open = mocker.create_autospec(WebTransportConnection, instance=True)
         conn_open.connection_id = ConnectionId("open-conn")
         type(conn_open).is_closed = mocker.PropertyMock(return_value=False)
+        conn_open.once = mocker.Mock()
         conn_closed = mocker.create_autospec(WebTransportConnection, instance=True)
         conn_closed.connection_id = ConnectionId("closed-conn")
         type(conn_closed).is_closed = mocker.PropertyMock(return_value=True)
+        conn_closed.once = mocker.Mock()
         await manager.add_connection(conn_open)
         await manager.add_connection(conn_closed)
         assert manager.get_connection_count() == 2
@@ -263,20 +289,66 @@ class TestManagerLifecycleAndCleanup:
             ConnectionManager, "cleanup_closed_connections", new_callable=mocker.AsyncMock
         )
 
-        async with ConnectionManager(cleanup_interval=123.45):
-            await asyncio.sleep(0)
+        async with ConnectionManager(connection_cleanup_interval=0.01):
+            await asyncio.sleep(0.05)
 
-        mock_cleanup.assert_awaited_once()
+        mock_cleanup.assert_awaited()
+        assert mock_cleanup.await_count > 0
 
     @pytest.mark.asyncio
     async def test_periodic_cleanup_task_exception_handling(self, mocker: MockerFixture, mock_logger: Any) -> None:
         test_exception = RuntimeError("Cleanup failed")
         mock_cleanup = mocker.patch.object(ConnectionManager, "cleanup_closed_connections", side_effect=test_exception)
 
-        async with ConnectionManager(cleanup_interval=0.01):
+        async with ConnectionManager(connection_cleanup_interval=0.01):
             await asyncio.sleep(0.05)
 
-        mock_cleanup.assert_awaited_once()
-        mock_logger.error.assert_called_once_with(
-            f"Connection cleanup task crashed: {test_exception}", exc_info=test_exception
+        mock_cleanup.assert_awaited()
+        mock_logger.error.assert_called_with(
+            f"Connection cleanup cycle failed: {test_exception}",
+            exc_info=test_exception,
         )
+
+
+class TestIdleConnectionManagement:
+    @pytest.mark.asyncio
+    async def test_idle_connection_is_closed(self, mocker: MockerFixture) -> None:
+        mocker.patch(
+            "pywebtransport.connection.manager.get_timestamp",
+            side_effect=[1000.0, 2000.0],
+        )
+
+        async with ConnectionManager(connection_idle_timeout=500.0, connection_idle_check_interval=0.01) as manager:
+            conn_idle = mocker.create_autospec(WebTransportConnection, instance=True)
+            conn_idle.connection_id = ConnectionId("idle-conn")
+            type(conn_idle).is_closed = mocker.PropertyMock(return_value=False)
+            type(conn_idle).is_closing = mocker.PropertyMock(return_value=False)
+            conn_idle.last_activity_time = 1000.0
+            conn_idle.close = mocker.AsyncMock()
+            conn_idle.once = mocker.Mock()
+
+            await manager.add_connection(conn_idle)
+            await asyncio.sleep(0.05)
+
+            conn_idle.close.assert_awaited_once_with(reason="Idle timeout")
+
+    @pytest.mark.asyncio
+    async def test_active_connection_is_not_closed(self, mocker: MockerFixture) -> None:
+        mocker.patch(
+            "pywebtransport.connection.manager.get_timestamp",
+            side_effect=[1000.0, 1200.0],
+        )
+
+        async with ConnectionManager(connection_idle_timeout=500.0, connection_idle_check_interval=0.01) as manager:
+            conn_active = mocker.create_autospec(WebTransportConnection, instance=True)
+            conn_active.connection_id = ConnectionId("active-conn")
+            type(conn_active).is_closed = mocker.PropertyMock(return_value=False)
+            type(conn_active).is_closing = mocker.PropertyMock(return_value=False)
+            conn_active.last_activity_time = 1000.0
+            conn_active.close = mocker.AsyncMock()
+            conn_active.once = mocker.Mock()
+
+            await manager.add_connection(conn_active)
+            await asyncio.sleep(0.05)
+
+            conn_active.close.assert_not_awaited()

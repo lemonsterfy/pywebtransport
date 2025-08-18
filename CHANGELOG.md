@@ -7,28 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.3.0
+### Planned for future release
 
 - **[Feature]** Introduce a high-performance, concurrent event processing model using `asyncio.TaskGroup`.
-- **[BREAKING CHANGE]** The execution of asynchronous event handlers will change from sequential to concurrent. **Note:** The order of handler execution will no longer be guaranteed.
 
-### Potential Future Work
+## [0.3.0] - 2025-08-18
 
-- Address any bugs discovered after the `v0.2.1` release in subsequent patch versions (`0.2.x`).
+This is a major release focused on production-readiness, significantly enhancing the library's robustness, resource management, performance, and configurability.
+
+**Note on Versioning:**
+While building the performance test suite for v0.2.2, we discovered a series of deep-seated resource management and robustness defects. As ensuring the library's stability in production environments is paramount, we decided to prioritize addressing these issues over the originally planned functional refactoring and release the fixes as version v0.3.0.
+
+### BREAKING CHANGE
+
+- **The `StreamManager` now fails immediately if the stream limit is reached.** Previously, an attempt to create a stream beyond the configured limit would block indefinitely. It now raises a `StreamError`, making resource exhaustion explicit and allowing applications to handle it gracefully.
+- **`WebTransportSession.close()` now closes the underlying `WebTransportConnection` by default.** This provides a more intuitive default behavior. To close only the session without terminating the connection, use `session.close(close_connection=False)`.
+
+### Added
+
+- **Implemented a server-side idle connection timeout.** The server can now be configured to automatically close connections that have been inactive for a specified duration, a critical feature for production environments.
+- **Introduced a performance-oriented "fire-and-forget" write mode.** The `WebTransportSendStream.write()` method now accepts a `wait_flush=False` parameter to allow high-throughput applications to buffer data without waiting for network I/O on every call.
+- **Added a new `CONNECTION_CLOSED` event** to distinguish graceful connection closures from unexpected losses (`CONNECTION_LOST`), enabling more precise lifecycle management.
+- **Added a comprehensive integration test suite** to validate the end-to-end behavior of the client, server, and application framework.
+- **Added a new performance test suite** to measure and benchmark key metrics like connection latency, stream throughput, and resource usage.
+
+### Changed
+
+- **Overhauled the resource management architecture to be event-driven.** Managers (`ConnectionManager`, `SessionManager`) now use event listeners and `weakref` to clean up closed resources almost instantaneously, replacing the less efficient polling mechanism and improving responsiveness.
+- **Enhanced the entire configuration system.** The `ClientConfig` and `ServerConfig` objects now include a wide range of new, fully validated parameters. This configuration is now correctly propagated from the top-level client/server down to every new session and stream.
+- **Refactored background task management.** Responsibility for periodic cleanup and idle checks has been delegated from the main `WebTransportServer` to the specialized `ConnectionManager` and `SessionManager` components, improving architectural separation of concerns.
+- **Updated API documentation** for 13 core components to reflect the new features, lifecycle behaviors, and configuration options.
+
+### Fixed
+
+- **Fixed a critical memory leak** in the protocol handler caused by a circular reference between the `WebTransportConnection` and `WebTransportProtocolHandler` objects.
+- **Fixed a severe resource leak** in the `StreamManager` where the `asyncio.Semaphore` controlling the stream limit was not released upon shutdown, which could lead to deadlocks.
+- **Eliminated "zombie sessions"** by correctly linking the `WebTransportSession` lifecycle to its parent `WebTransportConnection`. Sessions are now automatically cleaned up when the underlying connection is lost or closed.
+- **Fixed a bug in the CI/CD pipeline** that caused inaccurate code coverage reporting for parallel test jobs.
+- **Fixed bugs in the client and server application layers** where configuration values from `ClientConfig` and `ServerConfig` were not being correctly applied to new connections and sessions.
 
 ## [0.2.1] - 2025-08-07
 
 This is a patch release focused on improving the reliability of the protocol handler and the CI/CD pipeline.
-
-### Fixed
-
-- **Eliminated race condition warnings during session shutdown.** A race condition that occurred during rapid connection teardown would cause false positive warnings for late-arriving packets (both datagrams and streams). The handler now correctly and silently drops these packets, aligning with best practices and improving log clarity.
 
 ### Changed
 
 - **Hardened the CI/CD pipeline** by fixing parallel coverage reporting, resolving Codecov repository detection issues, and ensuring the GitHub sync step is more robust.
 - **Refined development dependencies** by removing `pre-commit` from the core dev setup to simplify the environment and updated the `dev-requirements.txt` lock file.
 - **Improved package metadata** in `pyproject.toml` for better discoverability on PyPI.
+
+### Fixed
+
+- **Eliminated race condition warnings during session shutdown.** A race condition that occurred during rapid connection teardown would cause false positive warnings for late-arriving packets (both datagrams and streams). The handler now correctly and silently drops these packets, aligning with best practices and improving log clarity.
 
 ## [0.2.0] - 2025-08-06
 
@@ -78,14 +108,14 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 
 ## [0.1.1] - 2025-07-28
 
-### Changed
-
-- Refactored unit tests to be independent of hardcoded version strings, improving maintainability.
-
 ### Added
 
 - A robust, end-to-end CI/CD pipeline for automated testing, coverage reporting, and deployment.
 - A public-facing CI workflow on GitHub Actions for pull request validation and build status badges.
+
+### Changed
+
+- Refactored unit tests to be independent of hardcoded version strings, improving maintainability.
 
 ## [0.1.0] - 2025-07-27
 
@@ -112,7 +142,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.1...v0.1.2

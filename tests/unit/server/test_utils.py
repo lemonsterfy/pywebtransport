@@ -53,9 +53,9 @@ class FakeWebTransportSession(WebTransportSession):
         await asyncio.sleep(0)
         return self._datagram_stream
 
-    async def close(self, *, code: int = 0, reason: str = "") -> None:
+    async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None:
         self.close_call_count += 1
-        self.close_call_args = {"code": code, "reason": reason}
+        self.close_call_args = {"code": code, "reason": reason, "close_connection": close_connection}
         await asyncio.sleep(0)
 
     async def incoming_streams(self) -> AsyncGenerator[Any, None]:

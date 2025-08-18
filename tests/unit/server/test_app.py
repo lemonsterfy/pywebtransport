@@ -9,7 +9,7 @@ from pytest_mock import MockerFixture
 from pywebtransport import Event, EventType, ServerConfig
 from pywebtransport.connection import WebTransportConnection
 from pywebtransport.server import ServerApp, WebTransportServer
-from pywebtransport.session import WebTransportSession
+from pywebtransport.session import SessionManager, WebTransportSession
 
 
 class TestServerApp:
@@ -45,17 +45,14 @@ class TestServerApp:
         server_instance.__aenter__ = mocker.AsyncMock(return_value=server_instance)
         server_instance.__aexit__ = mocker.AsyncMock()
         server_instance.config = ServerConfig(bind_host="0.0.0.0", bind_port=4433)
+        server_instance.session_manager = mocker.create_autospec(SessionManager, instance=True)
         mocker.patch("pywebtransport.server.app.WebTransportServer", return_value=server_instance)
         return server_instance
 
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
         session_instance = mocker.create_autospec(WebTransportSession, instance=True)
-
-        async def successful_ready() -> None:
-            pass
-
-        session_instance.ready = mocker.AsyncMock(side_effect=successful_ready)
+        session_instance.initialize = mocker.AsyncMock()
         session_instance.close = mocker.AsyncMock()
         session_instance.is_closed = False
         return mocker.patch("pywebtransport.server.app.WebTransportSession", return_value=session_instance)
@@ -177,10 +174,11 @@ class TestServerApp:
 
     @pytest.mark.asyncio
     async def test_handle_session_request_happy_path(
-        self, app: ServerApp, mock_router: Any, mock_session: Any, mocker: MockerFixture
+        self, app: ServerApp, mock_server: Any, mock_router: Any, mock_session: Any, mocker: MockerFixture
     ) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = True
+        mock_conn.config = ServerConfig()
         mock_handler = mocker.AsyncMock()
         mock_router.route_request.return_value = mock_handler
         mock_session_info = mocker.MagicMock(path="/", headers=[])
@@ -200,6 +198,7 @@ class TestServerApp:
         await app._handle_session_request(event)
 
         mock_conn.protocol_handler.accept_webtransport_session.assert_called_once_with(stream_id=4, session_id="s1")
+        mock_server.session_manager.add_session.assert_awaited_once_with(mock_session.return_value)
         assert captured_coro is not None
         await captured_coro
         mock_handler.assert_awaited_once()
@@ -210,7 +209,6 @@ class TestServerApp:
         [
             ("middleware", {"session_id": "s1", "stream_id": 1}, 403),
             ("no_route", {"session_id": "s1", "stream_id": 1}, 404),
-            ("timeout", {"session_id": "s1", "stream_id": 1}, 1),
             ("bad_data", "not_a_dict", None),
             ("no_conn", {"session_id": "s1", "stream_id": 1}, None),
             ("no_session_id", {"stream_id": 1}, None),
@@ -228,6 +226,7 @@ class TestServerApp:
     ) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = True
+        mock_conn.config = ServerConfig()
         mock_session_info = mocker.MagicMock(path="/", headers=[])
         mock_conn.protocol_handler.get_session_info.return_value = mock_session_info
         if isinstance(event_data, dict) and "connection" not in event_data:
@@ -238,23 +237,12 @@ class TestServerApp:
             mock_router.route_request.return_value = None
         else:
             mock_router.route_request.return_value = mocker.AsyncMock()
-        if rejection_case == "timeout":
 
-            async def wait_and_timeout(coro: Coroutine[Any, Any, None], timeout: float) -> NoReturn:
-                task = asyncio.create_task(coro)
-                await asyncio.sleep(0)
-                task.cancel()
-                raise asyncio.TimeoutError
-
-            mocker.patch("asyncio.wait_for", side_effect=wait_and_timeout)
         event = Event(type=EventType.SESSION_REQUEST, data=event_data)
 
         await app._handle_session_request(event)
 
-        if rejection_case == "timeout":
-            mock_session.return_value.close.assert_awaited_once_with(code=1, reason="Session ready timeout")
-            mock_conn.protocol_handler.close_webtransport_session.assert_not_called()
-        elif expected_code:
+        if expected_code:
             mock_conn.protocol_handler.close_webtransport_session.assert_called_once()
             assert mock_conn.protocol_handler.close_webtransport_session.call_args[1]["code"] == expected_code
 
@@ -273,6 +261,7 @@ class TestServerApp:
     async def test_handle_session_request_disconnected(self, app: ServerApp, mocker: MockerFixture) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = False
+        mock_conn.config = ServerConfig()
         event = Event(
             type=EventType.SESSION_REQUEST, data={"connection": mock_conn, "session_id": "s1", "stream_id": 1}
         )
@@ -285,6 +274,7 @@ class TestServerApp:
     async def test_handle_session_request_no_session_info(self, app: ServerApp, mocker: MockerFixture) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = True
+        mock_conn.config = ServerConfig()
         mock_conn.protocol_handler.get_session_info.return_value = None
         event = Event(
             type=EventType.SESSION_REQUEST, data={"connection": mock_conn, "session_id": "s1", "stream_id": 1}
@@ -298,6 +288,7 @@ class TestServerApp:
     async def test_handle_session_request_general_exception(self, app: ServerApp, mocker: MockerFixture) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = True
+        mock_conn.config = ServerConfig()
         mock_conn.protocol_handler.get_session_info.side_effect = ValueError("Unexpected error")
         event = Event(
             type=EventType.SESSION_REQUEST, data={"connection": mock_conn, "session_id": "s1", "stream_id": 1}
@@ -315,6 +306,7 @@ class TestServerApp:
     ) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = True
+        mock_conn.config = ServerConfig()
         handler_mock = mocker.AsyncMock(side_effect=ValueError("Handler error"))
         mock_router.route_request.return_value = handler_mock
         mock_session_info = mocker.MagicMock(path="/", headers=[])
@@ -344,6 +336,7 @@ class TestServerApp:
     ) -> None:
         mock_conn = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_conn.is_connected = True
+        mock_conn.config = ServerConfig()
         handler_mock = mocker.AsyncMock()
         mock_router.route_request.return_value = handler_mock
         mock_session.return_value.is_closed = True

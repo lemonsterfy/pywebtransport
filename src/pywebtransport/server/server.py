@@ -14,13 +14,13 @@ from typing import Any, Self, Type, cast
 from aioquic.asyncio import serve as quic_serve
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.asyncio.server import QuicServer
-from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import QuicEvent
 
 from pywebtransport.config import ServerConfig
 from pywebtransport.connection import ConnectionManager, WebTransportConnection
 from pywebtransport.events import Event, EventEmitter
 from pywebtransport.exceptions import ServerError
+from pywebtransport.protocol.utils import create_quic_configuration
 from pywebtransport.session import SessionManager
 from pywebtransport.types import Address, EventType
 from pywebtransport.utils import get_logger, get_timestamp
@@ -63,20 +63,17 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
         self._connection_ref: weakref.ReferenceType[WebTransportConnection] | None = None
         self._pending_events = []
 
-    def set_connection(self, connection: WebTransportConnection) -> None:
-        """Link the protocol to its WebTransportConnection and process buffered events."""
-        self._connection_ref = weakref.ref(connection)
-        if self._pending_events and connection.protocol_handler:
-            logger.debug(f"Processing {len(self._pending_events)} buffered QUIC events for {connection.connection_id}")
-            for event in self._pending_events:
-                asyncio.create_task(connection.protocol_handler.handle_quic_event(event))
-            self._pending_events.clear()
-
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Handle a new transport connection."""
         super().connection_made(transport)
         if server := self._server_ref():
             asyncio.create_task(server._handle_new_connection(transport, self))
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        """Handle the underlying transport connection being lost."""
+        super().connection_lost(exc)
+        if self._connection_ref and (connection := self._connection_ref()):
+            connection._on_connection_lost(exc)
 
     def quic_event_received(self, event: QuicEvent) -> None:
         """Receive QUIC events and either forward them or buffer them."""
@@ -86,6 +83,20 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
         else:
             logger.debug(f"Buffering QUIC event until connection is set: {event!r}")
             self._pending_events.append(event)
+
+    def set_connection(self, connection: WebTransportConnection) -> None:
+        """Link the protocol to its WebTransportConnection and process buffered events."""
+        self._connection_ref = weakref.ref(connection)
+        if self._pending_events and connection.protocol_handler:
+            logger.debug(f"Processing {len(self._pending_events)} buffered QUIC events for {connection.connection_id}")
+            for event in self._pending_events:
+                asyncio.create_task(connection.protocol_handler.handle_quic_event(event))
+            self._pending_events.clear()
+
+    def transmit(self) -> None:
+        """Send pending datagrams."""
+        if self._transport is not None and not self._transport.is_closing():
+            super().transmit()
 
 
 class WebTransportServer(EventEmitter):
@@ -99,10 +110,15 @@ class WebTransportServer(EventEmitter):
         self._serving, self._closing = False, False
         self._server: QuicServer | None = None
         self._start_time: float | None = None
-        self._connection_manager = ConnectionManager.create(max_connections=self._config.max_connections)
+        self._connection_manager = ConnectionManager.create(
+            max_connections=self._config.max_connections,
+            connection_cleanup_interval=self._config.connection_cleanup_interval,
+            connection_idle_check_interval=self._config.connection_idle_check_interval,
+            connection_idle_timeout=self._config.connection_idle_timeout,
+        )
         self._session_manager = SessionManager.create(
-            max_sessions=self._config.max_connections * 10,
-            cleanup_interval=getattr(self._config, "session_cleanup_interval", 300.0),
+            max_sessions=self._config.max_sessions,
+            session_cleanup_interval=self._config.session_cleanup_interval,
         )
         self._background_tasks: list[asyncio.Task[Any]] = []
         self._stats = ServerStats()
@@ -110,14 +126,19 @@ class WebTransportServer(EventEmitter):
         logger.info("WebTransport server initialized.")
 
     @property
+    def is_serving(self) -> bool:
+        """Check if the server is currently serving."""
+        return self._serving
+
+    @property
     def config(self) -> ServerConfig:
         """Get the server's configuration object."""
         return self._config
 
     @property
-    def is_serving(self) -> bool:
-        """Check if the server is currently serving."""
-        return self._serving
+    def session_manager(self) -> SessionManager:
+        """Get the server's session manager instance."""
+        return self._session_manager
 
     @property
     def local_address(self) -> Address | None:
@@ -148,9 +169,7 @@ class WebTransportServer(EventEmitter):
         bind_host, bind_port = host or self._config.bind_host, port or self._config.bind_port
         logger.info(f"Starting WebTransport server on {bind_host}:{bind_port}")
         try:
-            quic_config = QuicConfiguration(
-                is_client=False, alpn_protocols=self._config.alpn_protocols, max_datagram_frame_size=65536
-            )
+            quic_config = create_quic_configuration(is_client=False, **self._config.to_dict())
             quic_config.load_cert_chain(Path(self._config.certfile), Path(self._config.keyfile))
             if self._config.ca_certs:
                 quic_config.load_verify_locations(cafile=self._config.ca_certs)
@@ -262,16 +281,21 @@ class WebTransportServer(EventEmitter):
         try:
             connection = WebTransportConnection(self._config)
 
+            server_ref = weakref.ref(self)
+            conn_ref = weakref.ref(connection)
+
             async def forward_session_request(event: Event) -> None:
-                if isinstance(event.data, dict):
+                server = server_ref()
+                conn = conn_ref()
+                if server and conn and isinstance(event.data, dict):
                     event_data = event.data.copy()
                     if "connection" not in event_data:
-                        event_data["connection"] = connection
+                        event_data["connection"] = conn
                     logger.debug(
                         f"Forwarding session request for path '{event_data.get('path')}' "
-                        f"from connection {connection.connection_id} to server."
+                        f"from connection {conn.connection_id} to server."
                     )
-                    await self.emit(EventType.SESSION_REQUEST, data=event_data)
+                    await server.emit(EventType.SESSION_REQUEST, data=event_data)
 
             connection.on(EventType.SESSION_REQUEST, forward_session_request)
             dgram_transport = cast(asyncio.DatagramTransport, transport)
@@ -296,24 +320,7 @@ class WebTransportServer(EventEmitter):
 
     def _start_background_tasks(self) -> None:
         """Start all background tasks for the server."""
-        cleanup_interval = getattr(self._config, "manager_cleanup_interval", 60.0)
-        task = asyncio.create_task(self._cleanup_loop(cleanup_interval))
-        self._background_tasks.append(task)
-
-    async def _cleanup_loop(self, interval: float) -> None:
-        """Run a periodic cleanup loop for managers."""
-        try:
-            while self._serving:
-                await asyncio.sleep(interval)
-                logger.debug("Running periodic cleanup of connections and sessions...")
-                if hasattr(self._connection_manager, "cleanup_closed_connections"):
-                    await self._connection_manager.cleanup_closed_connections()
-                if hasattr(self._session_manager, "cleanup_closed_sessions"):
-                    await self._session_manager.cleanup_closed_sessions()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Cleanup loop error: {e}", exc_info=e)
+        pass
 
     def __str__(self) -> str:
         """Format a concise summary of server information for logging."""

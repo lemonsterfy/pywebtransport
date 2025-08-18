@@ -36,7 +36,9 @@ class TestEnumerations:
         "member, expected_value",
         [
             (EventType.CONNECTION_ESTABLISHED, "connection_established"),
+            (EventType.CONNECTION_FAILED, "connection_failed"),
             (EventType.CONNECTION_LOST, "connection_lost"),
+            (EventType.CONNECTION_CLOSED, "connection_closed"),
             (EventType.SESSION_REQUEST, "session_request"),
             (EventType.SESSION_READY, "session_ready"),
             (EventType.STREAM_OPENED, "stream_opened"),

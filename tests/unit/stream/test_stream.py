@@ -300,7 +300,8 @@ class TestWebTransportReceiveStream:
         receive_stream._set_state(StreamState.RESET_SENT)
 
         assert not receive_stream.is_readable
-        assert await receive_stream.read() == b""
+        result = await receive_stream.read()
+        assert result == b""
 
     @pytest.mark.asyncio
     async def test_on_data_received_empty_data(self, receive_stream: WebTransportReceiveStream) -> None:
@@ -378,6 +379,14 @@ class TestWebTransportSendStream:
             await completion_future
 
     @pytest.mark.asyncio
+    async def test_write_no_wait(self, send_stream: WebTransportSendStream) -> None:
+        await send_stream.write(b"fire and forget", wait_flush=False)
+
+        assert len(send_stream._write_buffer) == 1
+        assert send_stream._write_buffer[0]["data"] == b"fire and forget"
+        assert send_stream._write_buffer[0]["future"] is None
+
+    @pytest.mark.asyncio
     async def test_write_chunking(self, send_stream: WebTransportSendStream) -> None:
         send_stream._WRITE_CHUNK_SIZE = 10
 
@@ -393,13 +402,21 @@ class TestWebTransportSendStream:
     @pytest.mark.asyncio
     async def test_write_all(self, send_stream: WebTransportSendStream, mocker: MockerFixture) -> None:
         mock_write = mocker.patch.object(send_stream, "write", new_callable=mocker.AsyncMock)
+        mock_flush = mocker.patch.object(send_stream, "flush", new_callable=mocker.AsyncMock)
         mock_close = mocker.patch.object(send_stream, "close", new_callable=mocker.AsyncMock)
 
         await send_stream.write_all(b"all the data", chunk_size=5)
 
         assert mock_write.call_count == 3
-        mock_write.assert_has_calls([mocker.call(b"all t"), mocker.call(b"he da"), mocker.call(b"ta")])
-        mock_close.assert_called_once()
+        mock_write.assert_has_calls(
+            [
+                mocker.call(b"all t", wait_flush=False),
+                mocker.call(b"he da", wait_flush=False),
+                mocker.call(b"ta", wait_flush=False),
+            ]
+        )
+        mock_flush.assert_awaited_once()
+        mock_close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_flush_empty_and_timeout(self, send_stream: WebTransportSendStream, mocker: MockerFixture) -> None:
@@ -469,7 +486,7 @@ class TestWebTransportSendStream:
 
         await send_stream.close()
 
-        mock_write.assert_called_once_with(b"", end_stream=True)
+        mock_write.assert_called_once_with(b"", end_stream=True, wait_flush=True)
 
     @pytest.mark.asyncio
     async def test_writer_loop_integration(self, mock_session: Any) -> None:
@@ -535,6 +552,22 @@ class TestWebTransportStream:
     async def test_init(self, bidirectional_stream: WebTransportStream) -> None:
         assert bidirectional_stream.direction == StreamDirection.BIDIRECTIONAL.value
         assert hasattr(bidirectional_stream, "read") and hasattr(bidirectional_stream, "write")
+
+    @pytest.mark.asyncio
+    async def test_bidirectional_stream_read_and_write(
+        self, bidirectional_stream: WebTransportStream, mock_session: Any
+    ) -> None:
+        write_task = asyncio.create_task(bidirectional_stream.write(b"data to send"))
+        await asyncio.sleep(0)
+        assert len(bidirectional_stream._write_buffer) == 1
+        write_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await write_task
+
+        assert bidirectional_stream._buffer is not None
+        await bidirectional_stream._buffer.feed_data(b"data to receive")
+        read_data = await bidirectional_stream.read(size=100)
+        assert read_data == b"data to receive"
 
     @pytest.mark.asyncio
     async def test_close_calls_sendstream_close(

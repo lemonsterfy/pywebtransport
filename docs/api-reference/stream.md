@@ -18,7 +18,7 @@ Represents a unidirectional (send-only) WebTransport stream.
 
 #### Key Methods
 
-- **`async def write(self, data: Data, *, end_stream: bool = False) -> None`**: Writes data to the stream, handling backpressure.
+- **`async def write(self, data: Data, *, end_stream: bool = False, wait_flush: bool = True) -> None`**: Writes data to the stream. By default, it waits for the data to be flushed; set `wait_flush=False` for a fire-and-forget write.
 - **`async def write_all(self, data: bytes, *, chunk_size: int = 8192) -> None`**: Writes a large bytes object to the stream in chunks and then closes it.
 - **`async def flush(self) -> None`**: Waits until the stream's internal write buffer is empty.
 - **`async def close(self) -> None`**: Gracefully closes the stream's write side by sending a `FIN` bit.
@@ -78,12 +78,12 @@ Manages the lifecycle of all streams within a `WebTransportSession`, enforcing c
 
 #### Constructor
 
-- **`__init__(self, session: WebTransportSession, *, max_streams: int = 100, ...)`**: Initializes the stream manager.
+- **`__init__(self, session: WebTransportSession, *, max_streams: int = 100, stream_cleanup_interval: float = 15.0)`**: Initializes the stream manager.
 
 #### Instance Methods
 
-- **`async def create_bidirectional_stream(self) -> WebTransportStream`**: Creates a new bidirectional stream, respecting the `max_streams` limit.
-- **`async def create_unidirectional_stream(self) -> WebTransportSendStream`**: Creates a new unidirectional stream.
+- **`async def create_bidirectional_stream(self) -> WebTransportStream`**: Creates a new bidirectional stream. Will raise a `StreamError` if the `max_streams` limit is reached.
+- **`async def create_unidirectional_stream(self) -> WebTransportSendStream`**: Creates a new unidirectional stream. Will raise a `StreamError` if the `max_streams` limit is reached.
 - **`async def get_stream(self, stream_id: StreamId) -> StreamType | None`**: Retrieves a managed stream by its ID.
 - **`async def get_stats(self) -> dict[str, Any]`**: Returns detailed statistics about the managed streams.
 - **`async def shutdown(self) -> None`**: Closes all managed streams and stops background tasks.

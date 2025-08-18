@@ -5,7 +5,6 @@ import weakref
 from typing import Any, NoReturn, cast
 
 import pytest
-from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ConnectionError, Event, EventType, ServerConfig, ServerError
@@ -34,9 +33,19 @@ class TestWebTransportServer:
     @pytest.fixture
     def mock_server_config(self, mocker: MockerFixture) -> ServerConfig:
         mocker.patch("pywebtransport.config.ServerConfig.validate")
-        return ServerConfig(
-            bind_host="127.0.0.1", bind_port=4433, certfile="cert.pem", keyfile="key.pem", max_connections=10
+        config = ServerConfig(
+            bind_host="127.0.0.1",
+            bind_port=4433,
+            certfile="cert.pem",
+            keyfile="key.pem",
+            max_connections=10,
         )
+        # Add attributes that are now expected by the new implementation
+        config.connection_cleanup_interval = 60.0
+        config.connection_idle_check_interval = 15.0
+        config.connection_idle_timeout = 60.0
+        config.session_cleanup_interval = 300.0
+        return config
 
     @pytest.fixture
     def mock_session_manager(self, mocker: MockerFixture) -> Any:
@@ -59,7 +68,8 @@ class TestWebTransportServer:
 
     @pytest.fixture(autouse=True)
     def setup_common_mocks(self, mocker: MockerFixture) -> None:
-        mocker.patch("aioquic.quic.configuration.QuicConfiguration.load_cert_chain")
+        # Patch the new utility function for QUIC config creation
+        mocker.patch("pywebtransport.server.server.create_quic_configuration")
         mocker.patch("pywebtransport.server.server.get_timestamp", return_value=1000.0)
         mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
 
@@ -330,60 +340,19 @@ class TestWebTransportServer:
         assert "Certificate configuration appears invalid." in issues
 
     @pytest.mark.asyncio
-    async def test_cleanup_loop(
-        self,
-        server: WebTransportServer,
-        mock_connection_manager: Any,
-        mock_session_manager: Any,
-        mocker: MockerFixture,
-    ) -> None:
-        server._serving = True
-        mocker.patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError])
-
-        await server._cleanup_loop(interval=60.0)
-
-        mock_connection_manager.cleanup_closed_connections.assert_awaited_once()
-        mock_session_manager.cleanup_closed_sessions.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_cleanup_loop_logs_errors(
-        self,
-        server: WebTransportServer,
-        mock_connection_manager: Any,
-        caplog: LogCaptureFixture,
-        mocker: MockerFixture,
-    ) -> None:
-        server._serving = True
-        mock_connection_manager.cleanup_closed_connections.side_effect = ValueError("Cleanup failed")
-        mocker.patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError])
-
-        await server._cleanup_loop(interval=60.0)
-
-        assert "Cleanup loop error: Cleanup failed" in caplog.text
-
-    @pytest.mark.asyncio
-    async def test_cleanup_loop_no_cleanup_methods(self, server: WebTransportServer, mocker: MockerFixture) -> None:
-        server._serving = True
-        plain_manager = mocker.MagicMock()
-        del plain_manager.cleanup_closed_connections
-        server._connection_manager = plain_manager
-        mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
-
-        await server._cleanup_loop(interval=60.0)
-
-    @pytest.mark.asyncio
     async def test_listen_with_ca_certs(self, server: WebTransportServer, mocker: MockerFixture) -> None:
         class StopTest(BaseException):
             pass
 
-        mock_load_verify = mocker.patch("aioquic.quic.configuration.QuicConfiguration.load_verify_locations")
+        mock_create_quic_config = mocker.patch("pywebtransport.server.server.create_quic_configuration")
+        mock_quic_config = mock_create_quic_config.return_value
         mocker.patch("pywebtransport.server.server.quic_serve", side_effect=StopTest)
         server.config.ca_certs = "/path/to/ca.pem"
 
         with pytest.raises(StopTest):
             await server.listen()
 
-        mock_load_verify.assert_called_once_with(cafile="/path/to/ca.pem")
+        mock_quic_config.load_verify_locations.assert_called_once_with(cafile="/path/to/ca.pem")
 
 
 class TestWebTransportServerProtocol:
@@ -415,6 +384,18 @@ class TestWebTransportServerProtocol:
         server = protocol._server_ref()
         assert server is not None
         cast(Any, server._handle_new_connection).assert_awaited_once_with(mock_transport, protocol)
+
+    def test_connection_lost(self, protocol: WebTransportServerProtocol, mocker: MockerFixture) -> None:
+        mock_super_lost = mocker.patch("aioquic.asyncio.protocol.QuicConnectionProtocol.connection_lost")
+        mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
+        mock_connection._on_connection_lost = mocker.MagicMock()
+        protocol.set_connection(mock_connection)
+        test_exception = RuntimeError("Connection dropped")
+
+        protocol.connection_lost(test_exception)
+
+        mock_super_lost.assert_called_once_with(test_exception)
+        mock_connection._on_connection_lost.assert_called_once_with(test_exception)
 
     @pytest.mark.asyncio
     async def test_quic_event_received_forwards_event_when_connection_is_set(
@@ -462,3 +443,19 @@ class TestWebTransportServerProtocol:
         protocol.set_connection(mock_connection)
 
         mock_connection.protocol_handler.handle_quic_event.assert_not_called()
+
+    @pytest.mark.parametrize("is_closing, should_call", [(False, True), (True, False)])
+    def test_transmit(
+        self, protocol: WebTransportServerProtocol, mocker: MockerFixture, is_closing: bool, should_call: bool
+    ) -> None:
+        mock_super_transmit = mocker.patch("aioquic.asyncio.protocol.QuicConnectionProtocol.transmit")
+        mock_transport = mocker.MagicMock()
+        mock_transport.is_closing.return_value = is_closing
+        protocol._transport = mock_transport  # Manually set transport for test
+
+        protocol.transmit()
+
+        if should_call:
+            mock_super_transmit.assert_called_once()
+        else:
+            mock_super_transmit.assert_not_called()

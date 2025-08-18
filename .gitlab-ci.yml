@@ -65,7 +65,7 @@ codecov:
   script:
     - wget https://uploader.codecov.io/latest/linux/codecov
     - chmod +x codecov
-    - ./codecov -t $CODECOV_TOKEN -s "lemonsterfy/pywebtransport"
+    - ./codecov -t $CODECOV_TOKEN -s "lemonsterfy/pywebtransport" -f "coverage.*.xml"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
@@ -113,7 +113,7 @@ deploy:
     - git config user.email "ci@gitlab.local"
     - git tag "v$VERSION"
     - git push origin "v$VERSION"
-    - git remote add github https://$GITHUB_TOKEN@github.com/lemonsterfy/pywebtransport.git
+    - git remote add github "https://$GITHUB_TOKEN@github.com/lemonsterfy/pywebtransport.git"
     - git checkout $CI_COMMIT_BRANCH
     - git push github $CI_COMMIT_BRANCH --tags || echo "GitHub sync failed (release still successful)"
   rules:

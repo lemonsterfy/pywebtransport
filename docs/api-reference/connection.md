@@ -26,6 +26,7 @@ The core class representing a single WebTransport connection. It manages the con
 - **`get_summary() -> dict[str, Any]`**: Returns a structured summary of the connection for monitoring.
 - **`async def monitor_health(self, *, check_interval: float = 30.0, rtt_timeout: float = 5.0) -> None`**: A long-running task that monitors connection health with periodic RTT checks.
 - **`async def diagnose_issues(self) -> dict[str, Any]`**: Runs a series of checks and returns a dictionary of potential issues and recommendations.
+- **`def record_activity(self) -> None`**: Manually records network activity on the connection, primarily to reset its server-side idle timeout timer.
 
 #### Properties
 
@@ -50,7 +51,7 @@ Manages the lifecycle of multiple `WebTransportConnection` objects.
 
 #### Constructor
 
-- **`__init__(self, *, max_connections: int = 1000, cleanup_interval: float = 60.0)`**: Initializes the connection manager.
+- **`__init__(self, *, max_connections: int = 3000, connection_cleanup_interval: float = 30.0, connection_idle_check_interval: float = 5.0, connection_idle_timeout: float = 60.0)`**: Initializes the connection manager.
 
 #### Instance Methods
 
