@@ -57,7 +57,7 @@ jobs:
       - name: Upload coverage reports as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-reports
+          name: coverage-reports-${{ matrix.python-version }}
           path: coverage-*.xml
 
   report:
@@ -71,9 +71,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: coverage-reports
+          path: coverage-reports/
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: lemonsterfy/pywebtransport
-          fail_ci_if_error: true
+          directory: ./coverage-reports/

@@ -1,0 +1,57 @@
+"""
+Internal event definitions for the WebTransport protocol layer.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from pywebtransport.types import Headers, StreamId
+
+__all__ = [
+    "DataReceived",
+    "DatagramReceived",
+    "H3Event",
+    "HeadersReceived",
+    "WebTransportStreamDataReceived",
+]
+
+
+class H3Event:
+    """Base class for all H3 protocol engine events."""
+
+
+@dataclass
+class DataReceived(H3Event):
+    """Fired when a generic H3 DATA frame is received."""
+
+    data: bytes
+    stream_id: StreamId
+    stream_ended: bool
+
+
+@dataclass
+class DatagramReceived(H3Event):
+    """Fired when a WebTransport datagram is received."""
+
+    data: bytes
+    stream_id: StreamId
+
+
+@dataclass
+class HeadersReceived(H3Event):
+    """Fired when a HEADERS frame is received on a stream."""
+
+    headers: Headers
+    stream_id: StreamId
+    stream_ended: bool
+
+
+@dataclass
+class WebTransportStreamDataReceived(H3Event):
+    """Fired when raw data is received on an established WebTransport stream."""
+
+    data: bytes
+    session_id: int
+    stream_id: StreamId
+    stream_ended: bool
