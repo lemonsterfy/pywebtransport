@@ -97,7 +97,7 @@ class SessionManager:
 
             async def on_close(event: Any) -> None:
                 manager = manager_ref()
-                if manager:
+                if manager and isinstance(event.data, dict):
                     await manager.remove_session(event.data["session_id"])
 
             session.once(EventType.SESSION_CLOSED, on_close)
@@ -106,6 +106,44 @@ class SessionManager:
             self._update_stats_unsafe()
             logger.debug(f"Added session {session_id} (total: {len(self._sessions)})")
             return session_id
+
+    async def close_all_sessions(self) -> None:
+        """Close and remove all currently managed sessions."""
+        if self._lock is None:
+            raise SessionError(
+                "SessionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
+        sessions_to_close: list[WebTransportSession] = []
+        async with self._lock:
+            if not self._sessions:
+                return
+
+            sessions_to_close = list(self._sessions.values())
+            logger.info(f"Initiating shutdown for {len(sessions_to_close)} managed sessions.")
+            self._stats["total_closed"] += len(sessions_to_close)
+            self._sessions.clear()
+            self._update_stats_unsafe()
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for session in sessions_to_close:
+                    if not session.is_closed:
+                        tg.create_task(session.close(close_connection=False))
+        except* Exception as eg:
+            logger.error(f"Errors occurred while closing managed sessions: {eg.exceptions}")
+            raise
+
+    async def get_session(self, session_id: SessionId) -> WebTransportSession | None:
+        """Retrieve a session by its ID."""
+        if self._lock is None:
+            raise SessionError(
+                "SessionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            return self._sessions.get(session_id)
 
     async def remove_session(self, session_id: SessionId) -> WebTransportSession | None:
         """Remove a session from the manager by its ID."""
@@ -122,37 +160,26 @@ class SessionManager:
                 logger.debug(f"Removed session {session_id} (total: {len(self._sessions)})")
             return session
 
-    async def get_session(self, session_id: SessionId) -> WebTransportSession | None:
-        """Retrieve a session by its ID."""
+    async def cleanup_closed_sessions(self) -> int:
+        """Find and remove any sessions that are marked as closed."""
         if self._lock is None:
             raise SessionError(
                 "SessionManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
+        closed_session_ids = []
         async with self._lock:
-            return self._sessions.get(session_id)
+            for session_id, session in list(self._sessions.items()):
+                if session.is_closed:
+                    closed_session_ids.append(session_id)
+                    del self._sessions[session_id]
 
-    async def close_all_sessions(self) -> None:
-        """Close and remove all currently managed sessions."""
-        if self._lock is None:
-            raise SessionError(
-                "SessionManager has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
+            if closed_session_ids:
+                self._stats["total_closed"] += len(closed_session_ids)
+                self._update_stats_unsafe()
+                logger.debug(f"Cleaned up {len(closed_session_ids)} closed sessions.")
 
-        async with self._lock:
-            sessions_to_close = list(self._sessions.values())
-            if not sessions_to_close:
-                return
-            logger.info(f"Closing and removing {len(sessions_to_close)} managed sessions.")
-
-        close_tasks = [session.close() for session in sessions_to_close if not session.is_closed]
-        if close_tasks:
-            await asyncio.gather(*close_tasks, return_exceptions=True)
-
-        session_ids = [session.session_id for session in sessions_to_close]
-        remove_tasks = [self.remove_session(session_id) for session_id in session_ids]
-        await asyncio.gather(*remove_tasks, return_exceptions=True)
+        return len(closed_session_ids)
 
     async def get_all_sessions(self) -> list[WebTransportSession]:
         """Retrieve a list of all current sessions."""
@@ -164,6 +191,10 @@ class SessionManager:
         async with self._lock:
             return list(self._sessions.values())
 
+    def get_session_count(self) -> int:
+        """Get the current number of active sessions (non-locking)."""
+        return len(self._sessions)
+
     async def get_sessions_by_state(self, state: SessionState) -> list[WebTransportSession]:
         """Retrieve sessions that are in a specific state."""
         if self._lock is None:
@@ -173,32 +204,6 @@ class SessionManager:
             )
         async with self._lock:
             return [session for session in self._sessions.values() if session.state == state]
-
-    async def cleanup_closed_sessions(self) -> int:
-        """Find and remove any sessions that are marked as closed."""
-        if self._lock is None:
-            raise SessionError(
-                "SessionManager has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-        async with self._lock:
-            all_sessions = list(self._sessions.items())
-        closed_session_ids = []
-        for session_id, session in all_sessions:
-            if session.is_closed:
-                closed_session_ids.append(session_id)
-
-        if not closed_session_ids:
-            return 0
-
-        logger.debug(f"Found {len(closed_session_ids)} closed sessions to clean up.")
-        for session_id in closed_session_ids:
-            await self.remove_session(session_id)
-        return len(closed_session_ids)
-
-    def get_session_count(self) -> int:
-        """Get the current number of active sessions (non-locking)."""
-        return len(self._sessions)
 
     async def get_stats(self) -> dict[str, Any]:
         """Get detailed statistics about the managed sessions."""
@@ -210,18 +215,13 @@ class SessionManager:
         async with self._lock:
             states: dict[str, int] = defaultdict(int)
             for session in self._sessions.values():
-                states[session.state.value] += 1
+                states[session.state] += 1
             return {
                 **self._stats,
                 "active_sessions": len(self._sessions),
                 "states": dict(states),
                 "max_sessions": self._max_sessions,
             }
-
-    def _start_cleanup_task(self) -> None:
-        """Start the background task for periodic cleanup if not running."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
     async def _periodic_cleanup(self) -> None:
         """Periodically run the cleanup process to remove closed sessions."""
@@ -235,6 +235,11 @@ class SessionManager:
                 await asyncio.sleep(self._cleanup_interval)
         except asyncio.CancelledError:
             pass
+
+    def _start_cleanup_task(self) -> None:
+        """Start the background task for periodic cleanup if not running."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
     def _update_stats_unsafe(self) -> None:
         """Update internal statistics (must be called within a lock)."""

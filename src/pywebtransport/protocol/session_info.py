@@ -28,6 +28,10 @@ class StreamInfo:
     close_code: int | None = None
     close_reason: str | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the stream information to a dictionary."""
+        return asdict(self)
+
     def __str__(self) -> str:
         """Format stream information for protocol debugging."""
         duration = ""
@@ -36,14 +40,10 @@ class StreamInfo:
         else:
             duration = f" (active: {get_timestamp() - self.created_at:.2f}s)"
         return (
-            f"Stream {self.stream_id} [{self.state.value}] "
-            f"direction={self.direction.value} session={self.session_id} "
+            f"Stream {self.stream_id} [{self.state}] "
+            f"direction={self.direction} session={self.session_id} "
             f"sent={self.bytes_sent}b recv={self.bytes_received}b{duration}"
         )
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the stream information to a dictionary."""
-        return asdict(self)
 
 
 @dataclass
@@ -51,7 +51,7 @@ class WebTransportSessionInfo:
     """Represents stateful information about a WebTransport session."""
 
     session_id: SessionId
-    stream_id: StreamId  # The control stream ID
+    stream_id: StreamId
     state: SessionState
     path: str
     created_at: float
@@ -61,6 +61,10 @@ class WebTransportSessionInfo:
     close_code: int | None = None
     close_reason: str | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the session information to a dictionary."""
+        return asdict(self)
+
     def __str__(self) -> str:
         """Format session information for protocol debugging."""
         duration = ""
@@ -68,8 +72,4 @@ class WebTransportSessionInfo:
             duration = f" (duration: {self.closed_at - self.ready_at:.2f}s)"
         elif self.ready_at:
             duration = f" (active: {get_timestamp() - self.ready_at:.2f}s)"
-        return f"Session {self.session_id} [{self.state.value}] " f"path={self.path} stream={self.stream_id}{duration}"
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the session information to a dictionary."""
-        return asdict(self)
+        return f"Session {self.session_id} [{self.state}] " f"path={self.path} stream={self.stream_id}{duration}"

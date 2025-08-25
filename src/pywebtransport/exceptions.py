@@ -53,14 +53,6 @@ class WebTransportError(Exception):
         self.error_code = error_code or ErrorCodes.INTERNAL_ERROR
         self.details = details or {}
 
-    def __repr__(self) -> str:
-        """Return a detailed string representation of the error."""
-        return f"{self.__class__.__name__}(message='{self.message}', error_code={self.error_code})"
-
-    def __str__(self) -> str:
-        """Return a simple string representation of the error."""
-        return f"[{self.error_code}] {self.message}"
-
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary for serialization."""
         return {
@@ -69,6 +61,14 @@ class WebTransportError(Exception):
             "error_code": self.error_code,
             "details": self.details,
         }
+
+    def __str__(self) -> str:
+        """Return a simple string representation of the error."""
+        return f"[{self.error_code}] {self.message}"
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return f"{self.__class__.__name__}(message='{self.message}', error_code={self.error_code})"
 
 
 class AuthenticationError(WebTransportError):
@@ -327,7 +327,7 @@ class SessionError(WebTransportError):
         """Convert the exception to a dictionary."""
         data = super().to_dict()
         data["session_id"] = self.session_id
-        data["session_state"] = self.session_state.value if self.session_state else None
+        data["session_state"] = self.session_state
         return data
 
 
@@ -348,19 +348,19 @@ class StreamError(WebTransportError):
         self.stream_id = stream_id
         self.stream_state = stream_state
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the exception to a dictionary."""
+        data = super().to_dict()
+        data["stream_id"] = self.stream_id
+        data["stream_state"] = self.stream_state
+        return data
+
     def __str__(self) -> str:
         """Return a simple string representation of the error."""
         base_msg = super().__str__()
         if self.stream_id is not None:
             return f"{base_msg} (stream_id={self.stream_id})"
         return base_msg
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the exception to a dictionary."""
-        data = super().to_dict()
-        data["stream_id"] = self.stream_id
-        data["stream_state"] = self.stream_state.value if self.stream_state else None
-        return data
 
 
 class TimeoutError(WebTransportError):
@@ -426,9 +426,47 @@ def datagram_too_large(size: int, max_size: int) -> DatagramError:
     return DatagramError(f"Datagram size {size} exceeds maximum {max_size}", datagram_size=size, max_size=max_size)
 
 
+def get_error_category(exception: Exception) -> str:
+    """Get a simple string category for an exception for logging or monitoring."""
+    for exc_type, category in _ERROR_CATEGORY_MAP.items():
+        if isinstance(exception, exc_type):
+            return category
+    return "unknown"
+
+
 def invalid_config(key: str, value: Any, reason: str) -> ConfigurationError:
     """Create an invalid configuration error."""
     return ConfigurationError(f"Invalid configuration for '{key}': {reason}", config_key=key, config_value=value)
+
+
+def is_fatal_error(exception: Exception) -> bool:
+    """Check if an error is fatal and should terminate the connection."""
+    match exception:
+        case WebTransportError(error_code=code):
+            fatal_codes = {
+                ErrorCodes.PROTOCOL_VIOLATION,
+                ErrorCodes.FRAME_ENCODING_ERROR,
+                ErrorCodes.CRYPTO_BUFFER_EXCEEDED,
+                ErrorCodes.APP_AUTHENTICATION_FAILED,
+                ErrorCodes.APP_PERMISSION_DENIED,
+            }
+            return code in fatal_codes
+        case _:
+            return True
+
+
+def is_retriable_error(exception: Exception) -> bool:
+    """Check if an error is transient and the operation can be retried."""
+    match exception:
+        case WebTransportError(error_code=code):
+            retriable_codes = {
+                ErrorCodes.APP_CONNECTION_TIMEOUT,
+                ErrorCodes.APP_SERVICE_UNAVAILABLE,
+                ErrorCodes.FLOW_CONTROL_ERROR,
+            }
+            return code in retriable_codes
+        case _:
+            return False
 
 
 def protocol_violation(message: str, frame_type: int | None = None) -> ProtocolError:
@@ -439,7 +477,7 @@ def protocol_violation(message: str, frame_type: int | None = None) -> ProtocolE
 def session_not_ready(session_id: str, current_state: SessionState) -> SessionError:
     """Create a session not ready error."""
     return SessionError(
-        f"Session {session_id} not ready, current state: {current_state.value}",
+        f"Session {session_id} not ready, current state: {current_state}",
         session_id=session_id,
         session_state=current_state,
     )
@@ -450,37 +488,3 @@ def stream_closed(stream_id: int, reason: str = "Stream was closed") -> StreamEr
     return StreamError(
         f"Stream {stream_id} closed: {reason}", stream_id=stream_id, error_code=ErrorCodes.STREAM_STATE_ERROR
     )
-
-
-def is_fatal_error(exception: Exception) -> bool:
-    """Check if an error is fatal and should terminate the connection."""
-    if isinstance(exception, WebTransportError):
-        fatal_codes = {
-            ErrorCodes.PROTOCOL_VIOLATION,
-            ErrorCodes.FRAME_ENCODING_ERROR,
-            ErrorCodes.CRYPTO_BUFFER_EXCEEDED,
-            ErrorCodes.APP_AUTHENTICATION_FAILED,
-            ErrorCodes.APP_PERMISSION_DENIED,
-        }
-        return exception.error_code in fatal_codes
-    return True
-
-
-def is_retriable_error(exception: Exception) -> bool:
-    """Check if an error is transient and the operation can be retried."""
-    if isinstance(exception, WebTransportError):
-        retriable_codes = {
-            ErrorCodes.APP_CONNECTION_TIMEOUT,
-            ErrorCodes.APP_SERVICE_UNAVAILABLE,
-            ErrorCodes.FLOW_CONTROL_ERROR,
-        }
-        return exception.error_code in retriable_codes
-    return False
-
-
-def get_error_category(exception: Exception) -> str:
-    """Get a simple string category for an exception for logging or monitoring."""
-    for exc_type, category in _ERROR_CATEGORY_MAP.items():
-        if isinstance(exception, exc_type):
-            return category
-    return "unknown"

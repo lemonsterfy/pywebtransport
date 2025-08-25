@@ -9,7 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned for future release
 
-- **[Feature]** Introduce a high-performance, concurrent event processing model using `asyncio.TaskGroup`.
+_(No planned changes for the next release yet.)_
+
+## [0.3.1] - 2025-08-25
+
+This is a landmark release focused on solidifying the library's architecture for production use. It addresses deep-seated concurrency flaws, enhances performance across the entire stack, and systematically modernizes the codebase to align with the latest asynchronous best practices.
+
+### Added
+
+- **Enhanced Testing Capability** by adding the `pytest-repeat` dependency, a powerful tool for identifying and fixing non-deterministic, flaky tests in complex asynchronous code.
+
+### Changed
+
+- **Refined CI/CD and Quality Assurance Infrastructure**:
+  - Migrated the test coverage reporting and Codecov upload functionality from GitLab CI to GitHub Actions to consolidate quality checks for community contributions.
+- **Modernized Concurrency Model across the Entire Library**:
+  - Systematically refactored all concurrent operations (lifecycle management, cleanup, batch processing) in all high-level components to use the more robust **`asyncio.TaskGroup`** (Python 3.11+).
+  - Re-architected the `WebTransportSendStream` to use a robust **producer-consumer pattern** with proper locking and events for writing data and handling backpressure.
+- **Vastly Improved Concurrency Performance**:
+  - Re-architected `ConnectionPool` and `PooledClient` from a single global lock to a highly concurrent **per-key locking mechanism**, eliminating a major performance bottleneck when handling multiple endpoints.
+  - Drastically improved the performance of all manager classes (`ConnectionManager`, `SessionManager`, `StreamManager`) by making their periodic cleanup operations **atomic and efficient** with a single-lock strategy.
+  - Optimized the `ConnectionLoadBalancer`'s health checks and the `StreamPool`'s filling mechanism by making them **fully concurrent**.
+  - Made the `DatagramReliabilityLayer`'s retry mechanism concurrent for faster recovery from packet loss.
+- **Modernized Codebase Style**:
+  - Upgraded all `Enum` classes to **`StrEnum`** and simplified all dependent code by removing redundant `.value` calls, improving ergonomics.
+  - Modernized conditional logic throughout the codebase to use **`match-case`** syntax for improved clarity and readability.
+- **Updated Test Suites and Documentation**:
+  - Comprehensively updated the entire test suite (unit, integration, E2E) and API documentation to align with the extensive architectural refactoring and ensure full coverage of the new concurrency models and fixed behaviors.
+
+### Fixed
+
+- **Fixed Critical Race Conditions in Core Protocol Handling**:
+  - Eliminated a major stability issue in the low-level QUIC event processing loop (for both client and server) by implementing a robust, ordered **`asyncio.Queue`-based pipeline**, which replaced a fragile "fire-and-forget" task creation model. This change ensures strict event ordering, which, after performance evaluation, was proven to be more stable and performant than a parallelized model for this specific workload.
+  - Fixed a race condition in the protocol handler's `StreamReset` processing by ensuring it is handled synchronously before other events.
+  - Resolved a race condition where data on a new stream could be discarded. The protocol handler now reliably associates new streams by **correctly using the parent session context already provided in H3 protocol events**.
+- **Fixed Critical Concurrency Bugs in High-Level Components**:
+  - Resolved a severe **"thundering herd"** problem in `ConnectionLoadBalancer`, `ConnectionPool`, and `PooledClient` that caused redundant, wasteful resource creation under concurrent demand.
+  - Fixed a critical concurrency flaw in the `DatagramReliabilityLayer` by adding proper `asyncio.Lock` protection for all shared state.
+- **Fixed Major Resource and Stability Issues**:
+  - Fixed a critical stability issue in `StreamBuffer` by replacing a fragile recursive implementation with a robust iterative one, preventing potential `RecursionError` crashes.
+  - Fixed major bugs in the bidirectional `WebTransportStream` implementation that caused resource leaks and incomplete initialization.
+  - Fixed a potential resource leak in `ServerCluster` by ensuring server instances are cleaned up correctly if startup fails.
 
 ## [0.3.0] - 2025-08-18
 
@@ -142,7 +182,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.1.2...v0.2.0

@@ -28,6 +28,37 @@ __all__ = [
 logger = get_logger("protocol.utils")
 
 
+def can_receive_data(connection_state: ConnectionState, session_state: SessionState) -> bool:
+    """Check if data can be received based on connection and session states."""
+    return connection_state == ConnectionState.CONNECTED and session_state in [
+        SessionState.CONNECTED,
+        SessionState.DRAINING,
+    ]
+
+
+def can_receive_data_on_stream(stream_id: StreamId, *, is_client: bool) -> bool:
+    """Check if the local endpoint can receive data on a given stream."""
+    if is_bidirectional_stream(stream_id):
+        return True
+    return (is_client and is_server_initiated_stream(stream_id)) or (
+        not is_client and is_client_initiated_stream(stream_id)
+    )
+
+
+def can_send_data(connection_state: ConnectionState, session_state: SessionState) -> bool:
+    """Check if data can be sent based on connection and session states."""
+    return connection_state == ConnectionState.CONNECTED and session_state == SessionState.CONNECTED
+
+
+def can_send_data_on_stream(stream_id: StreamId, *, is_client: bool) -> bool:
+    """Check if the local endpoint can send data on a given stream."""
+    if is_bidirectional_stream(stream_id):
+        return True
+    return (is_client and is_client_initiated_stream(stream_id)) or (
+        not is_client and is_server_initiated_stream(stream_id)
+    )
+
+
 def create_quic_configuration(*, is_client: bool = True, **kwargs: Any) -> QuicConfiguration:
     """Create a QUIC configuration from keyword arguments."""
     config_params = {
@@ -35,6 +66,26 @@ def create_quic_configuration(*, is_client: bool = True, **kwargs: Any) -> QuicC
         "max_datagram_frame_size": kwargs.get("max_datagram_size", WebTransportConstants.MAX_DATAGRAM_SIZE),
     }
     return QuicConfiguration(is_client=is_client, **config_params)
+
+
+def get_stream_direction_from_id(stream_id: StreamId, *, is_client: bool) -> StreamDirection:
+    """Determine the stream direction from its ID and the endpoint role."""
+    validate_stream_id(stream_id)
+
+    match (is_bidirectional_stream(stream_id), can_send_data_on_stream(stream_id, is_client=is_client)):
+        case (True, _):
+            return StreamDirection.BIDIRECTIONAL
+        case (False, True):
+            return StreamDirection.SEND_ONLY
+        case (False, False):
+            return StreamDirection.RECEIVE_ONLY
+        case _:
+            raise AssertionError("Unreachable code: Invalid stream direction logic")
+
+
+def is_bidirectional_stream(stream_id: StreamId) -> bool:
+    """Check if a stream is bidirectional."""
+    return (stream_id & 0x2) == 0
 
 
 def is_client_initiated_stream(stream_id: StreamId) -> bool:
@@ -47,56 +98,6 @@ def is_server_initiated_stream(stream_id: StreamId) -> bool:
     return (stream_id & 0x1) == 1
 
 
-def is_bidirectional_stream(stream_id: StreamId) -> bool:
-    """Check if a stream is bidirectional."""
-    return (stream_id & 0x2) == 0
-
-
 def is_unidirectional_stream(stream_id: StreamId) -> bool:
     """Check if a stream is unidirectional."""
     return (stream_id & 0x2) != 0
-
-
-def can_send_data(connection_state: ConnectionState, session_state: SessionState) -> bool:
-    """Check if data can be sent based on connection and session states."""
-    return connection_state == ConnectionState.CONNECTED and session_state == SessionState.CONNECTED
-
-
-def can_receive_data(connection_state: ConnectionState, session_state: SessionState) -> bool:
-    """Check if data can be received based on connection and session states."""
-    return connection_state == ConnectionState.CONNECTED and session_state in [
-        SessionState.CONNECTED,
-        SessionState.DRAINING,
-    ]
-
-
-def can_send_data_on_stream(stream_id: StreamId, *, is_client: bool) -> bool:
-    """Check if the local endpoint can send data on a given stream."""
-    if is_bidirectional_stream(stream_id):
-        return True
-    return (is_client and is_client_initiated_stream(stream_id)) or (
-        not is_client and is_server_initiated_stream(stream_id)
-    )
-
-
-def can_receive_data_on_stream(stream_id: StreamId, *, is_client: bool) -> bool:
-    """Check if the local endpoint can receive data on a given stream."""
-    if is_bidirectional_stream(stream_id):
-        return True
-    return (is_client and is_server_initiated_stream(stream_id)) or (
-        not is_client and is_client_initiated_stream(stream_id)
-    )
-
-
-def get_stream_direction_from_id(stream_id: StreamId, *, is_client: bool) -> StreamDirection:
-    """Determine the stream direction from its ID and the endpoint role."""
-    validate_stream_id(stream_id)
-    if is_bidirectional_stream(stream_id):
-        return StreamDirection.BIDIRECTIONAL
-
-    if (is_client and is_client_initiated_stream(stream_id)) or (
-        not is_client and is_server_initiated_stream(stream_id)
-    ):
-        return StreamDirection.SEND_ONLY
-    else:
-        return StreamDirection.RECEIVE_ONLY

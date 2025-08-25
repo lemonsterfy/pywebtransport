@@ -211,6 +211,7 @@ class TestConnectionPool:
 
             mock_time.return_value = 1011.0
             await asyncio.wait_for(cycle_done.wait(), timeout=1)
+            await asyncio.sleep(0)
 
             mock_connection.close.assert_awaited_once()
             new_connection.close.assert_not_awaited()
@@ -236,6 +237,7 @@ class TestConnectionPool:
 
             mock_time.return_value = 1006.0
             await asyncio.wait_for(cycle_done.wait(), timeout=1)
+            await asyncio.sleep(0)
 
             assert pool_key not in pool._pool
             assert pool.get_stats()["total_pooled_connections"] == 0

@@ -71,28 +71,6 @@ class ClientMonitor:
             "is_monitoring": self.is_monitoring,
         }
 
-    async def _monitor_loop(self) -> None:
-        """Run the main loop for periodically collecting metrics and checking for alerts."""
-        try:
-            while not self._client.is_closed:
-                self._collect_metrics()
-                self._check_alerts()
-                await asyncio.sleep(self._interval)
-        except asyncio.CancelledError:
-            logger.info("Client monitor loop has been cancelled.")
-        except Exception as e:
-            logger.error(f"Client monitor loop encountered a critical error: {e}", exc_info=e)
-
-    def _collect_metrics(self) -> None:
-        """Collect a snapshot of the client's current statistics."""
-        try:
-            timestamp = get_timestamp()
-            stats = self._client.stats
-            metrics = {"timestamp": timestamp, "stats": stats}
-            self._metrics_history.append(metrics)
-        except Exception as e:
-            logger.error(f"Metrics collection failed: {e}")
-
     def _check_alerts(self) -> None:
         """Analyze the latest metrics and generate alerts if thresholds are breached."""
         metrics: dict[str, Any] | None = self._metrics_history[-1] if self._metrics_history else None
@@ -111,9 +89,31 @@ class ClientMonitor:
         if avg_connect_time > 5.0:
             self._create_alert("slow_connections", f"Slow connections: {avg_connect_time:.2f}s average")
 
+    def _collect_metrics(self) -> None:
+        """Collect a snapshot of the client's current statistics."""
+        try:
+            timestamp = get_timestamp()
+            stats = self._client.stats
+            metrics = {"timestamp": timestamp, "stats": stats}
+            self._metrics_history.append(metrics)
+        except Exception as e:
+            logger.error(f"Metrics collection failed: {e}")
+
     def _create_alert(self, alert_type: str, message: str) -> None:
         """Create and store a new alert, avoiding duplicates."""
         if not self._alerts or self._alerts[-1].get("message") != message:
             alert = {"type": alert_type, "message": message, "timestamp": get_timestamp()}
             self._alerts.append(alert)
             logger.warning(f"Client Health Alert: {message}")
+
+    async def _monitor_loop(self) -> None:
+        """Run the main loop for periodically collecting metrics and checking for alerts."""
+        try:
+            while not self._client.is_closed:
+                self._collect_metrics()
+                self._check_alerts()
+                await asyncio.sleep(self._interval)
+        except asyncio.CancelledError:
+            logger.info("Client monitor loop has been cancelled.")
+        except Exception as e:
+            logger.error(f"Client monitor loop encountered a critical error: {e}", exc_info=e)

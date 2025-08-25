@@ -35,10 +35,9 @@ class MiddlewareManager:
         """Add a middleware to the chain."""
         self._middleware.append(middleware)
 
-    def remove_middleware(self, middleware: Callable[[WebTransportSession], Awaitable[bool]]) -> None:
-        """Remove a middleware from the chain."""
-        if middleware in self._middleware:
-            self._middleware.remove(middleware)
+    def get_middleware_count(self) -> int:
+        """Get the number of registered middleware."""
+        return len(self._middleware)
 
     async def process_request(self, session: WebTransportSession) -> bool:
         """Process a request through the middleware chain."""
@@ -51,9 +50,10 @@ class MiddlewareManager:
                 return False
         return True
 
-    def get_middleware_count(self) -> int:
-        """Get the number of registered middleware."""
-        return len(self._middleware)
+    def remove_middleware(self, middleware: Callable[[WebTransportSession], Awaitable[bool]]) -> None:
+        """Remove a middleware from the chain."""
+        if middleware in self._middleware:
+            self._middleware.remove(middleware)
 
 
 class RateLimiter:
@@ -89,6 +89,30 @@ class RateLimiter:
             except asyncio.CancelledError:
                 pass
 
+    async def _periodic_cleanup(self) -> None:
+        """Periodically remove stale IP entries from the tracker."""
+        if self._lock is None:
+            logger.error("RateLimiter cleanup task cannot run without a lock.")
+            return
+
+        while True:
+            await asyncio.sleep(self._cleanup_interval)
+            async with self._lock:
+                current_time = get_timestamp()
+                cutoff_time = current_time - self._window_seconds
+                stale_ips = [
+                    ip for ip, timestamps in self._requests.items() if not timestamps or timestamps[-1] < cutoff_time
+                ]
+                for ip in stale_ips:
+                    del self._requests[ip]
+                if stale_ips:
+                    logger.debug(f"Cleaned up {len(stale_ips)} stale IP entries from rate limiter.")
+
+    def _start_cleanup_task(self) -> None:
+        """Create and start the periodic cleanup task if not already running."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+
     async def __call__(self, session: WebTransportSession) -> bool:
         """Apply rate limiting to an incoming session."""
         if self._lock is None:
@@ -114,30 +138,6 @@ class RateLimiter:
             valid_requests.append(current_time)
             self._requests[client_ip] = valid_requests
         return True
-
-    def _start_cleanup_task(self) -> None:
-        """Create and start the periodic cleanup task if not already running."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
-
-    async def _periodic_cleanup(self) -> None:
-        """Periodically remove stale IP entries from the tracker."""
-        if self._lock is None:
-            logger.error("RateLimiter cleanup task cannot run without a lock.")
-            return
-
-        while True:
-            await asyncio.sleep(self._cleanup_interval)
-            async with self._lock:
-                current_time = get_timestamp()
-                cutoff_time = current_time - self._window_seconds
-                stale_ips = [
-                    ip for ip, timestamps in self._requests.items() if not timestamps or timestamps[-1] < cutoff_time
-                ]
-                for ip in stale_ips:
-                    del self._requests[ip]
-                if stale_ips:
-                    logger.debug(f"Cleaned up {len(stale_ips)} stale IP entries from rate limiter.")
 
 
 def create_auth_middleware(

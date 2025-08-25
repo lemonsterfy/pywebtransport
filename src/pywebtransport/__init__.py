@@ -2,9 +2,6 @@
 A high-performance, async-native WebTransport implementation for Python.
 """
 
-import sys
-import warnings
-
 from .client import WebTransportClient
 from .config import ClientConfig, ServerConfig
 from .datagram import DatagramReliabilityLayer, WebTransportDatagramDuplexStream
@@ -78,11 +75,3 @@ __all__ = [
     "__version__",
     "create_development_server",
 ]
-
-if sys.version_info < (3, 11):
-    warnings.warn(
-        "pywebtransport support for Python 3.10 and older is deprecated and will be removed in v0.2.0. "
-        "Please upgrade to Python 3.11+.",
-        DeprecationWarning,
-        stacklevel=2,
-    )

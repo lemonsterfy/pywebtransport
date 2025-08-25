@@ -48,11 +48,11 @@ A context manager for measuring execution time.
 
 ## Network Utilities
 
-- **`parse_webtransport_url(url: URL) -> URLParts`**: Parses a WebTransport URL string into a `(hostname, port, path)` tuple.
+- **`parse_webtransport_url(url: URL) -> URLParts`**: Parses a WebTransport URL string into a `(hostname, port, path)` tuple. The result is cached for performance.
 - **`build_webtransport_url(host: str, port: int, *, path: str = "/", secure: bool = True, query_params: dict[str, str] | None = None) -> URL`**: Constructs a WebTransport URL from its components.
 - **`async def resolve_address(host: str, port: int, *, family: int = socket.AF_UNSPEC) -> Address`**: Asynchronously resolves a hostname to an `(ip_address, port)` tuple.
-- **`is_ipv4_address(host: str) -> bool`**: Checks if a string is a valid IPv4 address.
-- **`is_ipv6_address(host: str) -> bool`**: Checks if a string is a valid IPv6 address.
+- **`is_ipv4_address(host: str) -> bool`**: Checks if a string is a valid IPv4 address. The result is cached for performance.
+- **`is_ipv6_address(host: str) -> bool`**: Checks if a string is a valid IPv6 address. The result is cached for performance.
 
 ---
 
@@ -66,8 +66,8 @@ A context manager for measuring execution time.
 
 ## Data Processing & Formatting Utilities
 
-- **`ensure_bytes(data: Data, *, encoding: str = "utf-8") -> bytes`**: Ensures the given data is returned as `bytes`.
-- **`ensure_str(data: Data, *, encoding: str = "utf-8") -> str`**: Ensures the given data is returned as `str`.
+- **`ensure_bytes(data: Buffer | str, *, encoding: str = "utf-8") -> bytes`**: Ensures the given data is returned as `bytes`.
+- **`ensure_str(data: Buffer | str, *, encoding: str = "utf-8") -> str`**: Ensures the given data is returned as `str`.
 - **`normalize_headers(headers: dict[str, Any]) -> dict[str, str]`**: Normalizes HTTP headers by lowercasing keys and converting values to strings.
 - **`chunked_read(data: bytes, *, chunk_size: int = 8192) -> list[bytes]`**: Splits a bytes object into a list of smaller chunks.
 - **`format_bytes(data: bytes, *, max_length: int = 100) -> str`**: Formats a bytes object for readable debug output, truncating if necessary.

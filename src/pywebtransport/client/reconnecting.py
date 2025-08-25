@@ -88,18 +88,11 @@ class ReconnectingClient(EventEmitter):
         """Exit the async context, ensuring the client is closed."""
         await self.close()
 
-    async def get_session(self) -> WebTransportSession | None:
-        """Get the current session if connected, waiting briefly for connection."""
-        for _ in range(50):
-            if self.is_connected:
-                return self._session
-            await asyncio.sleep(0.1)
-        return None
-
     async def close(self) -> None:
         """Close the reconnecting client and all its resources."""
         if self._closed:
             return
+
         logger.info("Closing reconnecting client")
         self._closed = True
 
@@ -112,6 +105,14 @@ class ReconnectingClient(EventEmitter):
 
         await self._client.close()
         logger.info("Reconnecting client closed")
+
+    async def get_session(self) -> WebTransportSession | None:
+        """Get the current session if connected, waiting briefly for connection."""
+        for _ in range(50):
+            if self.is_connected:
+                return self._session
+            await asyncio.sleep(0.1)
+        return None
 
     async def _reconnect_loop(self) -> None:
         """Manage the connection lifecycle with an exponential backoff retry strategy."""

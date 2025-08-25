@@ -85,6 +85,56 @@ class StreamManager:
         await self.close_all_streams()
         logger.info("Stream manager shutdown complete")
 
+    async def add_stream(self, stream: StreamType) -> None:
+        """Add an externally created stream to the manager."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            if stream.stream_id in self._streams:
+                return
+            self._streams[stream.stream_id] = stream
+            self._stats["total_created"] += 1
+            self._update_stats_unsafe()
+            logger.debug(f"Added stream {stream.stream_id} (total: {self._stats['current_count']})")
+
+    async def close_all_streams(self) -> None:
+        """Close and remove all currently managed streams."""
+        if self._lock is None:
+            raise StreamError(
+                "StreamManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
+        streams_to_close: list[StreamType] = []
+        num_to_close = 0
+        async with self._lock:
+            if not self._streams:
+                return
+
+            streams_to_close = list(self._streams.values())
+            num_to_close = len(streams_to_close)
+            logger.info(f"Initiating shutdown for {num_to_close} managed streams.")
+
+            self._stats["total_closed"] += num_to_close
+            self._streams.clear()
+            self._update_stats_unsafe()
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for stream in streams_to_close:
+                    if not stream.is_closed:
+                        tg.create_task(stream.close())
+        except* Exception as eg:
+            logger.error(f"Errors occurred while closing managed streams: {eg.exceptions}")
+            raise
+        finally:
+            if self._creation_semaphore:
+                for _ in range(num_to_close):
+                    self._creation_semaphore.release()
+
     async def create_bidirectional_stream(self) -> WebTransportStream:
         """Create a new bidirectional stream, respecting concurrency limits."""
         if self._creation_semaphore is None:
@@ -127,21 +177,6 @@ class StreamManager:
             self._creation_semaphore.release()
             raise
 
-    async def add_stream(self, stream: StreamType) -> None:
-        """Add an externally created stream to the manager."""
-        if self._lock is None:
-            raise StreamError(
-                "StreamManager has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-        async with self._lock:
-            if stream.stream_id in self._streams:
-                return
-            self._streams[stream.stream_id] = stream
-            self._stats["total_created"] += 1
-            self._update_stats_unsafe()
-            logger.debug(f"Added stream {stream.stream_id} (total: {self._stats['current_count']})")
-
     async def remove_stream(self, stream_id: StreamId) -> StreamType | None:
         """Remove a stream from the manager by its ID."""
         if self._lock is None or self._creation_semaphore is None:
@@ -158,40 +193,28 @@ class StreamManager:
                 logger.debug(f"Removed stream {stream_id} (total: {self._stats['current_count']})")
             return stream
 
-    async def get_stream(self, stream_id: StreamId) -> StreamType | None:
-        """Retrieve a stream by its ID in a thread-safe manner."""
+    async def cleanup_closed_streams(self) -> int:
+        """Find and remove any streams that are marked as closed."""
         if self._lock is None:
             raise StreamError(
                 "StreamManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
+        closed_stream_ids = []
         async with self._lock:
-            return self._streams.get(stream_id)
+            for stream_id, stream in list(self._streams.items()):
+                if stream.is_closed:
+                    closed_stream_ids.append(stream_id)
+                    del self._streams[stream_id]
 
-    async def close_all_streams(self) -> None:
-        """Close and remove all currently managed streams."""
-        if self._lock is None:
-            raise StreamError(
-                "StreamManager has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-
-        async with self._lock:
-            streams_to_close = list(self._streams.values())
-            if not streams_to_close:
-                return
-            logger.info(f"Closing and removing {len(streams_to_close)} managed streams.")
-
-        close_tasks = [stream.close() for stream in streams_to_close if not stream.is_closed]
-        if close_tasks:
-            await asyncio.gather(*close_tasks, return_exceptions=True)
-
-        stream_ids = [stream.stream_id for stream in streams_to_close]
-        remove_tasks = [self.remove_stream(stream_id) for stream_id in stream_ids]
-        await asyncio.gather(*remove_tasks, return_exceptions=True)
-
-        async with self._lock:
-            self._update_stats_unsafe()
+            if closed_stream_ids:
+                if self._creation_semaphore:
+                    for _ in closed_stream_ids:
+                        self._creation_semaphore.release()
+                self._stats["total_closed"] += len(closed_stream_ids)
+                self._update_stats_unsafe()
+                logger.debug(f"Cleaned up {len(closed_stream_ids)} closed streams")
+        return len(closed_stream_ids)
 
     async def get_all_streams(self) -> list[StreamType]:
         """Retrieve a list of all currently managed streams."""
@@ -215,7 +238,7 @@ class StreamManager:
             directions: dict[str, int] = defaultdict(int)
             for stream in self._streams.values():
                 if hasattr(stream, "state"):
-                    states[stream.state.value] += 1
+                    states[stream.state] += 1
                 if hasattr(stream, "direction"):
                     directions[getattr(stream, "direction", "unknown")] += 1
 
@@ -229,35 +252,15 @@ class StreamManager:
                 "max_streams": self._max_streams,
             }
 
-    async def cleanup_closed_streams(self) -> int:
-        """Find and remove any streams that are marked as closed."""
+    async def get_stream(self, stream_id: StreamId) -> StreamType | None:
+        """Retrieve a stream by its ID in a thread-safe manner."""
         if self._lock is None:
             raise StreamError(
                 "StreamManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
-        closed_stream_ids = []
         async with self._lock:
-            all_streams = list(self._streams.items())
-
-        for stream_id, stream in all_streams:
-            if stream.is_closed:
-                closed_stream_ids.append(stream_id)
-
-        for stream_id in closed_stream_ids:
-            await self.remove_stream(stream_id)
-
-        if closed_stream_ids:
-            logger.debug(f"Cleaned up {len(closed_stream_ids)} closed streams")
-        return len(closed_stream_ids)
-
-    def _start_cleanup_task(self) -> None:
-        """Start the periodic cleanup task if it is not already running."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            try:
-                self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
-            except RuntimeError:
-                logger.warning("Could not start cleanup task: no running event loop.")
+            return self._streams.get(stream_id)
 
     async def _periodic_cleanup(self) -> None:
         """Periodically run the cleanup process to remove closed streams."""
@@ -272,21 +275,19 @@ class StreamManager:
         except asyncio.CancelledError:
             pass
 
+    def _start_cleanup_task(self) -> None:
+        """Start the periodic cleanup task if it is not already running."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            try:
+                self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+            except RuntimeError:
+                logger.warning("Could not start cleanup task: no running event loop.")
+
     def _update_stats_unsafe(self) -> None:
         """Update internal statistics (must be called within a lock)."""
         count = len(self._streams)
         self._stats["current_count"] = count
         self._stats["max_concurrent"] = max(self._stats["max_concurrent"], count)
-
-    def __len__(self) -> int:
-        """Return the current number of managed streams."""
-        return len(self._streams)
-
-    def __contains__(self, stream_id: object) -> bool:
-        """Check if a stream ID is being managed."""
-        if not isinstance(stream_id, int):
-            return False
-        return stream_id in self._streams
 
     async def __aiter__(self) -> AsyncIterator[StreamType]:
         """Return an async iterator over a snapshot of the managed streams."""
@@ -299,3 +300,13 @@ class StreamManager:
             streams_copy = list(self._streams.values())
         for stream in streams_copy:
             yield stream
+
+    def __contains__(self, stream_id: object) -> bool:
+        """Check if a stream ID is being managed."""
+        if not isinstance(stream_id, int):
+            return False
+        return stream_id in self._streams
+
+    def __len__(self) -> int:
+        """Return the current number of managed streams."""
+        return len(self._streams)

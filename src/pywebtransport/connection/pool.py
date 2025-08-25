@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import defaultdict
 from types import TracebackType
 from typing import Any, Self, Type
 
@@ -34,12 +35,13 @@ class ConnectionPool:
         self._max_idle_time = max_idle_time
         self._cleanup_interval = cleanup_interval
         self._pool: dict[str, list[tuple[WebTransportConnection, float]]] = {}
-        self._lock: asyncio.Lock | None = None
+        self._locks: defaultdict[str, asyncio.Lock] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
+        self._pending_creations: dict[str, asyncio.Event] = {}
 
     async def __aenter__(self) -> Self:
         """Enter async context, initializing resources and starting background tasks."""
-        self._lock = asyncio.Lock()
+        self._locks = defaultdict(asyncio.Lock)
         self._start_cleanup_task()
         return self
 
@@ -52,69 +54,9 @@ class ConnectionPool:
         """Exit async context, closing all pooled connections."""
         await self.close_all()
 
-    async def get_connection(
-        self,
-        *,
-        config: ClientConfig,
-        host: str,
-        port: int,
-        path: str = "/",
-    ) -> WebTransportConnection:
-        """Get a connection from the pool or create a new one."""
-        if self._lock is None:
-            raise ConnectionError(
-                "ConnectionPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-        pool_key = self._get_pool_key(host, port)
-        async with self._lock:
-            if pool_key in self._pool and self._pool[pool_key]:
-                connection, _ = self._pool[pool_key].pop(0)
-                if connection.is_connected:
-                    logger.debug(f"Reusing pooled connection to {host}:{port}")
-                    return connection
-                else:
-                    logger.debug(f"Discarding stale connection to {host}:{port}")
-                    await connection.close()
-
-        logger.debug(f"Creating new connection to {host}:{port}")
-        connection = WebTransportConnection(config)
-        await connection.connect(host=host, port=port, path=path)
-        return connection
-
-    async def return_connection(self, connection: WebTransportConnection) -> None:
-        """Return a connection to the pool for potential reuse."""
-        if self._lock is None:
-            raise ConnectionError(
-                "ConnectionPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-
-        if not connection.is_connected:
-            await connection.close()
-            return
-
-        remote_addr = connection.remote_address
-        if not remote_addr:
-            await connection.close()
-            return
-
-        pool_key = self._get_pool_key(remote_addr[0], remote_addr[1])
-        async with self._lock:
-            if pool_key not in self._pool:
-                self._pool[pool_key] = []
-
-            if len(self._pool[pool_key]) >= self._max_size:
-                logger.debug(f"Pool full for {pool_key}, closing returned connection")
-                await connection.close()
-                return
-
-            self._pool[pool_key].append((connection, time.time()))
-            logger.debug(f"Returned connection to pool for {pool_key}")
-
     async def close_all(self) -> None:
         """Close all idle connections and shut down the pool."""
-        if self._lock is None:
+        if self._locks is None:
             raise ConnectionError(
                 "ConnectionPool has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
@@ -127,18 +69,115 @@ class ConnectionPool:
             except asyncio.CancelledError:
                 pass
 
-        close_tasks = []
-        async with self._lock:
-            for connections in self._pool.values():
+        connections_to_close: list[WebTransportConnection] = []
+        all_pool_keys = list(self._pool.keys())
+        for pool_key in all_pool_keys:
+            async with self._locks[pool_key]:
+                connections = self._pool.pop(pool_key, [])
                 for connection, _ in connections:
-                    close_tasks.append(asyncio.create_task(connection.close()))
-            self._pool.clear()
+                    connections_to_close.append(connection)
 
-        if close_tasks:
-            await asyncio.gather(*close_tasks, return_exceptions=True)
+        if connections_to_close:
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    for conn in connections_to_close:
+                        tg.create_task(conn.close())
+            except* Exception as eg:
+                logger.error(f"Errors occurred while closing pooled connections: {eg.exceptions}")
+
+    async def get_connection(
+        self,
+        *,
+        config: ClientConfig,
+        host: str,
+        port: int,
+        path: str = "/",
+    ) -> WebTransportConnection:
+        """Get a connection from the pool or create a new one."""
+        if self._locks is None:
+            raise ConnectionError(
+                "ConnectionPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        pool_key = self._get_pool_key(host, port)
+
+        while True:
+            is_creator = False
+            lock = self._locks[pool_key]
+            event = None
+
+            async with lock:
+                if pool_key in self._pool and self._pool[pool_key]:
+                    connection, _ = self._pool[pool_key].pop(0)
+                    if connection.is_connected:
+                        logger.debug(f"Reusing pooled connection to {host}:{port}")
+                        return connection
+                    else:
+                        logger.debug(f"Discarding stale connection to {host}:{port}")
+                        asyncio.create_task(connection.close())
+                        continue
+
+                if event := self._pending_creations.get(pool_key):
+                    pass
+                else:
+                    is_creator = True
+                    event = asyncio.Event()
+                    self._pending_creations[pool_key] = event
+
+            if not is_creator:
+                await event.wait()
+                continue
+
+            try:
+                logger.debug(f"Creating new connection to {host}:{port}")
+                connection = WebTransportConnection(config)
+                await connection.connect(host=host, port=port, path=path)
+                return connection
+            finally:
+                async with lock:
+                    self._pending_creations.pop(pool_key, None)
+                    event.set()
+
+    async def return_connection(self, connection: WebTransportConnection) -> None:
+        """Return a connection to the pool for potential reuse."""
+        if self._locks is None:
+            raise ConnectionError(
+                "ConnectionPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
+        if not connection.is_connected:
+            await connection.close()
+            return
+
+        if not (remote_addr := connection.remote_address):
+            await connection.close()
+            return
+
+        pool_key = self._get_pool_key(remote_addr[0], remote_addr[1])
+        connection_to_close: WebTransportConnection | None = None
+
+        async with self._locks[pool_key]:
+            if pool_key not in self._pool:
+                self._pool[pool_key] = []
+
+            if len(self._pool[pool_key]) >= self._max_size:
+                logger.debug(f"Pool full for {pool_key}, closing returned connection")
+                connection_to_close = connection
+            else:
+                self._pool[pool_key].append((connection, time.time()))
+                logger.debug(f"Returned connection to pool for {pool_key}")
+
+        if connection_to_close:
+            await connection_to_close.close()
 
     def get_stats(self) -> dict[str, Any]:
         """Get current statistics about the connection pool."""
+        if self._locks is None:
+            raise ConnectionError(
+                "ConnectionPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         total_connections = sum(len(conns) for conns in self._pool.values())
         return {
             "total_pooled_connections": total_connections,
@@ -147,13 +186,55 @@ class ConnectionPool:
             "max_idle_time_seconds": self._max_idle_time,
         }
 
+    async def _cleanup_idle_connections(self) -> None:
+        """Periodically find and remove idle connections from the pool."""
+        if self._locks is None:
+            return
+
+        try:
+            while True:
+                await asyncio.sleep(self._cleanup_interval)
+                current_time = time.time()
+
+                connections_to_close: list[WebTransportConnection] = []
+                pool_keys = list(self._pool.keys())
+
+                for pool_key in pool_keys:
+                    async with self._locks[pool_key]:
+                        connections = self._pool.get(pool_key)
+                        if not connections:
+                            continue
+
+                        for i in range(len(connections) - 1, -1, -1):
+                            connection, idle_time = connections[i]
+                            if (current_time - idle_time) > self._max_idle_time:
+                                connections.pop(i)
+                                connections_to_close.append(connection)
+
+                        if not connections:
+                            self._pool.pop(pool_key, None)
+
+                if connections_to_close:
+                    logger.debug(f"Closing {len(connections_to_close)} idle connections")
+                    try:
+                        async with asyncio.TaskGroup() as tg:
+                            for conn in connections_to_close:
+                                tg.create_task(conn.close())
+                    except* Exception as eg:
+                        logger.warning(f"Errors closing idle connections: {eg.exceptions}")
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Pool cleanup task error: {e}", exc_info=e)
+
     def _get_pool_key(self, host: str, port: int) -> str:
         """Generate a unique key for a given host and port."""
         return f"{host}:{port}"
 
     def _start_cleanup_task(self) -> None:
         """Start the periodic cleanup task if it is not already running."""
-        if self._cleanup_task is None:
+        if self._cleanup_task is None or self._cleanup_task.done():
             coro = self._cleanup_idle_connections()
             try:
                 self._cleanup_task = asyncio.create_task(coro)
@@ -161,35 +242,3 @@ class ConnectionPool:
                 coro.close()
                 self._cleanup_task = None
                 logger.warning("Could not start pool cleanup task: no running event loop.")
-
-    async def _cleanup_idle_connections(self) -> None:
-        """Periodically find and remove idle connections from the pool."""
-        if self._lock is None:
-            return
-        try:
-            while True:
-                await asyncio.sleep(self._cleanup_interval)
-                current_time = time.time()
-                connections_to_close = []
-
-                async with self._lock:
-                    for pool_key, connections in list(self._pool.items()):
-                        for i in range(len(connections) - 1, -1, -1):
-                            connection, idle_time = connections[i]
-                            if (current_time - idle_time) > self._max_idle_time:
-                                connections.pop(i)
-                                connections_to_close.append(connection)
-                        if not connections:
-                            del self._pool[pool_key]
-
-                if connections_to_close:
-                    logger.debug(f"Closing {len(connections_to_close)} idle connections")
-                    for connection in connections_to_close:
-                        try:
-                            await connection.close()
-                        except Exception as e:
-                            logger.warning(f"Error closing idle connection: {e}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Pool cleanup task error: {e}", exc_info=e)

@@ -53,6 +53,18 @@ class WebTransportProxy:
         await self.close()
         logger.info("WebTransportProxy has been closed.")
 
+    async def close(self) -> None:
+        """Close the proxy client and the main session to the proxy server."""
+        if self._proxy_connect_lock is None:
+            raise ClientError(
+                "WebTransportProxy has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
+        logger.info("Closing proxy connection.")
+        await self._client.close()
+        self._proxy_session = None
+
     async def connect_through_proxy(
         self,
         target_url: URL,
@@ -95,18 +107,6 @@ class WebTransportProxy:
             if isinstance(e, asyncio.TimeoutError):
                 raise TimeoutError("Timeout while establishing tunnel via proxy.") from e
             raise
-
-    async def close(self) -> None:
-        """Close the proxy client and the main session to the proxy server."""
-        if self._proxy_connect_lock is None:
-            raise ClientError(
-                "WebTransportProxy has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-
-        logger.info("Closing proxy connection.")
-        await self._client.close()
-        self._proxy_session = None
 
     async def _ensure_proxy_session(self, headers: Headers | None, timeout: float) -> None:
         """Ensure the connection to the proxy server is established, using a lock."""

@@ -27,11 +27,6 @@ def create_heartbeat_datagram() -> bytes:
     return b"HEARTBEAT:" + str(int(get_timestamp())).encode("utf-8")
 
 
-def is_heartbeat_datagram(data: bytes) -> bool:
-    """Check if the given data is a heartbeat datagram."""
-    return data.startswith(b"HEARTBEAT:")
-
-
 async def datagram_throughput_test(
     datagram_stream: WebTransportDatagramDuplexStream,
     *,
@@ -64,6 +59,11 @@ async def datagram_throughput_test(
         "datagrams_sent": sent_count,
         "errors": error_count,
         "throughput_dps": throughput_dps,
-        "throughput_bps": throughput_dps * datagram_size * 8,  # in bits per second
+        "throughput_bps": throughput_dps * datagram_size * 8,
         "error_rate": error_count / max(1, sent_count + error_count),
     }
+
+
+def is_heartbeat_datagram(data: bytes) -> bool:
+    """Check if the given data is a heartbeat datagram."""
+    return data.startswith(b"HEARTBEAT:")

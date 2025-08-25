@@ -129,8 +129,9 @@ class TestConnectionLoadBalancer:
         mock_create_client = mocker.patch(
             "pywebtransport.connection.load_balancer.WebTransportConnection.create_client", return_value=new_connection
         )
+        mocker.patch.object(lb, "_get_next_target", new_callable=mocker.AsyncMock, return_value=target)
 
-        connection = await lb.get_connection(config=mock_client_config, strategy="round_robin")
+        connection = await lb.get_connection(config=mock_client_config)
 
         assert connection is new_connection
         mock_create_client.assert_awaited_once()
@@ -174,16 +175,17 @@ class TestConnectionLoadBalancer:
         mock_create_client = mocker.patch(
             "pywebtransport.connection.load_balancer.WebTransportConnection.create_client"
         )
+        expected_targets = targets[1:] + targets[:1]
 
-        for expected_host, expected_port in targets:
+        for expected_host, expected_port in expected_targets:
             await lb.get_connection(config=mock_client_config, strategy="round_robin")
             mock_create_client.assert_awaited_with(
                 config=mock_client_config, host=expected_host, port=expected_port, path="/"
             )
-        lb._connections.clear()
+            lb._connections.clear()
 
         await lb.get_connection(config=mock_client_config, strategy="round_robin")
-        expected_host, expected_port = targets[0]
+        expected_host, expected_port = expected_targets[0]
         mock_create_client.assert_awaited_with(
             config=mock_client_config, host=expected_host, port=expected_port, path="/"
         )

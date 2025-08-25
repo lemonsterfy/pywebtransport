@@ -3,11 +3,12 @@
 import asyncio
 from asyncio import Task
 from typing import Any, AsyncGenerator, Coroutine, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, WebTransportClient, WebTransportSession
+from pywebtransport import ClientConfig, ClientError, WebTransportClient, WebTransportSession
 from pywebtransport.client import PooledClient
 
 
@@ -71,25 +72,22 @@ class TestPooledClient:
         mock_underlying_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_close_with_no_sessions(
-        self, pool: PooledClient, mocker: MockerFixture, mock_underlying_client: Any
-    ) -> None:
-        mock_gather = mocker.patch("asyncio.gather")
+    async def test_close_with_sessions(self, pool: PooledClient, mocker: MockerFixture, mock_session: Any) -> None:
+        pool._pools["key1"] = [mock_session, mock_session]
+        pool._pools["key2"] = [mock_session]
+        mock_underlying_client = pool._client
 
         await pool.close()
 
-        mock_gather.assert_not_called()
-        mock_underlying_client.close.assert_awaited_once()
+        cast(AsyncMock, mock_session.close).assert_awaited()
+        assert cast(AsyncMock, mock_session.close).await_count == 3
+        cast(AsyncMock, mock_underlying_client.close).assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_close_without_starting(self, mock_underlying_client: Any) -> None:
         pool = PooledClient()
-        assert pool._cleanup_task is None
-        pool._lock = asyncio.Lock()
-
-        await pool.close()
-
-        mock_underlying_client.close.assert_awaited_once()
+        with pytest.raises(ClientError, match="PooledClient has not been activated"):
+            await pool.close()
 
     @pytest.mark.asyncio
     async def test_get_session_from_pool(self, pool: PooledClient, mock_session: Any) -> None:
@@ -130,7 +128,7 @@ class TestPooledClient:
         await pool.return_session(mock_session)
 
         assert pool._pools["example.com:443/"] == [mock_session]
-        cast(Any, mock_session.close).assert_not_awaited()
+        cast(AsyncMock, mock_session.close).assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_return_session_to_full_pool(self, mock_session: Any, mocker: MockerFixture) -> None:
@@ -142,7 +140,7 @@ class TestPooledClient:
             await pool.return_session(mock_session)
 
             assert len(pool._pools["example.com:443/"]) == 1
-            cast(Any, mock_session.close).assert_awaited_once()
+            cast(AsyncMock, mock_session.close).assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_return_stale_session(self, pool: PooledClient, mock_session: Any) -> None:
@@ -151,7 +149,7 @@ class TestPooledClient:
         await pool.return_session(mock_session)
 
         assert not pool._pools.get("example.com:443/")
-        cast(Any, mock_session.close).assert_awaited_once()
+        cast(AsyncMock, mock_session.close).assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_return_session_with_no_pool_key(self, pool: PooledClient, mock_session: Any) -> None:
@@ -160,7 +158,7 @@ class TestPooledClient:
         await pool.return_session(mock_session)
 
         assert not pool._pools
-        cast(Any, mock_session.close).assert_awaited_once()
+        cast(AsyncMock, mock_session.close).assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_start_cleanup_task_idempotent(self, mocker: MockerFixture) -> None:

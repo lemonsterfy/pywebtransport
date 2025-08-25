@@ -87,6 +87,10 @@ class DatagramMonitor:
                 pass
         logger.info(f"Datagram monitoring stopped for session {self._stream.session_id[:12]}...")
 
+    def get_alerts(self) -> list[dict[str, Any]]:
+        """Get a copy of the currently active alerts."""
+        return list(self._alerts)
+
     def get_samples(self, *, limit: int | None = None) -> list[dict[str, Any]]:
         """Get a copy of the collected performance samples."""
         samples_list = list(self._samples)
@@ -94,34 +98,31 @@ class DatagramMonitor:
             return samples_list[-limit:]
         return samples_list
 
-    def get_alerts(self) -> list[dict[str, Any]]:
-        """Get a copy of the currently active alerts."""
-        return list(self._alerts)
+    def _analyze_trend(self, values: list[float]) -> str:
+        """Perform a simple trend analysis on a series of values."""
+        if len(values) < self._trend_analysis_window:
+            return "stable"
 
-    async def _monitor_loop(self) -> None:
-        """The main loop for collecting stats and checking for alerts."""
-        try:
-            while True:
-                await asyncio.sleep(self._interval)
-                stats = self._stream.stats
-                queue_stats = self._stream.get_queue_stats()
+        first_half = values[: len(values) // 2]
+        second_half = values[len(values) // 2 :]
 
-                sample = {
-                    "timestamp": get_timestamp(),
-                    "datagrams_sent": stats.get("datagrams_sent", 0),
-                    "datagrams_received": stats.get("datagrams_received", 0),
-                    "send_success_rate": stats.get("send_success_rate", 0.0),
-                    "avg_send_time": stats.get("avg_send_time", 0.0),
-                    "outgoing_queue_size": queue_stats.get("outgoing", {}).get("size", 0),
-                }
+        if not first_half or not second_half:
+            return "stable"
 
-                self._samples.append(sample)
-                await self._check_alerts(sample)
+        first_avg = sum(first_half) / len(first_half)
+        second_avg = sum(second_half) / len(second_half)
 
-        except asyncio.CancelledError:
-            logger.info("Datagram monitor loop cancelled.")
-        except Exception as e:
-            logger.error(f"Monitor loop error: {e}", exc_info=e)
+        if first_avg == 0 and second_avg > 0:
+            return "increasing"
+
+        if first_avg > 0:
+            change = (second_avg - first_avg) / first_avg
+            if change > 0.25:
+                return "increasing"
+            elif change < -0.25:
+                return "decreasing"
+
+        return "stable"
 
     async def _check_alerts(self, current_sample: dict[str, Any]) -> None:
         """Check the current sample against configured alert thresholds."""
@@ -155,28 +156,27 @@ class DatagramMonitor:
                     }
                 )
 
-    def _analyze_trend(self, values: list[float]) -> str:
-        """Perform a simple trend analysis on a series of values."""
-        if len(values) < self._trend_analysis_window:
-            return "stable"
+    async def _monitor_loop(self) -> None:
+        """The main loop for collecting stats and checking for alerts."""
+        try:
+            while True:
+                await asyncio.sleep(self._interval)
+                stats = self._stream.stats
+                queue_stats = self._stream.get_queue_stats()
 
-        first_half = values[: len(values) // 2]
-        second_half = values[len(values) // 2 :]
+                sample = {
+                    "timestamp": get_timestamp(),
+                    "datagrams_sent": stats.get("datagrams_sent", 0),
+                    "datagrams_received": stats.get("datagrams_received", 0),
+                    "send_success_rate": stats.get("send_success_rate", 0.0),
+                    "avg_send_time": stats.get("avg_send_time", 0.0),
+                    "outgoing_queue_size": queue_stats.get("outgoing", {}).get("size", 0),
+                }
 
-        if not first_half or not second_half:
-            return "stable"
+                self._samples.append(sample)
+                await self._check_alerts(sample)
 
-        first_avg = sum(first_half) / len(first_half)
-        second_avg = sum(second_half) / len(second_half)
-
-        if first_avg == 0 and second_avg > 0:
-            return "increasing"
-
-        if first_avg > 0:
-            change = (second_avg - first_avg) / first_avg
-            if change > 0.25:
-                return "increasing"
-            elif change < -0.25:
-                return "decreasing"
-
-        return "stable"
+        except asyncio.CancelledError:
+            logger.info("Datagram monitor loop cancelled.")
+        except Exception as e:
+            logger.error(f"Monitor loop error: {e}", exc_info=e)

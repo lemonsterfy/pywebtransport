@@ -5,6 +5,7 @@ Core Library Utilities.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import logging
 import secrets
@@ -30,7 +31,7 @@ from pywebtransport.constants import (
     WebTransportConstants,
 )
 from pywebtransport.exceptions import CertificateError, ConfigurationError, TimeoutError, certificate_not_found
-from pywebtransport.types import URL, Address, Data, Timeout, URLParts
+from pywebtransport.types import URL, Address, Buffer, Timeout, URLParts
 
 __all__ = [
     "Timer",
@@ -68,45 +69,6 @@ __all__ = [
 ]
 
 T = TypeVar("T")
-
-
-def get_logger(name: str) -> logging.Logger:
-    """Get a logger instance with a specific name."""
-    return logging.getLogger(f"pywebtransport.{name}")
-
-
-def setup_logging(
-    *, level: str = DEFAULT_LOG_LEVEL, format_string: str | None = None, logger_name: str = "pywebtransport"
-) -> logging.Logger:
-    """Set up and configure the main logger."""
-    logger = logging.getLogger(logger_name)
-    if logger.handlers:
-        return logger
-    numeric_level = getattr(logging, level.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ValueError(f"Invalid log level: {level}")
-    logger.setLevel(numeric_level)
-    handler = logging.StreamHandler()
-    handler.setLevel(numeric_level)
-    formatter = logging.Formatter(format_string or DEFAULT_LOG_FORMAT)
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    return logger
-
-
-def generate_connection_id() -> str:
-    """Generate a unique, URL-safe connection ID."""
-    return secrets.token_urlsafe(12)
-
-
-def generate_request_id() -> str:
-    """Generate a unique, URL-safe request ID."""
-    return secrets.token_urlsafe(8)
-
-
-def generate_session_id() -> str:
-    """Generate a unique, URL-safe session ID."""
-    return secrets.token_urlsafe(16)
 
 
 class Timer:
@@ -155,11 +117,6 @@ class Timer:
         return self.elapsed
 
 
-def get_timestamp() -> float:
-    """Get the current Unix timestamp."""
-    return time.time()
-
-
 def build_webtransport_url(
     host: str, port: int, *, path: str = "/", secure: bool = True, query_params: dict[str, str] | None = None
 ) -> URL:
@@ -177,110 +134,20 @@ def build_webtransport_url(
     return f"{scheme}://{host}:{port}{path}{query}"
 
 
-def is_ipv4_address(host: str) -> bool:
-    """Check if a host string is a valid IPv4 address."""
-    try:
-        socket.inet_aton(host)
-        return True
-    except socket.error:
-        return False
+def calculate_checksum(data: bytes, *, algorithm: str = "sha256") -> str:
+    """Calculate the checksum of data using a specified secure hash algorithm."""
+    if algorithm not in hashlib.algorithms_guaranteed:
+        raise ValueError(f"Unsupported or insecure hash algorithm: {algorithm}")
+    hash_obj = hashlib.new(algorithm)
+    hash_obj.update(data)
+    return hash_obj.hexdigest()
 
 
-def is_ipv6_address(host: str) -> bool:
-    """Check if a host string is a valid IPv6 address."""
-    try:
-        socket.inet_pton(socket.AF_INET6, host)
-        return True
-    except socket.error:
-        return False
-
-
-def parse_webtransport_url(url: URL) -> URLParts:
-    """Parse a WebTransport URL into its host, port, and path components."""
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in WEBTRANSPORT_SCHEMES:
-        raise ConfigurationError(
-            f"Unsupported scheme '{parsed.scheme}'. Must be one of: {WEBTRANSPORT_SCHEMES}", config_key="url"
-        )
-    if not parsed.hostname:
-        raise ConfigurationError("Missing hostname in URL", config_key="url")
-    if parsed.port:
-        port = parsed.port
-    elif parsed.scheme in SECURE_SCHEMES:
-        port = WebTransportConstants.DEFAULT_SECURE_PORT
-    else:
-        port = WebTransportConstants.DEFAULT_PORT
-    path = parsed.path or "/"
-    if parsed.query:
-        path += f"?{parsed.query}"
-    if parsed.fragment:
-        path += f"#{parsed.fragment}"
-    return (parsed.hostname, port, path)
-
-
-async def resolve_address(host: str, port: int, *, family: int = socket.AF_UNSPEC) -> Address:
-    """Resolve a hostname to an IP address asynchronously."""
-    try:
-        loop = asyncio.get_event_loop()
-        result = await loop.getaddrinfo(host, port, family=family, type=socket.SOCK_DGRAM)
-        if not result:
-            raise OSError(f"No address found for {host}:{port}")
-        family, type_, proto, canonname, sockaddr = result[0]
-        return (sockaddr[0], sockaddr[1])
-    except OSError as e:
-        raise ConfigurationError(f"Failed to resolve address {host}:{port}: {e}")
-
-
-def ensure_bytes(data: Data, *, encoding: str = "utf-8") -> bytes:
-    """Ensure that the given data is in bytes format."""
-    if isinstance(data, str):
-        return data.encode(encoding)
-    if isinstance(data, (bytes, bytearray, memoryview)):
-        return bytes(data)
-    raise TypeError(f"Expected str, bytes, bytearray or memoryview, got {type(data)}")
-
-
-def ensure_str(data: Data, *, encoding: str = "utf-8") -> str:
-    """Ensure that the given data is in string format."""
-    if isinstance(data, str):
-        return data
-    if isinstance(data, (bytes, bytearray, memoryview)):
-        return bytes(data).decode(encoding)
-    raise TypeError(f"Expected str, bytes, bytearray or memoryview, got {type(data)}")
-
-
-def format_bytes(data: bytes, *, max_length: int = 100) -> str:
-    """Format bytes for readable debugging output."""
-    if len(data) <= max_length:
-        return repr(data)
-    return f"{repr(data[:max_length])}... ({len(data)} bytes total)"
-
-
-def format_duration(seconds: float) -> str:
-    """Format a duration in seconds into a human-readable string."""
-    if seconds < 1:
-        return f"{seconds * 1000:.1f}ms"
-    elif seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        minutes = int(seconds // 60)
-        secs = seconds % 60
-        return f"{minutes}m{secs:.1f}s"
-    else:
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = seconds % 60
-        return f"{hours}h{minutes}m{secs:.1f}s"
-
-
-def format_timestamp(timestamp: float) -> str:
-    """Format a Unix timestamp into an ISO 8601 string."""
-    return datetime.fromtimestamp(timestamp).isoformat()
-
-
-def normalize_headers(headers: dict[str, Any]) -> dict[str, str]:
-    """Normalize header keys to lowercase and values to strings."""
-    return {str(key).lower(): str(value) for key, value in headers.items()}
+def chunked_read(data: bytes, *, chunk_size: int = 8192) -> list[bytes]:
+    """Split data into a list of chunks of a specified size."""
+    if chunk_size <= 0:
+        raise ValueError("Chunk size must be positive")
+    return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
 async def create_task_with_timeout(
@@ -296,39 +163,66 @@ async def create_task_with_timeout(
     return asyncio.create_task(_wrapper(), name=name)
 
 
-async def run_with_timeout(coro: Coroutine[Any, Any, T], *, timeout: float, default_value: T | None = None) -> T | None:
-    """Run a coroutine with a timeout, returning a default value on timeout."""
-    try:
-        return await asyncio.wait_for(coro, timeout=timeout)
-    except asyncio.TimeoutError:
-        return default_value
+def ensure_bytes(data: Buffer | str, *, encoding: str = "utf-8") -> bytes:
+    """Ensure that the given data is in bytes format."""
+    match data:
+        case str():
+            return data.encode(encoding)
+        case bytes():
+            return data
+        case bytearray() | memoryview():
+            return bytes(data)
+        case _:
+            raise TypeError(f"Expected str, bytes, bytearray, or memoryview, got {type(data).__name__}")
 
 
-async def wait_for_condition(
-    condition: Callable[[], bool], *, timeout: Timeout | None = None, interval: float = 0.1
-) -> None:
-    """Wait for a condition to become true, with an optional timeout."""
-
-    async def _waiter() -> None:
-        while not condition():
-            await asyncio.sleep(interval)
-
-    if timeout is None:
-        await _waiter()
-    else:
-        try:
-            await asyncio.wait_for(_waiter(), timeout=timeout)
-        except asyncio.TimeoutError as e:
-            raise TimeoutError(f"Condition not met within {timeout}s timeout") from e
+def ensure_str(data: Buffer | str, *, encoding: str = "utf-8") -> str:
+    """Ensure that the given data is in string format."""
+    match data:
+        case str():
+            return data
+        case bytes() | bytearray() | memoryview():
+            return bytes(data).decode(encoding)
+        case _:
+            raise TypeError(f"Expected str, bytes, bytearray, or memoryview, got {type(data).__name__}")
 
 
-def calculate_checksum(data: bytes, *, algorithm: str = "sha256") -> str:
-    """Calculate the checksum of data using a specified secure hash algorithm."""
-    if algorithm not in hashlib.algorithms_guaranteed:
-        raise ValueError(f"Unsupported or insecure hash algorithm: {algorithm}")
-    hash_obj = hashlib.new(algorithm)
-    hash_obj.update(data)
-    return hash_obj.hexdigest()
+def format_bytes(data: bytes, *, max_length: int = 100) -> str:
+    """Format bytes for readable debugging output."""
+    if len(data) <= max_length:
+        return repr(data)
+    return f"{repr(data[:max_length])}... ({len(data)} bytes total)"
+
+
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds into a human-readable string."""
+    if seconds < 1:
+        return f"{seconds * 1000:.1f}ms"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    if seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m{secs:.1f}s"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours}h{minutes}m{secs:.1f}s"
+
+
+def format_timestamp(timestamp: float) -> str:
+    """Format a Unix timestamp into an ISO 8601 string."""
+    return datetime.fromtimestamp(timestamp).isoformat()
+
+
+def generate_connection_id() -> str:
+    """Generate a unique, URL-safe connection ID."""
+    return secrets.token_urlsafe(12)
+
+
+def generate_request_id() -> str:
+    """Generate a unique, URL-safe request ID."""
+    return secrets.token_urlsafe(8)
 
 
 def generate_self_signed_cert(
@@ -373,12 +267,48 @@ def generate_self_signed_cert(
     return (str(cert_file), str(key_file))
 
 
+def generate_session_id() -> str:
+    """Generate a unique, URL-safe session ID."""
+    return secrets.token_urlsafe(16)
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Get a logger instance with a specific name."""
+    return logging.getLogger(f"pywebtransport.{name}")
+
+
+def get_timestamp() -> float:
+    """Get the current Unix timestamp."""
+    return time.time()
+
+
+@functools.cache
+def is_ipv4_address(host: str) -> bool:
+    """Check if a host string is a valid IPv4 address."""
+    try:
+        socket.inet_aton(host)
+        return True
+    except socket.error:
+        return False
+
+
+@functools.cache
+def is_ipv6_address(host: str) -> bool:
+    """Check if a host string is a valid IPv6 address."""
+    try:
+        socket.inet_pton(socket.AF_INET6, host)
+        return True
+    except socket.error:
+        return False
+
+
 def load_certificate(certfile: str, keyfile: str) -> ssl.SSLContext:
     """Load an SSL certificate and private key into an SSL context."""
     if not Path(certfile).exists():
         raise certificate_not_found(certfile)
     if not Path(keyfile).exists():
         raise certificate_not_found(keyfile)
+
     try:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -386,6 +316,90 @@ def load_certificate(certfile: str, keyfile: str) -> ssl.SSLContext:
         return context
     except Exception as e:
         raise CertificateError(f"Failed to load certificate: {e}")
+
+
+def merge_configs(base_config: dict[str, Any], override_config: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge two configuration dictionaries."""
+    result = base_config.copy()
+    for key, value in override_config.items():
+        match (result.get(key), value):
+            case (dict() as base_dict, dict() as override_dict):
+                result[key] = merge_configs(base_dict, override_dict)
+            case _:
+                result[key] = value
+    return result
+
+
+def normalize_headers(headers: dict[str, Any]) -> dict[str, str]:
+    """Normalize header keys to lowercase and values to strings."""
+    return {str(key).lower(): str(value) for key, value in headers.items()}
+
+
+@functools.cache
+def parse_webtransport_url(url: URL) -> URLParts:
+    """Parse a WebTransport URL into its host, port, and path components."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in WEBTRANSPORT_SCHEMES:
+        raise ConfigurationError(
+            f"Unsupported scheme '{parsed.scheme}'. Must be one of: {WEBTRANSPORT_SCHEMES}", config_key="url"
+        )
+    if not parsed.hostname:
+        raise ConfigurationError("Missing hostname in URL", config_key="url")
+
+    match parsed:
+        case urllib.parse.ParseResult(port=p) if p:
+            port = p
+        case urllib.parse.ParseResult(scheme=s) if s in SECURE_SCHEMES:
+            port = WebTransportConstants.DEFAULT_SECURE_PORT
+        case _:
+            port = WebTransportConstants.DEFAULT_PORT
+
+    path = parsed.path or "/"
+    if parsed.query:
+        path += f"?{parsed.query}"
+    if parsed.fragment:
+        path += f"#{parsed.fragment}"
+    return (parsed.hostname, port, path)
+
+
+async def resolve_address(host: str, port: int, *, family: int = socket.AF_UNSPEC) -> Address:
+    """Resolve a hostname to an IP address asynchronously."""
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.getaddrinfo(host, port, family=family, type=socket.SOCK_DGRAM)
+        if not result:
+            raise OSError(f"No address found for {host}:{port}")
+        family, type_, proto, canonname, sockaddr = result[0]
+        return (sockaddr[0], sockaddr[1])
+    except OSError as e:
+        raise ConfigurationError(f"Failed to resolve address {host}:{port}: {e}")
+
+
+async def run_with_timeout(coro: Coroutine[Any, Any, T], *, timeout: float, default_value: T | None = None) -> T | None:
+    """Run a coroutine with a timeout, returning a default value on timeout."""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        return default_value
+
+
+def setup_logging(
+    *, level: str = DEFAULT_LOG_LEVEL, format_string: str | None = None, logger_name: str = "pywebtransport"
+) -> logging.Logger:
+    """Set up and configure the main logger."""
+    logger = logging.getLogger(logger_name)
+    if logger.handlers:
+        return logger
+    numeric_level = getattr(logging, level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f"Invalid log level: {level}")
+    logger.setLevel(numeric_level)
+    handler = logging.StreamHandler()
+    handler.setLevel(numeric_level)
+    formatter = logging.Formatter(format_string or DEFAULT_LOG_FORMAT)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    return logger
 
 
 def validate_address(address: Any) -> None:
@@ -437,19 +451,19 @@ def validate_url(url: URL) -> bool:
         return False
 
 
-def chunked_read(data: bytes, *, chunk_size: int = 8192) -> list[bytes]:
-    """Split data into a list of chunks of a specified size."""
-    if chunk_size <= 0:
-        raise ValueError("Chunk size must be positive")
-    return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
+async def wait_for_condition(
+    condition: Callable[[], bool], *, timeout: Timeout | None = None, interval: float = 0.1
+) -> None:
+    """Wait for a condition to become true, with an optional timeout."""
 
+    async def _waiter() -> None:
+        while not condition():
+            await asyncio.sleep(interval)
 
-def merge_configs(base_config: dict[str, Any], override_config: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge two configuration dictionaries."""
-    result = base_config.copy()
-    for key, value in override_config.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = merge_configs(result[key], value)
-        else:
-            result[key] = value
-    return result
+    if timeout is None:
+        await _waiter()
+    else:
+        try:
+            await asyncio.wait_for(_waiter(), timeout=timeout)
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(f"Condition not met within {timeout}s timeout") from e

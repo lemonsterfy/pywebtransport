@@ -111,8 +111,8 @@ class ConnectionManager:
 
             async def on_close(event: Any) -> None:
                 manager = manager_ref()
-                if manager:
-                    await manager.remove_connection(event["connection_id"])
+                if manager and isinstance(event.data, dict):
+                    await manager.remove_connection(event.data["connection_id"])
 
             connection.once(EventType.CONNECTION_CLOSED, on_close)
 
@@ -120,6 +120,44 @@ class ConnectionManager:
             self._update_stats_unsafe()
             logger.debug(f"Added connection {connection_id} (total: {len(self._connections)})")
             return connection_id
+
+    async def close_all_connections(self) -> None:
+        """Close all currently managed connections."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
+        connections_to_close: list[WebTransportConnection] = []
+        async with self._lock:
+            if not self._connections:
+                return
+            connections_to_close = list(self._connections.values())
+            logger.info(f"Closing {len(connections_to_close)} connections")
+            self._connections.clear()
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for conn in connections_to_close:
+                    tg.create_task(conn.close())
+        except* Exception as eg:
+            logger.error(f"Errors occurred while closing connections: {eg.exceptions}")
+
+        async with self._lock:
+            self._stats["total_closed"] += len(connections_to_close)
+            self._update_stats_unsafe()
+        logger.info("All connections closed")
+
+    async def get_connection(self, connection_id: ConnectionId) -> WebTransportConnection | None:
+        """Retrieve a connection by its ID."""
+        if self._lock is None:
+            raise ConnectionError(
+                "ConnectionManager has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            return self._connections.get(connection_id)
 
     async def remove_connection(self, connection_id: ConnectionId) -> WebTransportConnection | None:
         """Remove a connection from the manager by its ID."""
@@ -136,36 +174,26 @@ class ConnectionManager:
                 logger.debug(f"Removed connection {connection_id} (total: {len(self._connections)})")
             return connection
 
-    async def get_connection(self, connection_id: ConnectionId) -> WebTransportConnection | None:
-        """Retrieve a connection by its ID."""
+    async def cleanup_closed_connections(self) -> int:
+        """Find and remove any connections that are marked as closed."""
         if self._lock is None:
             raise ConnectionError(
                 "ConnectionManager has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
-        async with self._lock:
-            return self._connections.get(connection_id)
 
-    async def close_all_connections(self) -> None:
-        """Close all currently managed connections."""
-        if self._lock is None:
-            raise ConnectionError(
-                "ConnectionManager has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
+        closed_connection_ids = []
         async with self._lock:
-            connections_to_close = list(self._connections.values())
-            if not connections_to_close:
-                return
-            logger.info(f"Closing {len(connections_to_close)} connections")
+            for conn_id, conn in list(self._connections.items()):
+                if conn.is_closed:
+                    closed_connection_ids.append(conn_id)
+                    del self._connections[conn_id]
 
-        close_tasks = [conn.close() for conn in connections_to_close]
-        await asyncio.gather(*close_tasks, return_exceptions=True)
-
-        async with self._lock:
-            self._connections.clear()
-            self._update_stats_unsafe()
-        logger.info("All connections closed")
+            if closed_connection_ids:
+                self._stats["total_closed"] += len(closed_connection_ids)
+                self._update_stats_unsafe()
+                logger.debug(f"Cleaned up {len(closed_connection_ids)} closed connections.")
+        return len(closed_connection_ids)
 
     async def get_all_connections(self) -> list[WebTransportConnection]:
         """Retrieve a list of all current connections."""
@@ -191,45 +219,13 @@ class ConnectionManager:
         async with self._lock:
             states: dict[str, int] = defaultdict(int)
             for conn in self._connections.values():
-                states[conn.state.value] += 1
+                states[conn.state] += 1
             return {
                 **self._stats,
                 "active": len(self._connections),
                 "states": dict(states),
                 "max_connections": self._max_connections,
             }
-
-    async def cleanup_closed_connections(self) -> int:
-        """Find and remove any connections that are marked as closed."""
-        if self._lock is None:
-            raise ConnectionError(
-                "ConnectionManager has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-
-        closed_connection_ids = []
-        async with self._lock:
-            all_connections = list(self._connections.items())
-
-        for conn_id, conn in all_connections:
-            if conn.is_closed:
-                closed_connection_ids.append(conn_id)
-
-        if not closed_connection_ids:
-            return 0
-
-        for conn_id in closed_connection_ids:
-            await self.remove_connection(conn_id)
-
-        logger.debug(f"Cleaned up {len(closed_connection_ids)} closed connections.")
-        return len(closed_connection_ids)
-
-    def _start_background_tasks(self) -> None:
-        """Start all periodic background tasks."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
-        if self._idle_check_task is None or self._idle_check_task.done():
-            self._idle_check_task = asyncio.create_task(self._periodic_idle_check())
 
     async def _periodic_cleanup(self) -> None:
         """Periodically run the cleanup process to remove closed connections."""
@@ -270,8 +266,12 @@ class ConnectionManager:
 
                     if idle_connections_to_close:
                         logger.info(f"Closing {len(idle_connections_to_close)} idle connections.")
-                        close_tasks = [conn.close(reason="Idle timeout") for conn in idle_connections_to_close]
-                        await asyncio.gather(*close_tasks, return_exceptions=True)
+                        try:
+                            async with asyncio.TaskGroup() as tg:
+                                for conn in idle_connections_to_close:
+                                    tg.create_task(conn.close(reason="Idle timeout"))
+                        except* Exception as eg:
+                            logger.error(f"Errors occurred while closing idle connections: {eg.exceptions}")
 
                 except Exception as e:
                     logger.error(f"Idle connection check cycle failed: {e}", exc_info=e)
@@ -279,6 +279,13 @@ class ConnectionManager:
                 await asyncio.sleep(self._idle_check_interval)
         except asyncio.CancelledError:
             pass
+
+    def _start_background_tasks(self) -> None:
+        """Start all periodic background tasks."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        if self._idle_check_task is None or self._idle_check_task.done():
+            self._idle_check_task = asyncio.create_task(self._periodic_idle_check())
 
     def _update_stats_unsafe(self) -> None:
         """Update internal statistics (must be called within a lock)."""

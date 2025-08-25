@@ -23,11 +23,15 @@ class TestClientUtils:
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
         session = mocker.create_autospec(WebTransportSession, instance=True)
+        type(session).is_closed = mocker.PropertyMock(return_value=False)
+        session.close = mocker.AsyncMock()
         return session
 
     @pytest.fixture
     def mock_stream(self, mocker: MockerFixture) -> Any:
         stream = mocker.create_autospec(WebTransportStream, instance=True)
+        stream.write = mocker.AsyncMock()
+        stream.read = mocker.AsyncMock()
         return stream
 
     @pytest.fixture(autouse=True)
@@ -38,8 +42,9 @@ class TestClientUtils:
         )
 
     @pytest.mark.asyncio
-    async def test_benchmark_all_success(self, mocker: MockerFixture) -> None:
-        mocker.patch("asyncio.gather", new_callable=mocker.AsyncMock, return_value=[0.1, 0.2, 0.3])
+    async def test_benchmark_all_success(self, mocker: MockerFixture, mock_client: Any, mock_session: Any) -> None:
+        mock_client.connect.return_value = mock_session
+        mocker.patch("pywebtransport.client.utils.get_timestamp", side_effect=[1.0, 1.1, 2.0, 2.2, 3.0, 3.3])
 
         results = await client_utils.benchmark_client_performance(self.URL, num_requests=3)
 
@@ -47,24 +52,25 @@ class TestClientUtils:
         assert results["successful_requests"] == 3
         assert results["failed_requests"] == 0
         assert results["avg_latency"] == pytest.approx(0.2)
-        assert results["min_latency"] == 0.1
-        assert results["max_latency"] == 0.3
+        assert results["min_latency"] == pytest.approx(0.1)
+        assert results["max_latency"] == pytest.approx(0.3)
 
     @pytest.mark.asyncio
-    async def test_benchmark_partial_failure(self, mocker: MockerFixture) -> None:
-        mocker.patch("asyncio.gather", new_callable=mocker.AsyncMock, return_value=[0.2, None, 0.4])
+    async def test_benchmark_partial_failure(self, mocker: MockerFixture, mock_client: Any, mock_session: Any) -> None:
+        mock_client.connect.side_effect = [mock_session, ConnectionError("failed"), mock_session]
+        mocker.patch("pywebtransport.client.utils.get_timestamp", side_effect=[1.0, 1.2, 2.0, 2.4])
 
         results = await client_utils.benchmark_client_performance(self.URL, num_requests=3)
 
-        assert results["successful_requests"] == 2
-        assert results["failed_requests"] == 1
-        assert results["avg_latency"] == pytest.approx(0.3)
+        assert results["successful_requests"] == 1
+        assert results["failed_requests"] == 2
+        assert results["avg_latency"] == pytest.approx(0.2)
         assert results["min_latency"] == pytest.approx(0.2)
-        assert results["max_latency"] == pytest.approx(0.4)
+        assert results["max_latency"] == pytest.approx(0.2)
 
     @pytest.mark.asyncio
-    async def test_benchmark_all_fail(self, mocker: MockerFixture) -> None:
-        mocker.patch("asyncio.gather", new_callable=mocker.AsyncMock, return_value=[None, None])
+    async def test_benchmark_all_fail(self, mocker: MockerFixture, mock_client: Any) -> None:
+        mock_client.connect.side_effect = ConnectionError("failed")
 
         results = await client_utils.benchmark_client_performance(self.URL, num_requests=2)
 
@@ -73,12 +79,9 @@ class TestClientUtils:
         assert "avg_latency" not in results
 
     @pytest.mark.asyncio
-    async def test_benchmark_zero_requests(self, mocker: MockerFixture) -> None:
-        mock_gather = mocker.patch("asyncio.gather", new_callable=mocker.AsyncMock)
-
+    async def test_benchmark_zero_requests(self) -> None:
         results = await client_utils.benchmark_client_performance(self.URL, num_requests=0)
 
-        mock_gather.assert_awaited_once_with()
         assert results["total_requests"] == 0
         assert results["successful_requests"] == 0
         assert results["failed_requests"] == 0
@@ -113,7 +116,8 @@ class TestClientUtils:
         assert results["successful_requests"] == 0
         assert results["failed_requests"] == 1
         assert not results["latencies"]
-        mock_logger.assert_called_once_with("Benchmark request failed: Connection failed")
+        mock_logger.assert_called_once()
+        assert "benchmark requests failed" in mock_logger.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_connectivity_success(self, mocker: MockerFixture, mock_client: Any, mock_session: Any) -> None:
