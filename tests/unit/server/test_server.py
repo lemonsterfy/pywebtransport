@@ -359,6 +359,7 @@ class TestWebTransportServerProtocol:
     @pytest.fixture
     def mock_server(self, mocker: MockerFixture) -> Any:
         server = mocker.create_autospec(WebTransportServer, instance=True)
+        server._active_protocols = set()
         server._handle_new_connection = mocker.AsyncMock()
         return server
 
@@ -384,6 +385,7 @@ class TestWebTransportServerProtocol:
         server = protocol._server_ref()
         assert server is not None
         cast(Any, server._handle_new_connection).assert_awaited_once_with(mock_transport, protocol)
+        assert protocol in server._active_protocols
 
     def test_connection_lost(self, protocol: WebTransportServerProtocol, mocker: MockerFixture) -> None:
         mock_super_lost = mocker.patch("aioquic.asyncio.protocol.QuicConnectionProtocol.connection_lost")
@@ -391,58 +393,57 @@ class TestWebTransportServerProtocol:
         mock_connection._on_connection_lost = mocker.MagicMock()
         protocol.set_connection(mock_connection)
         test_exception = RuntimeError("Connection dropped")
+        server = protocol._server_ref()
+        assert server
+        server._active_protocols.add(protocol)
 
         protocol.connection_lost(test_exception)
 
         mock_super_lost.assert_called_once_with(test_exception)
         mock_connection._on_connection_lost.assert_called_once_with(test_exception)
+        assert protocol not in server._active_protocols
 
     @pytest.mark.asyncio
-    async def test_quic_event_received_forwards_event_when_connection_is_set(
+    async def test_quic_event_received_forwards_directly_after_connection_set(
         self, protocol: WebTransportServerProtocol, mocker: MockerFixture
     ) -> None:
         mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_connection.protocol_handler.handle_quic_event = mocker.AsyncMock()
         mock_event = mocker.MagicMock()
+        protocol.connection_made(mocker.MagicMock())
         protocol.set_connection(mock_connection)
+        await asyncio.sleep(0)
 
         protocol.quic_event_received(mock_event)
         await asyncio.sleep(0)
 
         mock_connection.protocol_handler.handle_quic_event.assert_awaited_once_with(mock_event)
 
-    def test_quic_event_received_buffers_event_when_no_connection(
+    @pytest.mark.asyncio
+    async def test_quic_event_received_queues_event_when_no_connection(
         self, protocol: WebTransportServerProtocol, mocker: MockerFixture
     ) -> None:
+        protocol.connection_made(mocker.MagicMock())
+        await asyncio.sleep(0)
+
         protocol.quic_event_received(mocker.MagicMock())
 
-        assert len(protocol._pending_events) == 1
+        assert protocol._event_queue.qsize() == 1
 
     @pytest.mark.asyncio
-    async def test_set_connection_processes_pending_events(
+    async def test_set_connection_allows_processing(
         self, protocol: WebTransportServerProtocol, mocker: MockerFixture
     ) -> None:
         mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_connection.protocol_handler.handle_quic_event = mocker.AsyncMock()
-        mock_events = [mocker.MagicMock(), mocker.MagicMock()]
-        protocol._pending_events = mock_events
+        mock_event = mocker.MagicMock()
+        protocol.connection_made(mocker.MagicMock())
+        protocol.quic_event_received(mock_event)
 
         protocol.set_connection(mock_connection)
         await asyncio.sleep(0)
 
-        mock_connection.protocol_handler.handle_quic_event.assert_has_awaits(
-            [mocker.call(e) for e in mock_events], any_order=True
-        )
-
-    def test_set_connection_no_pending_events(
-        self, protocol: WebTransportServerProtocol, mocker: MockerFixture
-    ) -> None:
-        mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
-        mock_connection.protocol_handler.handle_quic_event = mocker.AsyncMock()
-
-        protocol.set_connection(mock_connection)
-
-        mock_connection.protocol_handler.handle_quic_event.assert_not_called()
+        mock_connection.protocol_handler.handle_quic_event.assert_awaited_once_with(mock_event)
 
     @pytest.mark.parametrize("is_closing, should_call", [(False, True), (True, False)])
     def test_transmit(
@@ -451,7 +452,7 @@ class TestWebTransportServerProtocol:
         mock_super_transmit = mocker.patch("aioquic.asyncio.protocol.QuicConnectionProtocol.transmit")
         mock_transport = mocker.MagicMock()
         mock_transport.is_closing.return_value = is_closing
-        protocol._transport = mock_transport  # Manually set transport for test
+        protocol._transport = mock_transport
 
         protocol.transmit()
 

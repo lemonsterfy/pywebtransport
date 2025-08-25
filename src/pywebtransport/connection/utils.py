@@ -13,8 +13,8 @@ from pywebtransport.utils import get_logger
 
 __all__ = [
     "connect_with_retry",
-    "ensure_connection",
     "create_multiple_connections",
+    "ensure_connection",
     "test_multiple_connections",
     "test_tcp_connection",
 ]
@@ -51,6 +51,36 @@ async def connect_with_retry(
     raise ConnectionError(f"Failed to connect after {max_retries + 1} attempts: {last_error}")
 
 
+async def create_multiple_connections(
+    *,
+    config: ClientConfig,
+    targets: list[tuple[str, int]],
+    path: str = "/",
+    max_concurrent: int = 10,
+) -> dict[str, WebTransportConnection]:
+    """Create multiple connections to a list of targets with a concurrency limit."""
+    semaphore = asyncio.Semaphore(max_concurrent)
+    connections: dict[str, WebTransportConnection] = {}
+
+    async def create_single_connection(host: str, port: int) -> None:
+        target_key = f"{host}:{port}"
+        async with semaphore:
+            try:
+                connection = await WebTransportConnection.create_client(config=config, host=host, port=port, path=path)
+                connections[target_key] = connection
+            except Exception as e:
+                logger.error(f"Failed to connect to {host}:{port}: {e}")
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for host, port in targets:
+                tg.create_task(create_single_connection(host, port))
+    except* Exception as eg:
+        logger.error(f"Errors occurred while creating multiple connections: {eg.exceptions}")
+
+    return connections
+
+
 async def ensure_connection(
     connection: WebTransportConnection,
     config: ClientConfig,
@@ -72,49 +102,28 @@ async def ensure_connection(
     return new_connection
 
 
-async def create_multiple_connections(
-    *,
-    config: ClientConfig,
-    targets: list[tuple[str, int]],
-    path: str = "/",
-    max_concurrent: int = 10,
-) -> dict[str, WebTransportConnection]:
-    """Create multiple connections to a list of targets with a concurrency limit."""
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    async def create_single_connection(host: str, port: int) -> tuple[str, WebTransportConnection | None]:
-        async with semaphore:
-            try:
-                connection = await WebTransportConnection.create_client(config=config, host=host, port=port, path=path)
-                return f"{host}:{port}", connection
-            except Exception as e:
-                logger.error(f"Failed to connect to {host}:{port}: {e}")
-                return f"{host}:{port}", None
-
-    tasks = [create_single_connection(host, port) for host, port in targets]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    connections = {}
-    for result in results:
-        if isinstance(result, tuple) and len(result) == 2:
-            target_key, connection = result
-            if connection:
-                connections[target_key] = connection
-    return connections
-
-
 async def test_multiple_connections(*, targets: list[tuple[str, int]], timeout: float = 10.0) -> dict[str, bool]:
     """Test TCP connectivity to multiple targets concurrently."""
-    tasks = []
-    target_keys = []
-    for host, port in targets:
-        target_key = f"{host}:{port}"
-        target_keys.append(target_key)
-        tasks.append(test_tcp_connection(host=host, port=port, timeout=timeout))
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
     connection_results: dict[str, bool] = {}
-    for target_key, result in zip(target_keys, results):
-        connection_results[target_key] = isinstance(result, bool) and result
+    tasks: dict[str, asyncio.Task[bool]] = {}
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for host, port in targets:
+                target_key = f"{host}:{port}"
+                tasks[target_key] = tg.create_task(test_tcp_connection(host=host, port=port, timeout=timeout))
+    except* Exception:
+        pass
+
+    for target_key, task in tasks.items():
+        if task.done() and not task.cancelled():
+            try:
+                connection_results[target_key] = task.result()
+            except Exception:
+                connection_results[target_key] = False
+        else:
+            connection_results[target_key] = False
+
     return connection_results
 
 

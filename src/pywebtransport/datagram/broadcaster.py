@@ -50,6 +50,17 @@ class DatagramBroadcaster:
             async with self._lock:
                 self._streams.clear()
 
+    async def add_stream(self, stream: WebTransportDatagramDuplexStream) -> None:
+        """Add a stream to the broadcast list."""
+        if self._lock is None:
+            raise DatagramError(
+                "DatagramBroadcaster has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+        async with self._lock:
+            if stream not in self._streams:
+                self._streams.append(stream)
+
     async def broadcast(self, data: Data, *, priority: int = 0, ttl: float | None = None) -> int:
         """Broadcast a datagram to all registered streams concurrently."""
         if self._lock is None:
@@ -89,17 +100,6 @@ class DatagramBroadcaster:
                         self._streams.remove(stream)
 
         return sent_count
-
-    async def add_stream(self, stream: WebTransportDatagramDuplexStream) -> None:
-        """Add a stream to the broadcast list."""
-        if self._lock is None:
-            raise DatagramError(
-                "DatagramBroadcaster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-        async with self._lock:
-            if stream not in self._streams:
-                self._streams.append(stream)
 
     async def remove_stream(self, stream: WebTransportDatagramDuplexStream) -> None:
         """Remove a stream from the broadcast list."""

@@ -13,7 +13,7 @@ Enumerations define constants for states, directions, and event types, providing
 Defines the lifecycle states of a WebTransport connection.
 
 ```python
-class ConnectionState(Enum):
+class ConnectionState(StrEnum):
     IDLE = "idle"
     CONNECTING = "connecting"
     CONNECTED = "connected"
@@ -28,7 +28,7 @@ class ConnectionState(Enum):
 Defines the types of events emitted by the event system.
 
 ```python
-class EventType(Enum):
+class EventType(StrEnum):
     # Connection events
     CONNECTION_ESTABLISHED = "connection_established"
     CONNECTION_LOST = "connection_lost"
@@ -47,7 +47,7 @@ class EventType(Enum):
     # Datagram events
     DATAGRAM_RECEIVED = "datagram_received"
     DATAGRAM_SENT = "datagram_sent"
-    DATagram_ERROR = "datagram_error"
+    DATAGRAM_ERROR = "datagram_error"
     # Protocol & Error events
     PROTOCOL_ERROR = "protocol_error"
     TIMEOUT_ERROR = "timeout_error"
@@ -58,7 +58,7 @@ class EventType(Enum):
 Defines the lifecycle states of a WebTransport session.
 
 ```python
-class SessionState(Enum):
+class SessionState(StrEnum):
     CONNECTING = "connecting"
     CONNECTED = "connected"
     CLOSING = "closing"
@@ -71,7 +71,7 @@ class SessionState(Enum):
 Defines the direction of data flow for a WebTransport stream.
 
 ```python
-class StreamDirection(Enum):
+class StreamDirection(StrEnum):
     BIDIRECTIONAL = "bidirectional"
     SEND_ONLY = "send_only"
     RECEIVE_ONLY = "receive_only"
@@ -82,7 +82,7 @@ class StreamDirection(Enum):
 Defines the lifecycle states of a WebTransport stream.
 
 ```python
-class StreamState(Enum):
+class StreamState(StrEnum):
     IDLE = "idle"
     OPEN = "open"
     HALF_CLOSED_LOCAL = "half_closed_local"
@@ -163,11 +163,11 @@ Defines the contract for a stream that can be read from.
 ```python
 @runtime_checkable
 class ReadableStreamProtocol(Protocol):
+    def at_eof(self) -> bool: ...
     async def read(self, size: int = -1) -> bytes: ...
     async def readline(self, separator: bytes = b"\n") -> bytes: ...
     async def readexactly(self, n: int) -> bytes: ...
     async def readuntil(self, separator: bytes = b"\n") -> bytes: ...
-    def at_eof(self) -> bool: ...
 ```
 
 ### WritableStreamProtocol Protocol
@@ -177,11 +177,11 @@ Defines the contract for a stream that can be written to.
 ```python
 @runtime_checkable
 class WritableStreamProtocol(Protocol):
+    async def close(self, *, code: int | None = None, reason: str | None = None) -> None: ...
+    async def flush(self) -> None: ...
+    def is_closing(self) -> bool: ...
     async def write(self, data: Data) -> None: ...
     async def writelines(self, lines: list[Data]) -> None: ...
-    async def flush(self) -> None: ...
-    async def close(self, *, code: int | None = None, reason: str | None = None) -> None: ...
-    def is_closing(self) -> bool: ...
 ```
 
 ### BidirectionalStreamProtocol Protocol

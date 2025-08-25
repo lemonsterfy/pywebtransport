@@ -25,6 +25,27 @@ class RequestRouter:
         self._pattern_routes: list[tuple[Pattern[str], SessionHandler]] = []
         self._default_handler: SessionHandler | None = None
 
+    def add_pattern_route(self, pattern: str, handler: SessionHandler) -> None:
+        """Add a route for a regular expression pattern."""
+        try:
+            compiled_pattern = re.compile(pattern)
+            self._pattern_routes.append((compiled_pattern, handler))
+            logger.debug(f"Added pattern route: {pattern}")
+        except re.error as e:
+            logger.error(f"Invalid regex pattern '{pattern}': {e}")
+            raise
+
+    def add_route(self, path: str, handler: SessionHandler) -> None:
+        """Add a route for an exact path match."""
+        self._routes[path] = handler
+        logger.debug(f"Added route: {path}")
+
+    def remove_route(self, path: str) -> None:
+        """Remove a route for an exact path match."""
+        if path in self._routes:
+            del self._routes[path]
+            logger.debug(f"Removed route: {path}")
+
     def route_request(self, session: WebTransportSession) -> SessionHandler | None:
         """Route a request to the appropriate handler based on the session's path."""
         path = session.path
@@ -42,39 +63,18 @@ class RequestRouter:
 
         return handler or self._default_handler
 
-    def add_route(self, path: str, handler: SessionHandler) -> None:
-        """Add a route for an exact path match."""
-        self._routes[path] = handler
-        logger.debug(f"Added route: {path}")
-
-    def add_pattern_route(self, pattern: str, handler: SessionHandler) -> None:
-        """Add a route for a regular expression pattern."""
-        try:
-            compiled_pattern = re.compile(pattern)
-            self._pattern_routes.append((compiled_pattern, handler))
-            logger.debug(f"Added pattern route: {pattern}")
-        except re.error as e:
-            logger.error(f"Invalid regex pattern '{pattern}': {e}")
-            raise
-
-    def remove_route(self, path: str) -> None:
-        """Remove a route for an exact path match."""
-        if path in self._routes:
-            del self._routes[path]
-            logger.debug(f"Removed route: {path}")
-
     def set_default_handler(self, handler: SessionHandler) -> None:
         """Set a default handler for routes that are not matched."""
         self._default_handler = handler
         logger.debug("Set default handler")
 
-    def get_route_handler(self, path: str) -> SessionHandler | None:
-        """Get the handler for a specific path (exact match only)."""
-        return self._routes.get(path)
-
     def get_all_routes(self) -> dict[str, SessionHandler]:
         """Get a copy of all registered exact-match routes."""
         return self._routes.copy()
+
+    def get_route_handler(self, path: str) -> SessionHandler | None:
+        """Get the handler for a specific path (exact match only)."""
+        return self._routes.get(path)
 
     def get_route_stats(self) -> dict[str, Any]:
         """Get statistics about the configured routes."""

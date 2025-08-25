@@ -56,11 +56,11 @@ def create_simple_app() -> ServerApp:
 async def echo_handler(session: WebTransportSession) -> None:
     """Echo all received datagrams and stream data back to the client."""
     try:
-        datagram_task = asyncio.create_task(_echo_datagrams(session))
-        stream_task = asyncio.create_task(_echo_streams(session))
-        await asyncio.gather(datagram_task, stream_task)
-    except Exception as e:
-        logger.error(f"Echo handler error for session {session.session_id}: {e}", exc_info=e)
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(_echo_datagrams(session))
+            tg.create_task(_echo_streams(session))
+    except* Exception as eg:
+        logger.error(f"Echo handler error for session {session.session_id}: {eg.exceptions}", exc_info=eg)
 
 
 async def health_check_handler(session: WebTransportSession) -> None:

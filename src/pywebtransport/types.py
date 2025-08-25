@@ -5,7 +5,7 @@ Core Type Definitions.
 from __future__ import annotations
 
 import ssl
-from enum import Enum
+from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -86,7 +86,7 @@ T = TypeVar("T")
 P = TypeVar("P")
 
 
-class ConnectionState(Enum):
+class ConnectionState(StrEnum):
     """Enumeration of connection states."""
 
     IDLE = "idle"
@@ -98,7 +98,7 @@ class ConnectionState(Enum):
     DRAINING = "draining"
 
 
-class EventType(Enum):
+class EventType(StrEnum):
     """Enumeration of system event types."""
 
     CONNECTION_ESTABLISHED = "connection_established"
@@ -120,7 +120,7 @@ class EventType(Enum):
     TIMEOUT_ERROR = "timeout_error"
 
 
-class SessionState(Enum):
+class SessionState(StrEnum):
     """Enumeration of WebTransport session states."""
 
     CONNECTING = "connecting"
@@ -130,7 +130,7 @@ class SessionState(Enum):
     CLOSED = "closed"
 
 
-class StreamDirection(Enum):
+class StreamDirection(StrEnum):
     """Enumeration of stream directions."""
 
     BIDIRECTIONAL = "bidirectional"
@@ -138,7 +138,7 @@ class StreamDirection(Enum):
     RECEIVE_ONLY = "receive_only"
 
 
-class StreamState(Enum):
+class StreamState(StrEnum):
     """Enumeration of WebTransport stream states."""
 
     IDLE = "idle"
@@ -177,6 +177,7 @@ URL: TypeAlias = str
 URLParts: TypeAlias = tuple[str, int, str]
 Weight: TypeAlias = int
 
+
 if TYPE_CHECKING:
     ConnectionLostHandler: TypeAlias = Callable[[WebTransportConnection, Exception | None], Awaitable[None]]
     EventHandler: TypeAlias = Callable[[Event], Awaitable[None]]
@@ -189,6 +190,7 @@ else:
     RouteHandler: TypeAlias = Callable[[Any], Awaitable[None]]
     SessionHandler: TypeAlias = Callable[[Any], Awaitable[None]]
     StreamHandler: TypeAlias = Callable[[Any], Awaitable[None]]
+
 DatagramHandler: TypeAlias = Callable[[bytes], Awaitable[None]]
 ErrorHandler: TypeAlias = Callable[[Exception], Awaitable[None]]
 Routes: TypeAlias = dict[RoutePattern, RouteHandler]
@@ -234,16 +236,16 @@ class ConnectionInfoProtocol(Protocol):
 class EventEmitterProtocol(Protocol):
     """A protocol for an event emitter."""
 
-    def on(self, event_type: EventType, handler: EventHandler) -> None:
-        """Register an event handler."""
+    async def emit(self, event_type: EventType, *, data: EventData | None = None) -> None:
+        """Emit an event."""
         ...
 
     def off(self, event_type: EventType, *, handler: EventHandler | None = None) -> None:
         """Unregister an event handler."""
         ...
 
-    async def emit(self, event_type: EventType, *, data: EventData | None = None) -> None:
-        """Emit an event."""
+    def on(self, event_type: EventType, handler: EventHandler) -> None:
+        """Register an event handler."""
         ...
 
 
@@ -259,6 +261,10 @@ class MiddlewareProtocol(Protocol):
 @runtime_checkable
 class ReadableStreamProtocol(Protocol):
     """A protocol for a readable stream."""
+
+    def at_eof(self) -> bool:
+        """Check if the end of the stream has been reached."""
+        ...
 
     async def read(self, size: int = -1) -> bytes:
         """Read data from the stream."""
@@ -276,14 +282,22 @@ class ReadableStreamProtocol(Protocol):
         """Read from the stream until a separator is found."""
         ...
 
-    def at_eof(self) -> bool:
-        """Check if the end of the stream has been reached."""
-        ...
-
 
 @runtime_checkable
 class WritableStreamProtocol(Protocol):
     """A protocol for a writable stream."""
+
+    async def close(self, *, code: int | None = None, reason: str | None = None) -> None:
+        """Close the stream."""
+        ...
+
+    async def flush(self) -> None:
+        """Flush the stream's write buffer."""
+        ...
+
+    def is_closing(self) -> bool:
+        """Check if the stream is in the process of closing."""
+        ...
 
     async def write(self, data: Data) -> None:
         """Write data to the stream."""
@@ -291,18 +305,6 @@ class WritableStreamProtocol(Protocol):
 
     async def writelines(self, lines: list[Data]) -> None:
         """Write multiple lines to the stream."""
-        ...
-
-    async def flush(self) -> None:
-        """Flush the stream's write buffer."""
-        ...
-
-    async def close(self, *, code: int | None = None, reason: str | None = None) -> None:
-        """Close the stream."""
-        ...
-
-    def is_closing(self) -> bool:
-        """Check if the stream is in the process of closing."""
         ...
 
 

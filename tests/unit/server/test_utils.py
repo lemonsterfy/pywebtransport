@@ -165,36 +165,30 @@ class TestHandlers:
 
     @pytest.mark.asyncio
     async def test_echo_handler_creates_tasks(self, mocker: MockerFixture, mock_session: WebTransportSession) -> None:
-        mock_create_task = mocker.patch("asyncio.create_task")
-        mock_gather = mocker.patch("asyncio.gather", new_callable=mocker.AsyncMock)
-        mock_echo_datagrams = mocker.patch("pywebtransport.server.utils._echo_datagrams", new_callable=mocker.MagicMock)
-        mock_echo_streams = mocker.patch("pywebtransport.server.utils._echo_streams", new_callable=mocker.MagicMock)
+        mock_echo_datagrams = mocker.patch("pywebtransport.server.utils._echo_datagrams", new_callable=mocker.AsyncMock)
+        mock_echo_streams = mocker.patch("pywebtransport.server.utils._echo_streams", new_callable=mocker.AsyncMock)
 
         await echo_handler(mock_session)
 
-        mock_echo_datagrams.assert_called_once_with(mock_session)
-        mock_echo_streams.assert_called_once_with(mock_session)
-        mock_create_task.assert_has_calls(
-            [
-                mocker.call(mock_echo_datagrams.return_value),
-                mocker.call(mock_echo_streams.return_value),
-            ],
-            any_order=True,
-        )
-        assert mock_gather.await_count == 1
-        assert len(mock_gather.await_args.args) == 2
+        mock_echo_datagrams.assert_awaited_once_with(mock_session)
+        mock_echo_streams.assert_awaited_once_with(mock_session)
 
     @pytest.mark.asyncio
     async def test_echo_handler_exception(self, mocker: MockerFixture, mock_session: WebTransportSession) -> None:
         mock_logger = mocker.patch("pywebtransport.server.utils.logger")
-        mocker.patch("asyncio.gather", new_callable=mocker.AsyncMock, side_effect=ValueError("Test Error"))
-        mocker.patch("pywebtransport.server.utils._echo_datagrams")
-        mocker.patch("pywebtransport.server.utils._echo_streams")
+        test_error = ValueError("Test Error")
+        mocker.patch("pywebtransport.server.utils._echo_datagrams", side_effect=test_error)
+        mocker.patch("pywebtransport.server.utils._echo_streams", new_callable=mocker.AsyncMock)
 
         await echo_handler(mock_session)
 
         mock_logger.error.assert_called_once()
-        assert "Test Error" in mock_logger.error.call_args[0][0]
+        kwargs = mock_logger.error.call_args.kwargs
+        assert "exc_info" in kwargs
+        exc_group = kwargs["exc_info"]
+        assert isinstance(exc_group, ExceptionGroup)
+        assert len(exc_group.exceptions) == 1
+        assert exc_group.exceptions[0] is test_error
 
 
 class TestEchoHelpers:
@@ -290,6 +284,7 @@ class TestEchoHelpers:
                 yield data
 
         mock_stream.read_iter.return_value = data_iterator()
+        mock_stream.write = mocker.AsyncMock()
 
         await _echo_single_stream(mock_stream)
 

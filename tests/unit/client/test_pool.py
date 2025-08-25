@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.client.pool module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, cast
+from typing import Any, AsyncGenerator
 
 import pytest
 from pytest_mock import MockerFixture
@@ -51,42 +51,46 @@ class TestClientPool:
         self, mocker: MockerFixture, mock_webtransport_client: Any, mock_client_create: Any
     ) -> None:
         num_clients = 3
-        mock_gather = mocker.patch("pywebtransport.client.pool.asyncio.gather", wraps=asyncio.gather)
         pool = ClientPool.create(num_clients=num_clients)
 
         async with pool as returned_pool:
             assert returned_pool is pool
             assert mock_client_create.call_count == num_clients
-            assert mock_gather.call_count == 1
             assert len(pool._clients) == num_clients
             assert all(c is mock_webtransport_client for c in pool._clients)
+            assert mock_webtransport_client.__aenter__.call_count == num_clients
 
-        assert mock_gather.call_count == 2
         assert mock_webtransport_client.close.call_count == num_clients
         assert len(pool._clients) == 0
 
     @pytest.mark.asyncio
-    async def test_aenter_activation_failure(
-        self, mocker: MockerFixture, mock_webtransport_client: Any, mock_client_create: Any
-    ) -> None:
-        original_gather = asyncio.gather
-
-        async def stateful_gather_mock(*tasks: Any, **kwargs: Any) -> list[Any]:
-            call_count = getattr(stateful_gather_mock, "call_count", 0)
-            setattr(stateful_gather_mock, "call_count", call_count + 1)
-            if call_count == 0:
-                await original_gather(*tasks)
-                raise ValueError("Activation failed")
-            return cast(list[Any], await original_gather(*tasks, **kwargs))
-
-        mocker.patch("pywebtransport.client.pool.asyncio.gather", side_effect=stateful_gather_mock)
+    async def test_aenter_activation_failure(self, mocker: MockerFixture) -> None:
+        failing_client = mocker.create_autospec(WebTransportClient, instance=True)
+        failing_client.__aenter__ = mocker.AsyncMock(side_effect=ValueError("Activation failed"))
+        failing_client.close = mocker.AsyncMock()
+        successful_client = mocker.create_autospec(WebTransportClient, instance=True)
+        successful_client.__aenter__ = mocker.AsyncMock(return_value=successful_client)
+        successful_client.close = mocker.AsyncMock()
+        mocker.patch(
+            "pywebtransport.client.pool.WebTransportClient.create",
+            side_effect=[failing_client, successful_client],
+        )
         pool = ClientPool.create(num_clients=2)
 
-        with pytest.raises(ValueError, match="Activation failed"):
+        try:
             async with pool:
                 pass
+            pytest.fail("Should have raised an exception.")
+        except ExceptionGroup as exc_info:
+            match, _ = exc_info.split(ValueError)
+            assert match is not None, "A ValueError should be present in the ExceptionGroup"
+            assert len(match.exceptions) == 1
+            assert str(match.exceptions[0]) == "Activation failed"
+        except ValueError as e:
+            assert str(e) == "Activation failed"
 
-        assert mock_webtransport_client.close.call_count == 2
+        failing_client.close.assert_awaited_once()
+        successful_client.close.assert_awaited_once()
         assert len(pool._clients) == 0
 
     @pytest.mark.asyncio
@@ -125,19 +129,25 @@ class TestClientPool:
     async def test_connect_all_partial_failure(self, mocker: MockerFixture) -> None:
         mock_session = mocker.MagicMock(spec=WebTransportSession)
         successful_client = mocker.create_autospec(WebTransportClient, instance=True)
+        successful_client.__aenter__ = mocker.AsyncMock(return_value=successful_client)
         successful_client.connect = mocker.AsyncMock(return_value=mock_session)
         failing_client = mocker.create_autospec(WebTransportClient, instance=True)
+        failing_client.__aenter__ = mocker.AsyncMock(return_value=failing_client)
         failing_client.connect = mocker.AsyncMock(side_effect=ClientError("Connection failed"))
+
+        mocker.patch(
+            "pywebtransport.client.pool.WebTransportClient.create",
+            side_effect=[successful_client, failing_client],
+        )
+
         pool = ClientPool.create(num_clients=2)
-        pool._lock = asyncio.Lock()
-        pool._clients = [successful_client, failing_client]
+        async with pool:
+            sessions = await pool.connect_all("https://example.com")
 
-        sessions = await pool.connect_all("https://example.com")
-
-        assert len(sessions) == 1
-        assert sessions[0] is mock_session
-        successful_client.connect.assert_awaited_once()
-        failing_client.connect.assert_awaited_once()
+            assert len(sessions) == 1
+            assert sessions[0] is mock_session
+            successful_client.connect.assert_awaited_once()
+            failing_client.connect.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_close_all_on_empty_pool(self) -> None:

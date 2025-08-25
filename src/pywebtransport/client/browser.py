@@ -73,27 +73,6 @@ class WebTransportBrowser:
             self._history.clear()
             self._history_index = -1
 
-    async def navigate(self, url: str) -> WebTransportSession:
-        """Navigate to a URL, creating a new session and clearing forward history."""
-        if self._lock is None:
-            raise ClientError(
-                "WebTransportBrowser has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
-            )
-
-        async with self._lock:
-            if self._current_session and self._history and self._history[self._history_index] == url:
-                return self._current_session
-
-            if self._history_index < len(self._history) - 1:
-                self._history = self._history[: self._history_index + 1]
-
-            if not self._history or self._history[-1] != url:
-                self._history.append(url)
-
-            self._history_index = len(self._history) - 1
-            return await self._navigate_internal(url)
-
     async def back(self) -> WebTransportSession | None:
         """Go back to the previous entry in the navigation history."""
         if self._lock is None:
@@ -123,6 +102,27 @@ class WebTransportBrowser:
                 url_to_navigate = self._history[self._history_index]
                 return await self._navigate_internal(url_to_navigate)
             return None
+
+    async def navigate(self, url: str) -> WebTransportSession:
+        """Navigate to a URL, creating a new session and clearing forward history."""
+        if self._lock is None:
+            raise ClientError(
+                "WebTransportBrowser has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
+        async with self._lock:
+            if self._current_session and self._history and self._history[self._history_index] == url:
+                return self._current_session
+
+            if self._history_index < len(self._history) - 1:
+                self._history = self._history[: self._history_index + 1]
+
+            if not self._history or self._history[-1] != url:
+                self._history.append(url)
+
+            self._history_index = len(self._history) - 1
+            return await self._navigate_internal(url)
 
     async def refresh(self) -> WebTransportSession | None:
         """Refresh the current session by reconnecting to the current URL."""

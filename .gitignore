@@ -45,5 +45,5 @@ __pycache__/
 .mypy_cache/
 
 # Virtual environments
-.venv/
-venv/
+.venv*/
+venv*/

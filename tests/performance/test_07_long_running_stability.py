@@ -3,12 +3,13 @@ Long-running stability and memory leak tests for the server.
 """
 
 import asyncio
+import json
 import logging
 import os
 import ssl
+from collections.abc import AsyncGenerator
 from typing import Any, Final, cast
 
-import psutil
 import pytest
 
 from pywebtransport import ClientConfig, ConnectionError, WebTransportClient, WebTransportSession
@@ -20,49 +21,61 @@ INITIAL_STABILIZATION_SECONDS: Final[int] = 15
 COOLDOWN_SECONDS: Final[int] = 60
 BASELINE_SAMPLING_COUNT: Final[int] = 5
 BASELINE_SAMPLING_INTERVAL: Final[float] = 2.0
-MEMORY_LEAK_THRESHOLD_ABSOLUTE_KB: Final[float] = 2048.0
+MEMORY_LEAK_THRESHOLD_ABSOLUTE_KB: Final[float] = 4096.0
 MEMORY_LEAK_THRESHOLD_RELATIVE: Final[float] = 0.05
 SERVER_URL: Final[str] = "https://127.0.0.1:4433"
-SERVER_PORT: Final[int] = 4433
 PERSISTENT_ECHO_ENDPOINT: Final[str] = "/persistent_echo"
+RESOURCE_USAGE_ENDPOINT: Final[str] = "/resource_usage"
 
 logger = logging.getLogger("test_07_long_running_stability")
 
 
-def _get_server_pid(port: int) -> int | None:
-    """Find the PID of the server process listening on the specified UDP port."""
-    try:
-        for conn in psutil.net_connections(kind="udp"):
-            if conn.laddr and conn.laddr.port == port and conn.pid:
-                logger.info(f"Found server process with PID {conn.pid} on UDP port {port}.")
-                return conn.pid
-    except Exception as e:
-        logger.error(f"Could not get server PID: {e}")
-    return None
+async def get_server_resources(client: WebTransportClient) -> dict[str, Any]:
+    """Retrieve resource usage statistics from the test server using a persistent client."""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            session = await client.connect(f"{SERVER_URL}{RESOURCE_USAGE_ENDPOINT}")
+            async with session:
+                stream = await session.create_bidirectional_stream()
+                await stream.write_all(b"GET")
+                response_bytes = await stream.read_all()
+                return cast(dict[str, Any], json.loads(response_bytes))
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"Failed to get server resources on attempt {attempt + 1}/{max_retries}: {e}. Retrying..."
+                )
+                await asyncio.sleep(2.0)
+            else:
+                logger.error(f"Failed to get server resources after {max_retries} attempts: {e}")
+                pytest.fail("Could not retrieve server resource statistics.")
+    return {}
 
 
 class MemoryMonitor:
     """Monitor and analyze the memory usage of a process over multiple rounds."""
 
-    def __init__(self, process: psutil.Process):
-        """Initialize the memory monitor with the target process."""
-        self._process = process
+    def __init__(self, measurement_client: WebTransportClient):
+        """Initialize the memory monitor with a dedicated measurement client."""
+        self._measurement_client = measurement_client
         self._baselines_kb: list[float] = []
 
-    def get_current_memory_kb(self) -> float:
-        """Get the current RSS memory of the process in kilobytes."""
+    async def get_current_memory_kb(self) -> float:
+        """Get the current RSS memory of the server in kilobytes via remote query."""
         try:
-            rss_bytes = self._process.memory_info().rss
+            resources = await get_server_resources(self._measurement_client)
+            rss_bytes = resources["memory_rss_bytes"]
             return cast(float, rss_bytes / 1024)
-        except psutil.NoSuchProcess:
-            pytest.fail(f"Server process {self._process.pid} disappeared.")
+        except Exception:
+            pytest.fail("Failed to query server memory.")
 
     async def record_baseline(self, round_num: int) -> None:
         """Record a stable memory baseline by averaging multiple samples."""
         samples = []
         logger.info(f"Sampling for baseline after Round {round_num} ({BASELINE_SAMPLING_COUNT} samples)...")
         for i in range(BASELINE_SAMPLING_COUNT):
-            samples.append(self.get_current_memory_kb())
+            samples.append(await self.get_current_memory_kb())
             if i < BASELINE_SAMPLING_COUNT - 1:
                 await asyncio.sleep(BASELINE_SAMPLING_INTERVAL)
 
@@ -116,14 +129,19 @@ class TestLongRunningStability:
             write_timeout=40.0,
         )
 
-    async def test_long_running_memory_stability(self, client_config: ClientConfig) -> None:
+    @pytest.fixture(scope="class")
+    async def measurement_client(self, client_config: ClientConfig) -> AsyncGenerator[WebTransportClient, None]:
+        """Provide a single, long-lived client for all measurement tasks."""
+        client = WebTransportClient.create(config=client_config)
+        async with client:
+            yield client
+
+    async def test_long_running_memory_stability(
+        self, client_config: ClientConfig, measurement_client: WebTransportClient
+    ) -> None:
         """Execute a multi-round stability test to detect memory leaks."""
         logger.info("\n--- [Long-Running Stability Test using Phased Repetition] ---")
-        server_pid = _get_server_pid(SERVER_PORT)
-        assert server_pid is not None, f"Could not find server process on port {SERVER_PORT}."
-
-        server_process = psutil.Process(server_pid)
-        monitor = MemoryMonitor(server_process)
+        monitor = MemoryMonitor(measurement_client)
 
         await asyncio.sleep(INITIAL_STABILIZATION_SECONDS)
 

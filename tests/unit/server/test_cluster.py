@@ -114,38 +114,56 @@ class TestServerCluster:
         mock_webtransport_server_class: Any,
         mocker: MockerFixture,
     ) -> None:
-        mock_server_ok = mocker.create_autospec(WebTransportServer, instance=True, spec_set=True)
-        mock_server_ok.__aenter__ = mocker.AsyncMock(return_value=mock_server_ok)
-        mock_server_ok.listen = mocker.AsyncMock()
-        mock_server_ok.close = mocker.AsyncMock()
         mock_server_fail = mocker.create_autospec(WebTransportServer, instance=True, spec_set=True)
         mock_server_fail.__aenter__ = mocker.AsyncMock(return_value=mock_server_fail)
         mock_server_fail.listen = mocker.AsyncMock(side_effect=ValueError("Listen failed"))
         mock_server_fail.close = mocker.AsyncMock()
-        mock_webtransport_server_class.side_effect = [mock_server_ok, mock_server_fail]
+        mock_server_ok = mocker.create_autospec(WebTransportServer, instance=True, spec_set=True)
+        mock_server_ok.__aenter__ = mocker.AsyncMock(return_value=mock_server_ok)
+        mock_server_ok.listen = mocker.AsyncMock()
+        mock_server_ok.close = mocker.AsyncMock()
+        mock_webtransport_server_class.side_effect = [mock_server_fail, mock_server_ok]
         cluster = ServerCluster(configs=server_configs)
         cluster._lock = asyncio.Lock()
 
-        with pytest.raises(ValueError, match="Listen failed"):
+        try:
             await cluster.start_all()
+            pytest.fail("Should have raised an exception.")
+        except ExceptionGroup as exc_info:
+            match, _ = exc_info.split(ValueError)
+            assert match is not None, "A ValueError should be present in the ExceptionGroup"
+            assert len(match.exceptions) == 1
+            assert str(match.exceptions[0]) == "Listen failed"
+        except ValueError as e:
+            assert str(e) == "Listen failed"
 
         assert not cluster.is_running
         assert not cluster._servers
         cast(Any, mock_server_ok.close).assert_awaited_once()
-        cast(Any, mock_server_fail.close).assert_not_awaited()
+        cast(Any, mock_server_fail.close).assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_start_all_with_only_failures(
-        self, server_configs: list[ServerConfig], mocker: MockerFixture, cluster: ServerCluster
+        self, server_configs: list[ServerConfig], mocker: MockerFixture
     ) -> None:
         mocker.patch.object(
-            cluster,
+            ServerCluster,
             "_create_and_start_server",
             side_effect=ValueError("Failed to create"),
         )
+        cluster = ServerCluster(configs=server_configs)
+        cluster._lock = asyncio.Lock()
 
-        with pytest.raises(ValueError, match="Failed to create"):
+        try:
             await cluster.start_all()
+            pytest.fail("Should have raised an exception.")
+        except ExceptionGroup as exc_info:
+            match, _ = exc_info.split(ValueError)
+            assert match is not None, "A ValueError should be present in the ExceptionGroup"
+            assert len(match.exceptions) >= 1
+            assert "Failed to create" in str(match.exceptions[0])
+        except ValueError as e:
+            assert "Failed to create" in str(e)
 
         assert not cluster.is_running
         assert not cluster._servers

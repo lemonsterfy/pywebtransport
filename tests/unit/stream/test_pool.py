@@ -94,26 +94,25 @@ class TestStreamPoolLifecycle:
         close_all_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_fill_pool_stops_if_session_closed(
-        self, mock_session: Any, mock_stream_factory: Callable[[], Any], mocker: MockerFixture
-    ) -> None:
+    async def test_fill_pool_stops_if_session_closed(self, mock_session: Any, mocker: MockerFixture) -> None:
         mock_logger = mocker.patch("pywebtransport.stream.pool.logger")
-        mock_session.create_bidirectional_stream.side_effect = [mock_stream_factory() for _ in range(5)]
-        type(mock_session).is_closed = mocker.PropertyMock(side_effect=[False, False, True])
+        type(mock_session).is_closed = mocker.PropertyMock(return_value=True)
 
         async with StreamPool(session=mock_session, pool_size=5) as pool:
-            assert pool._total_managed_streams == 2
-            mock_logger.warning.assert_called_once_with("Session closed during stream pool replenishment.")
+            assert pool._total_managed_streams == 0
+            mock_session.create_bidirectional_stream.assert_not_called()
+            mock_logger.warning.assert_called_once_with("Session closed, cannot replenish stream pool.")
 
     @pytest.mark.asyncio
     async def test_initialize_pool_does_not_raise_on_error(self, mock_session: Any, mocker: MockerFixture) -> None:
         mock_logger = mocker.patch("pywebtransport.stream.pool.logger")
         mock_session.create_bidirectional_stream.side_effect = RuntimeError("Creation failed")
 
-        async with StreamPool(session=mock_session):
+        async with StreamPool(session=mock_session, pool_size=2):
             pass
 
-        mock_logger.error.assert_called_with("Error initializing stream pool: Creation failed")
+        mock_logger.error.assert_called()
+        assert "Failed to create 2 streams for the pool" in mock_logger.error.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_close_all_cancels_maintenance_task(self, populated_pool: StreamPool) -> None:

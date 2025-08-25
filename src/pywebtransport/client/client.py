@@ -93,14 +93,14 @@ class WebTransportClient(EventEmitter):
         return cls(config=config)
 
     @property
-    def config(self) -> ClientConfig:
-        """Get the client's configuration object."""
-        return self._config
-
-    @property
     def is_closed(self) -> bool:
         """Check if the client is closed."""
         return self._closed
+
+    @property
+    def config(self) -> ClientConfig:
+        """Get the client's configuration object."""
+        return self._config
 
     @property
     def stats(self) -> dict[str, Any]:
@@ -198,10 +198,6 @@ class WebTransportClient(EventEmitter):
                 raise TimeoutError(f"Connection timeout to {url} after {connect_timeout}s") from e
             raise ClientError(f"Failed to connect to {url}: {e}") from e
 
-    def set_default_headers(self, headers: Headers) -> None:
-        """Set default headers for all subsequent connections."""
-        self._default_headers = headers.copy()
-
     def debug_state(self) -> dict[str, Any]:
         """Get a detailed snapshot of the client's state for debugging."""
         return {
@@ -229,3 +225,7 @@ class WebTransportClient(EventEmitter):
             issues.append(f"Slow average connection time: {avg_connect_time:.2f}s")
 
         return issues
+
+    def set_default_headers(self, headers: Headers) -> None:
+        """Set default headers for all subsequent connections."""
+        self._default_headers = headers.copy()

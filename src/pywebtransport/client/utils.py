@@ -11,12 +11,12 @@ from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
 from pywebtransport.utils import get_logger, get_timestamp
 
-logger = get_logger("client.utils")
-
 __all__ = [
     "benchmark_client_performance",
     "test_client_connectivity",
 ]
+
+logger = get_logger("client.utils")
 
 
 async def benchmark_client_performance(
@@ -35,29 +35,33 @@ async def benchmark_client_performance(
     }
     semaphore = asyncio.Semaphore(concurrent_requests)
 
-    async def benchmark_single_request(client: WebTransportClient) -> float | None:
+    async def benchmark_single_request(client: WebTransportClient) -> float:
         async with semaphore:
+            start_time = get_timestamp()
+            session = await client.connect(url)
             try:
-                start_time = get_timestamp()
-                session = await client.connect(url)
                 stream = await session.create_bidirectional_stream()
                 await stream.write(b"benchmark_ping")
                 _ = await stream.read(size=1024)
                 latency = get_timestamp() - start_time
-                await session.close()
                 return latency
-            except Exception as e:
-                logger.warning(f"Benchmark request failed: {e}")
-                return None
+            finally:
+                if session and not session.is_closed:
+                    await session.close()
 
+    tasks: list[asyncio.Task[float]] = []
     async with WebTransportClient.create(config=config) as client:
-        tasks = [asyncio.create_task(benchmark_single_request(client)) for _ in range(num_requests)]
-        latency_results = await asyncio.gather(*tasks)
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for _ in range(num_requests):
+                    tasks.append(tg.create_task(benchmark_single_request(client)))
+        except* Exception as eg:
+            logger.warning(f"{len(eg.exceptions)} benchmark requests failed.")
 
-    for latency in latency_results:
-        if latency is not None:
+    for task in tasks:
+        if task.done() and not task.exception():
             results["successful_requests"] += 1
-            results["latencies"].append(latency)
+            results["latencies"].append(task.result())
         else:
             results["failed_requests"] += 1
 

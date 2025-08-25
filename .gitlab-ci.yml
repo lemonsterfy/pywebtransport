@@ -3,7 +3,6 @@
 stages:
   - lint
   - test
-  - report
   - build
   - deploy
 
@@ -41,32 +40,10 @@ test:
     - pip install -r dev-requirements.txt
     - pip install -e .
   script:
-    - pytest --cov=pywebtransport --cov-report=term --cov-report=xml:coverage.${PYTHON_VERSION}.xml
+    - pytest --cov=pywebtransport --cov-report=term
   coverage: '/TOTAL.*\s+(\d+%)$/'
-  artifacts:
-    paths:
-      - coverage.*.xml
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage.*.xml
-    expire_in: 1 week
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "main"
-
-codecov:
-  stage: report
-  image: python:3.11-slim
-  dependencies:
-    - test
-  before_script:
-    - apt-get update && apt-get install -y wget
-  script:
-    - wget https://uploader.codecov.io/latest/linux/codecov
-    - chmod +x codecov
-    - ./codecov -t $CODECOV_TOKEN -s "lemonsterfy/pywebtransport" -f "coverage.*.xml"
-  rules:
     - if: $CI_COMMIT_BRANCH == "main"
 
 build:

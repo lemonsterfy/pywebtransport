@@ -416,6 +416,7 @@ pytest==8.4.1 \
     #   pytest-benchmark
     #   pytest-cov
     #   pytest-mock
+    #   pytest-repeat
     #   pywebtransport (pyproject.toml)
 pytest-asyncio==1.1.0 \
     --hash=sha256:5fe2d69607b0bd75c656d1211f969cadba035030156745ee09e7d71740e58ecf \
@@ -432,6 +433,10 @@ pytest-cov==6.2.1 \
 pytest-mock==3.14.1 \
     --hash=sha256:159e9edac4c451ce77a5cdb9fc5d1100708d2dd4ba3c3df572f14097351af80e \
     --hash=sha256:178aefcd11307d874b4cd3100344e7e2d888d9791a6a1d9bfe90fbc1b74fd1d0
+    # via pywebtransport (pyproject.toml)
+pytest-repeat==0.9.4 \
+    --hash=sha256:c1738b4e412a6f3b3b9e0b8b29fcd7a423e50f87381ad9307ef6f5a8601139f3 \
+    --hash=sha256:d92ac14dfaa6ffcfe6917e5d16f0c9bc82380c135b03c2a5f412d2637f224485
     # via pywebtransport (pyproject.toml)
 service-identity==24.2.0 \
     --hash=sha256:6b047fbd8a84fd0bb0d55ebce4031e400562b9196e1e0d3e0fe2b8a59f6d4a85 \

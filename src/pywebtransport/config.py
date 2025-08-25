@@ -23,21 +23,6 @@ __all__ = [
 ]
 
 
-def _validate_timeout(timeout: float | None) -> None:
-    """Validate a timeout value."""
-    if timeout is not None:
-        if not isinstance(timeout, (int, float)):
-            raise TypeError("Timeout must be a number or None")
-        if timeout <= 0:
-            raise ValueError("Timeout must be positive")
-
-
-def _validate_port(port: Any) -> None:
-    """Validate that a value is a valid network port."""
-    if not isinstance(port, int) or not (1 <= port <= 65535):
-        raise ValueError(f"Port must be an integer between 1 and 65535, got {port}")
-
-
 @dataclass
 class ClientConfig:
     """A comprehensive configuration for the WebTransport client."""
@@ -125,6 +110,50 @@ class ClientConfig:
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}
         return cls(**filtered_dict)
 
+    def copy(self) -> Self:
+        """Create a deep copy of the configuration."""
+        return copy.deepcopy(self)
+
+    def merge(self, other: ClientConfig | dict[str, Any]) -> Self:
+        """Merge this configuration with another config or dictionary."""
+        match other:
+            case dict():
+                return self.update(**other)
+            case ClientConfig():
+                update_dict = {
+                    f.name: getattr(other, f.name)
+                    for f in other.__dataclass_fields__.values()
+                    if getattr(other, f.name) is not None
+                }
+                return self.update(**update_dict)
+            case _:
+                raise TypeError("Can only merge with ClientConfig or dict")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the configuration to a dictionary."""
+        result = {}
+        for field_name in self.__dataclass_fields__:
+            value = getattr(self, field_name)
+            match value:
+                case ssl.VerifyMode():
+                    result[field_name] = value.name
+                case Path():
+                    result[field_name] = str(value)
+                case _:
+                    result[field_name] = value
+        return result
+
+    def update(self, **kwargs: Any) -> Self:
+        """Create a new config with updated values."""
+        new_config = self.copy()
+        for key, value in kwargs.items():
+            if hasattr(new_config, key):
+                setattr(new_config, key, value)
+            else:
+                raise invalid_config(key, value, "unknown configuration key")
+        new_config.validate()
+        return new_config
+
     def validate(self) -> None:
         """Validate the integrity and correctness of the configuration values."""
         try:
@@ -178,47 +207,6 @@ class ClientConfig:
             raise invalid_config("retry_backoff", self.retry_backoff, "must be >= 1.0")
         if self.max_retry_delay <= 0:
             raise invalid_config("max_retry_delay", self.max_retry_delay, "must be positive")
-
-    def copy(self) -> Self:
-        """Create a deep copy of the configuration."""
-        return copy.deepcopy(self)
-
-    def update(self, **kwargs: Any) -> Self:
-        """Create a new config with updated values."""
-        new_config = self.copy()
-        for key, value in kwargs.items():
-            if hasattr(new_config, key):
-                setattr(new_config, key, value)
-            else:
-                raise invalid_config(key, value, "unknown configuration key")
-        new_config.validate()
-        return new_config
-
-    def merge(self, other: ClientConfig | dict[str, Any]) -> Self:
-        """Merge this configuration with another config or dictionary."""
-        if isinstance(other, dict):
-            return self.update(**other)
-        if isinstance(other, ClientConfig):
-            update_dict = {
-                f.name: getattr(other, f.name)
-                for f in other.__dataclass_fields__.values()
-                if getattr(other, f.name) is not None
-            }
-            return self.update(**update_dict)
-        raise TypeError("Can only merge with ClientConfig or dict")
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the configuration to a dictionary."""
-        result = {}
-        for field_name in self.__dataclass_fields__:
-            value = getattr(self, field_name)
-            if isinstance(value, ssl.VerifyMode):
-                result[field_name] = value.name
-            elif isinstance(value, Path):
-                result[field_name] = str(value)
-            else:
-                result[field_name] = value
-        return result
 
 
 @dataclass
@@ -311,6 +299,54 @@ class ServerConfig:
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}
         return cls(**filtered_dict)
 
+    def copy(self) -> Self:
+        """Create a deep copy of the configuration."""
+        return copy.deepcopy(self)
+
+    def get_bind_address(self) -> Address:
+        """Get the bind address as a (host, port) tuple."""
+        return (self.bind_host, self.bind_port)
+
+    def merge(self, other: ServerConfig | dict[str, Any]) -> Self:
+        """Merge this configuration with another config or dictionary."""
+        match other:
+            case dict():
+                return self.update(**other)
+            case ServerConfig():
+                update_dict = {
+                    f.name: getattr(other, f.name)
+                    for f in other.__dataclass_fields__.values()
+                    if getattr(other, f.name) is not None
+                }
+                return self.update(**update_dict)
+            case _:
+                raise TypeError("Can only merge with ServerConfig or dict")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the configuration to a dictionary."""
+        result = {}
+        for field_name in self.__dataclass_fields__:
+            value = getattr(self, field_name)
+            match value:
+                case ssl.VerifyMode():
+                    result[field_name] = value.name
+                case Path():
+                    result[field_name] = str(value)
+                case _:
+                    result[field_name] = value
+        return result
+
+    def update(self, **kwargs: Any) -> Self:
+        """Create a new config with updated values."""
+        new_config = self.copy()
+        for key, value in kwargs.items():
+            if hasattr(new_config, key):
+                setattr(new_config, key, value)
+            else:
+                raise invalid_config(key, value, "unknown configuration key")
+        new_config.validate()
+        return new_config
+
     def validate(self) -> None:
         """Validate the integrity and correctness of the configuration values."""
         if not self.bind_host:
@@ -365,51 +401,6 @@ class ServerConfig:
         if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
             raise invalid_config("max_datagram_size", self.max_datagram_size, "must be 1-65535")
 
-    def copy(self) -> Self:
-        """Create a deep copy of the configuration."""
-        return copy.deepcopy(self)
-
-    def update(self, **kwargs: Any) -> Self:
-        """Create a new config with updated values."""
-        new_config = self.copy()
-        for key, value in kwargs.items():
-            if hasattr(new_config, key):
-                setattr(new_config, key, value)
-            else:
-                raise invalid_config(key, value, "unknown configuration key")
-        new_config.validate()
-        return new_config
-
-    def merge(self, other: ServerConfig | dict[str, Any]) -> Self:
-        """Merge this configuration with another config or dictionary."""
-        if isinstance(other, dict):
-            return self.update(**other)
-        if isinstance(other, ServerConfig):
-            update_dict = {
-                f.name: getattr(other, f.name)
-                for f in other.__dataclass_fields__.values()
-                if getattr(other, f.name) is not None
-            }
-            return self.update(**update_dict)
-        raise TypeError("Can only merge with ServerConfig or dict")
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the configuration to a dictionary."""
-        result = {}
-        for field_name in self.__dataclass_fields__:
-            value = getattr(self, field_name)
-            if isinstance(value, ssl.VerifyMode):
-                result[field_name] = value.name
-            elif isinstance(value, Path):
-                result[field_name] = str(value)
-            else:
-                result[field_name] = value
-        return result
-
-    def get_bind_address(self) -> Address:
-        """Get the bind address as a (host, port) tuple."""
-        return (self.bind_host, self.bind_port)
-
 
 class ConfigBuilder:
     """A builder for fluently creating client or server configurations."""
@@ -423,9 +414,20 @@ class ConfigBuilder:
         """Set the bind host and port (server only)."""
         if self.config_type != "server":
             raise ConfigurationError("bind() can only be used with server config")
+
         self._config_dict["bind_host"] = host
         self._config_dict["bind_port"] = port
         return self
+
+    def build(self) -> ClientConfig | ServerConfig:
+        """Build and return the final configuration object."""
+        match self.config_type:
+            case "client":
+                return ClientConfig.create(**self._config_dict)
+            case "server":
+                return ServerConfig.create(**self._config_dict)
+            case _:
+                raise ConfigurationError(f"Unknown config type: {self.config_type}")
 
     def debug(self, *, enabled: bool = True, log_level: str = "DEBUG") -> Self:
         """Set debug and logging settings."""
@@ -481,10 +483,17 @@ class ConfigBuilder:
             self._config_dict["write_timeout"] = write
         return self
 
-    def build(self) -> ClientConfig | ServerConfig:
-        """Build and return the final configuration object."""
-        if self.config_type == "client":
-            return ClientConfig.create(**self._config_dict)
-        if self.config_type == "server":
-            return ServerConfig.create(**self._config_dict)
-        raise ConfigurationError(f"Unknown config type: {self.config_type}")
+
+def _validate_port(port: Any) -> None:
+    """Validate that a value is a valid network port."""
+    if not isinstance(port, int) or not (1 <= port <= 65535):
+        raise ValueError(f"Port must be an integer between 1 and 65535, got {port}")
+
+
+def _validate_timeout(timeout: float | None) -> None:
+    """Validate a timeout value."""
+    if timeout is not None:
+        if not isinstance(timeout, (int, float)):
+            raise TypeError("Timeout must be a number or None")
+        if timeout <= 0:
+            raise ValueError("Timeout must be positive")

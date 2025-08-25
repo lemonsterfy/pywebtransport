@@ -92,8 +92,12 @@ class StreamPool:
                 break
 
         if streams_to_close:
-            close_tasks = [s.close() for s in streams_to_close]
-            await asyncio.gather(*close_tasks, return_exceptions=True)
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    for s in streams_to_close:
+                        tg.create_task(s.close())
+            except* Exception as eg:
+                logger.error(f"Errors occurred while closing pooled streams: {eg.exceptions}")
             logger.info(f"Closed {len(streams_to_close)} idle streams from the pool.")
 
         async with self._lock:
@@ -147,6 +151,31 @@ class StreamPool:
             logger.debug(f"Stream pool is full, closing returned stream {stream.stream_id}.")
             await stream.close()
 
+    async def _fill_pool(self) -> None:
+        """Create new streams concurrently until the pool reaches its target size."""
+        if self._available is None:
+            return
+
+        needed = self._pool_size - self._total_managed_streams
+        if needed <= 0:
+            return
+
+        if self._session.is_closed:
+            logger.warning("Session closed, cannot replenish stream pool.")
+            return
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tasks = [tg.create_task(self._session.create_bidirectional_stream()) for _ in range(needed)]
+
+            created_streams = [task.result() for task in tasks]
+            for stream in created_streams:
+                await self._available.put(stream)
+                self._total_managed_streams += 1
+
+        except* Exception as eg:
+            logger.error(f"Failed to create {needed} streams for the pool: {eg.exceptions}")
+
     async def _initialize_pool(self) -> None:
         """Initialize the pool by pre-filling it with new streams."""
         if self._lock is None:
@@ -161,29 +190,6 @@ class StreamPool:
         except Exception as e:
             logger.error(f"Error initializing stream pool: {e}")
             await self.close_all()
-
-    async def _fill_pool(self) -> None:
-        """Create new streams until the pool reaches its target size."""
-        if self._available is None:
-            return
-        while self._total_managed_streams < self._pool_size and self._available.qsize() < self._pool_size:
-            if self._session.is_closed:
-                logger.warning("Session closed during stream pool replenishment.")
-                break
-            stream = await self._session.create_bidirectional_stream()
-            await self._available.put(stream)
-            self._total_managed_streams += 1
-
-    def _start_maintenance_task(self) -> None:
-        """Start the periodic pool maintenance task if not already running."""
-        if self._maintenance_task is None:
-            coro = self._maintain_pool_loop()
-            try:
-                self._maintenance_task = asyncio.create_task(coro)
-            except RuntimeError:
-                coro.close()
-                self._maintenance_task = None
-                logger.warning("Could not start pool maintenance task: no running event loop.")
 
     async def _maintain_pool_loop(self) -> None:
         """Periodically check and replenish the stream pool."""
@@ -201,3 +207,14 @@ class StreamPool:
             logger.info("Stream pool maintenance task cancelled.")
         except Exception as e:
             logger.error(f"Stream pool maintenance task crashed: {e}", exc_info=e)
+
+    def _start_maintenance_task(self) -> None:
+        """Start the periodic pool maintenance task if not already running."""
+        if self._maintenance_task is None:
+            coro = self._maintain_pool_loop()
+            try:
+                self._maintenance_task = asyncio.create_task(coro)
+            except RuntimeError:
+                coro.close()
+                self._maintenance_task = None
+                logger.warning("Could not start pool maintenance task: no running event loop.")

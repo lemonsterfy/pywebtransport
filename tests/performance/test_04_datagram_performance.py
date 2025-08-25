@@ -16,6 +16,7 @@ from pywebtransport import ClientConfig, WebTransportClient
 DATAGRAM_SIZE: Final[int] = 64
 PPS_BURST_COUNT: Final[int] = 1000
 RTT_ECHO_TIMEOUT: Final[float] = 2.0
+DATAGRAM_PACING_DELAY: Final[float] = 0.00012
 SERVER_URL: Final[str] = "https://127.0.0.1:4433"
 ECHO_ENDPOINT: Final[str] = "/echo"
 DISCARD_ENDPOINT: Final[str] = "/discard"
@@ -72,7 +73,11 @@ class TestDatagramPerformance:
                 session = await client.connect(f"{SERVER_URL}{DISCARD_ENDPOINT}")
                 datagrams = await session.datagrams
 
-                tasks = [datagrams.send(payload) for _ in range(PPS_BURST_COUNT)]
+                tasks = []
+                for _ in range(PPS_BURST_COUNT):
+                    tasks.append(asyncio.create_task(datagrams.send(payload)))
+                    await asyncio.sleep(DATAGRAM_PACING_DELAY)
+
                 await asyncio.gather(*tasks)
 
         benchmark(lambda: asyncio.run(run_pps_cycle()))

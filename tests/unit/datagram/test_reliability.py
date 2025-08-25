@@ -321,7 +321,9 @@ class TestDatagramReliabilityLayer:
     @pytest.mark.asyncio
     async def test_handle_ack_message(self, reliability_layer: DatagramReliabilityLayer) -> None:
         seq = TEST_START_SEQ
-        reliability_layer._pending_acks[seq] = _ReliableDatagram(data=b"data")
+        assert reliability_layer._lock is not None
+        async with reliability_layer._lock:
+            reliability_layer._pending_acks[seq] = _ReliableDatagram(data=b"data")
 
         await reliability_layer._handle_ack_message(str(seq).encode("utf-8"))
         assert seq not in reliability_layer._pending_acks
@@ -338,7 +340,9 @@ class TestDatagramReliabilityLayer:
         mock_time = mocker.patch("pywebtransport.datagram.reliability.get_timestamp")
         seq = TEST_START_SEQ
         datagram = _ReliableDatagram(data=b"retry-data", sequence=seq)
-        reliability_layer._pending_acks[seq] = datagram
+        assert reliability_layer._lock is not None
+        async with reliability_layer._lock:
+            reliability_layer._pending_acks[seq] = datagram
         mock_time.return_value = datagram.timestamp + reliability_layer._ack_timeout + 0.1
 
         await reliability_layer._retry_loop()
@@ -355,7 +359,9 @@ class TestDatagramReliabilityLayer:
         seq = TEST_START_SEQ
         datagram = _ReliableDatagram(data=b"give-up-data", sequence=seq)
         datagram.retry_count = reliability_layer._max_retries
-        reliability_layer._pending_acks[seq] = datagram
+        assert reliability_layer._lock is not None
+        async with reliability_layer._lock:
+            reliability_layer._pending_acks[seq] = datagram
         mock_time.return_value = datagram.timestamp + reliability_layer._ack_timeout + 0.1
 
         await reliability_layer._retry_loop()
@@ -371,7 +377,9 @@ class TestDatagramReliabilityLayer:
         mock_time = mocker.patch("pywebtransport.datagram.reliability.get_timestamp")
         seq = TEST_START_SEQ
         datagram = _ReliableDatagram(data=b"not-timed-out", sequence=seq)
-        reliability_layer._pending_acks[seq] = datagram
+        assert reliability_layer._lock is not None
+        async with reliability_layer._lock:
+            reliability_layer._pending_acks[seq] = datagram
         mock_time.return_value = datagram.timestamp + reliability_layer._ack_timeout - 0.05
 
         await reliability_layer._retry_loop()
@@ -385,16 +393,20 @@ class TestDatagramReliabilityLayer:
     ) -> None:
         mocker.patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError])
         mock_time = mocker.patch("pywebtransport.datagram.reliability.get_timestamp")
-        mock_stream.send_structured.side_effect = DatagramError("Stream closed")
         seq = TEST_START_SEQ
         datagram = _ReliableDatagram(data=b"retry-fail", sequence=seq)
-        reliability_layer._pending_acks[seq] = datagram
+        assert reliability_layer._lock is not None
+        async with reliability_layer._lock:
+            reliability_layer._pending_acks[seq] = datagram
         mock_time.return_value = datagram.timestamp + reliability_layer._ack_timeout + 0.1
+        mock_get_stream = mocker.patch.object(
+            reliability_layer, "_get_stream", side_effect=DatagramError("Stream is gone")
+        )
 
         await reliability_layer._retry_loop()
 
-        mock_stream.send_structured.assert_awaited_once()
-        assert reliability_layer._closed
+        mock_get_stream.assert_called_once()
+        assert reliability_layer._closed is True
 
     @pytest.mark.asyncio
     async def test_retry_loop_unexpected_exception(

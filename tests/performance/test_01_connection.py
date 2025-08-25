@@ -12,7 +12,7 @@ from pytest_benchmark.fixture import BenchmarkFixture
 
 from pywebtransport import ClientConfig, ConnectionError, WebTransportClient
 
-CONCURRENCY_LEVEL: Final[int] = 20
+CONCURRENCY_LEVEL: Final[int] = 100
 SERVER_URL: Final[str] = "https://127.0.0.1:4433"
 CONNECTION_TEST_ENDPOINT: Final[str] = "/connection_test"
 

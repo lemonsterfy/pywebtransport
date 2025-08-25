@@ -78,49 +78,45 @@ class Event:
     @property
     def is_connection_event(self) -> bool:
         """Check if this event is connection-related."""
-        return self._get_event_value().startswith("connection_")
+        return self.type.startswith("connection_")
 
     @property
     def is_datagram_event(self) -> bool:
         """Check if this event is datagram-related."""
-        return self._get_event_value().startswith("datagram_")
+        return self.type.startswith("datagram_")
 
     @property
     def is_error_event(self) -> bool:
         """Check if this event is error-related."""
-        return "error" in self._get_event_value().lower()
+        return "error" in self.type.lower()
 
     @property
     def is_session_event(self) -> bool:
         """Check if this event is session-related."""
-        return self._get_event_value().startswith("session_")
+        return self.type.startswith("session_")
 
     @property
     def is_stream_event(self) -> bool:
         """Check if this event is stream-related."""
-        return self._get_event_value().startswith("stream_")
+        return self.type.startswith("stream_")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the event to a dictionary."""
         return {
             "id": self.event_id,
-            "type": self._get_event_value(),
+            "type": self.type,
             "timestamp": self.timestamp,
             "data": self.data,
             "source": str(self.source) if self.source else None,
         }
 
-    def _get_event_value(self) -> str:
-        """Get the string value from an EventType enum or a string."""
-        return self.type.value if isinstance(self.type, EventType) else self.type
+    def __str__(self) -> str:
+        """Return a simple string representation of the event."""
+        return f"Event({self.type}, {self.event_id[:8]})"
 
     def __repr__(self) -> str:
         """Return a detailed string representation of the event."""
-        return f"Event(type={self._get_event_value()}, id={self.event_id}, timestamp={self.timestamp})"
-
-    def __str__(self) -> str:
-        """Return a simple string representation of the event."""
-        return f"Event({self._get_event_value()}, {self.event_id[:8]})"
+        return f"Event(type={self.type}, id={self.event_id}, timestamp={self.timestamp})"
 
 
 class EventEmitter:
@@ -152,6 +148,20 @@ class EventEmitter:
         self.remove_all_listeners()
         logger.debug("EventEmitter closed and listeners cleared.")
 
+    def pause(self) -> None:
+        """Pause event processing and queue subsequent events."""
+        self._paused = True
+        logger.debug("Event processing paused")
+
+    def resume(self) -> asyncio.Task | None:
+        """Resume event processing and handle all queued events."""
+        self._paused = False
+        logger.debug("Event processing resumed")
+        if self._event_queue and (self._processing_task is None or self._processing_task.done()):
+            self._processing_task = asyncio.create_task(self._process_queued_events())
+            return self._processing_task
+        return None
+
     async def emit(
         self,
         event_type: EventType | str,
@@ -162,10 +172,59 @@ class EventEmitter:
         """Emit an event to all corresponding listeners."""
         event = Event(type=event_type, data=data, source=source)
         self._add_to_history(event)
+
         if self._paused:
             self._event_queue.append(event)
             return
+
         await self._process_event(event)
+
+    def off(self, event_type: EventType | str, handler: EventHandler | None = None) -> None:
+        """Unregister a specific event handler or all handlers for an event."""
+        if handler is None:
+            self._handlers[event_type].clear()
+            self._once_handlers[event_type].clear()
+            logger.debug(f"Removed all handlers for event {event_type}")
+        else:
+            if handler in self._handlers[event_type]:
+                self._handlers[event_type].remove(handler)
+                logger.debug(f"Removed handler for event {event_type}")
+            if handler in self._once_handlers[event_type]:
+                self._once_handlers[event_type].remove(handler)
+                logger.debug(f"Removed once handler for event {event_type}")
+
+    def off_any(self, handler: EventHandler | None = None) -> None:
+        """Unregister a specific wildcard handler or all wildcard handlers."""
+        if handler is None:
+            self._wildcard_handlers.clear()
+            logger.debug("Removed all wildcard handlers")
+        elif handler in self._wildcard_handlers:
+            self._wildcard_handlers.remove(handler)
+            logger.debug("Removed wildcard handler")
+
+    def on(self, event_type: EventType | str, handler: EventHandler) -> None:
+        """Register a persistent event handler."""
+        handlers = self._handlers[event_type]
+        if len(handlers) >= self._max_listeners:
+            logger.warning(f"Maximum listeners ({self._max_listeners}) exceeded for event {event_type}")
+        if handler not in handlers:
+            handlers.append(handler)
+            logger.debug(f"Registered handler for event {event_type}")
+        else:
+            logger.warning(f"Handler already registered for event {event_type}")
+
+    def on_any(self, handler: EventHandler) -> None:
+        """Register a wildcard handler for all events."""
+        if handler not in self._wildcard_handlers:
+            self._wildcard_handlers.append(handler)
+            logger.debug("Registered wildcard handler")
+
+    def once(self, event_type: EventType | str, handler: EventHandler) -> None:
+        """Register a one-time event handler."""
+        once_handlers = self._once_handlers[event_type]
+        if handler not in once_handlers:
+            once_handlers.append(handler)
+            logger.debug(f"Registered once handler for event {event_type}")
 
     async def wait_for(
         self,
@@ -192,104 +251,18 @@ class EventEmitter:
         finally:
             self.off(event_type, handler)
 
-    def on(self, event_type: EventType | str, handler: EventHandler) -> None:
-        """Register a persistent event handler."""
-        handlers = self._handlers[event_type]
-        if len(handlers) >= self._max_listeners:
-            logger.warning(f"Maximum listeners ({self._max_listeners}) exceeded for event {event_type}")
-        if handler not in handlers:
-            handlers.append(handler)
-            logger.debug(f"Registered handler for event {event_type}")
-        else:
-            logger.warning(f"Handler already registered for event {event_type}")
-
-    def once(self, event_type: EventType | str, handler: EventHandler) -> None:
-        """Register a one-time event handler."""
-        once_handlers = self._once_handlers[event_type]
-        if handler not in once_handlers:
-            once_handlers.append(handler)
-            logger.debug(f"Registered once handler for event {event_type}")
-
-    def off(self, event_type: EventType | str, handler: EventHandler | None = None) -> None:
-        """Unregister a specific event handler or all handlers for an event."""
-        if handler is None:
-            self._handlers[event_type].clear()
-            self._once_handlers[event_type].clear()
-            logger.debug(f"Removed all handlers for event {event_type}")
-        else:
-            if handler in self._handlers[event_type]:
-                self._handlers[event_type].remove(handler)
-                logger.debug(f"Removed handler for event {event_type}")
-            if handler in self._once_handlers[event_type]:
-                self._once_handlers[event_type].remove(handler)
-                logger.debug(f"Removed once handler for event {event_type}")
-
-    def on_any(self, handler: EventHandler) -> None:
-        """Register a wildcard handler for all events."""
-        if handler not in self._wildcard_handlers:
-            self._wildcard_handlers.append(handler)
-            logger.debug("Registered wildcard handler")
-
-    def off_any(self, handler: EventHandler | None = None) -> None:
-        """Unregister a specific wildcard handler or all wildcard handlers."""
-        if handler is None:
-            self._wildcard_handlers.clear()
-            logger.debug("Removed all wildcard handlers")
-        elif handler in self._wildcard_handlers:
-            self._wildcard_handlers.remove(handler)
-            logger.debug("Removed wildcard handler")
-
-    def remove_all_listeners(self, event_type: EventType | str | None = None) -> None:
-        """Remove all listeners for a specific event or for all events."""
-        if event_type is None:
-            self._handlers.clear()
-            self._once_handlers.clear()
-            self._wildcard_handlers.clear()
-            logger.debug("Removed all event listeners")
-        else:
-            self._handlers[event_type].clear()
-            self._once_handlers[event_type].clear()
-            logger.debug(f"Removed all listeners for event {event_type}")
-
-    def pause(self) -> None:
-        """Pause event processing and queue subsequent events."""
-        self._paused = True
-        logger.debug("Event processing paused")
-
-    def resume(self) -> asyncio.Task | None:
-        """Resume event processing and handle all queued events."""
-        self._paused = False
-        logger.debug("Event processing resumed")
-        if self._event_queue and (self._processing_task is None or self._processing_task.done()):
-            self._processing_task = asyncio.create_task(self._process_queued_events())
-            return self._processing_task
-        return None
-
-    def listeners(self, event_type: EventType | str) -> list[EventHandler]:
-        """Get all listeners for a specific event type."""
-        return self._handlers[event_type][:] + self._once_handlers[event_type][:]
-
-    def listener_count(self, event_type: EventType | str) -> int:
-        """Get the number of listeners for a specific event type."""
-        return len(self.listeners(event_type))
+    def clear_history(self) -> None:
+        """Clear the entire event history."""
+        self._event_history.clear()
+        logger.debug("Event history cleared")
 
     def get_event_history(self, event_type: EventType | str | None = None, limit: int = 100) -> list[Event]:
         """Get the recorded history of events."""
         if event_type is None:
             return self._event_history[-limit:]
 
-        event_value = event_type.value if isinstance(event_type, EventType) else event_type
-        filtered_events = [event for event in self._event_history if event._get_event_value() == event_value]
+        filtered_events = [event for event in self._event_history if event.type == event_type]
         return filtered_events[-limit:]
-
-    def clear_history(self) -> None:
-        """Clear the entire event history."""
-        self._event_history.clear()
-        logger.debug("Event history cleared")
-
-    def set_max_listeners(self, max_listeners: int) -> None:
-        """Set the maximum number of listeners per event."""
-        self._max_listeners = max_listeners
 
     def get_stats(self) -> dict[str, Any]:
         """Get statistics about the event emitter."""
@@ -304,6 +277,30 @@ class EventEmitter:
             "queued_events": len(self._event_queue),
             "paused": self._paused,
         }
+
+    def listener_count(self, event_type: EventType | str) -> int:
+        """Get the number of listeners for a specific event type."""
+        return len(self.listeners(event_type))
+
+    def listeners(self, event_type: EventType | str) -> list[EventHandler]:
+        """Get all listeners for a specific event type."""
+        return self._handlers[event_type][:] + self._once_handlers[event_type][:]
+
+    def remove_all_listeners(self, event_type: EventType | str | None = None) -> None:
+        """Remove all listeners for a specific event or for all events."""
+        if event_type is None:
+            self._handlers.clear()
+            self._once_handlers.clear()
+            self._wildcard_handlers.clear()
+            logger.debug("Removed all event listeners")
+        else:
+            self._handlers[event_type].clear()
+            self._once_handlers[event_type].clear()
+            logger.debug(f"Removed all listeners for event {event_type}")
+
+    def set_max_listeners(self, max_listeners: int) -> None:
+        """Set the maximum number of listeners per event."""
+        self._max_listeners = max_listeners
 
     def _add_to_history(self, event: Event) -> None:
         """Add an event to the history buffer."""
@@ -366,10 +363,6 @@ class EventBus:
         self.clear_all_subscriptions()
         logger.debug("Event bus closed.")
 
-    async def publish(self, event: Event) -> None:
-        """Publish a pre-constructed event to all subscribers."""
-        await self._emitter.emit(event_type=event.type, data=event.data, source=event.source)
-
     async def emit(
         self,
         event_type: EventType | str,
@@ -379,6 +372,10 @@ class EventBus:
     ) -> None:
         """Create and emit an event on the bus."""
         await self._emitter.emit(event_type, data=data, source=source)
+
+    async def publish(self, event: Event) -> None:
+        """Publish a pre-constructed event to all subscribers."""
+        await self._emitter.emit(event_type=event.type, data=event.data, source=event.source)
 
     def subscribe(self, event_type: EventType | str, handler: EventHandler, *, once: bool = False) -> str:
         """Subscribe to an event, returning a unique subscription ID."""
@@ -399,18 +396,17 @@ class EventBus:
             return
         event_type, handler = self._subscriptions.pop(subscription_id)
         self._emitter.off(event_type, handler)
-        event_value = event_type.value if isinstance(event_type, EventType) else event_type
-        logger.debug(f"Removed subscription {subscription_id} for event {event_value}")
-
-    def get_subscription_count(self) -> int:
-        """Get the number of active subscriptions."""
-        return len(self._subscriptions)
+        logger.debug(f"Removed subscription {subscription_id} for event {event_type}")
 
     def clear_all_subscriptions(self) -> None:
         """Clear all subscriptions from the bus."""
         self._subscriptions.clear()
         self._emitter.remove_all_listeners()
         logger.debug("Cleared all event bus subscriptions")
+
+    def get_subscription_count(self) -> int:
+        """Get the number of active subscriptions."""
+        return len(self._subscriptions)
 
 
 async def create_event_bus() -> EventBus:

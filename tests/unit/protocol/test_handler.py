@@ -20,7 +20,7 @@ from pywebtransport import (
     TimeoutError,
 )
 from pywebtransport.events import EventEmitter
-from pywebtransport.protocol import StreamInfo, WebTransportProtocolHandler, WebTransportSessionInfo
+from pywebtransport.protocol import WebTransportProtocolHandler, WebTransportSessionInfo
 from pywebtransport.protocol.h3 import DatagramReceived
 from pywebtransport.protocol.h3 import DataReceived as H3DataReceived
 from pywebtransport.protocol.h3 import H3Connection, HeadersReceived, WebTransportStreamDataReceived
@@ -168,8 +168,8 @@ class TestWebTransportProtocolHandler:
         "headers, expected_authority",
         [
             (None, b"test.server"),
-            ([("host", "custom.host")], b"custom.host"),
-            ([("x-custom", "value")], b"test.server"),
+            ({"host": "custom.host"}, b"custom.host"),
+            ({"x-custom": "value"}, b"test.server"),
         ],
     )
     async def test_create_webtransport_session_client_success(
@@ -191,7 +191,7 @@ class TestWebTransportProtocolHandler:
         assert sent_headers[b":method"] == b"CONNECT"
         assert sent_headers[b":path"] == b"/test"
         assert sent_headers[b":authority"] == expected_authority
-        if headers and "x-custom" in dict(headers):
+        if headers and "x-custom" in headers:
             assert sent_headers[b"x-custom"] == b"value"
 
     @pytest.mark.asyncio
@@ -493,15 +493,13 @@ class TestWebTransportProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_webtransport_stream_data_new_stream(
-        self, handler_server: Any, mock_parent_connection: Any, mocker: MockerFixture
+        self, handler_server: Any, mock_parent_connection: Any
     ) -> None:
+        session_control_stream_id = 0
         s_info = WebTransportSessionInfo(
-            session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
+            session_id="s1", stream_id=session_control_stream_id, state=SessionState.CONNECTED, path="/", created_at=0
         )
         handler_server._register_session("s1", s_info)
-        mock_h3_stream = mocker.MagicMock()
-        mock_h3_stream.session_id = 0
-        handler_server._h3._get_or_create_stream.return_value = mock_h3_stream
         opened_future: asyncio.Future[Any] = asyncio.Future()
         initial_data = b"initial data"
         initial_ended = True
@@ -512,7 +510,9 @@ class TestWebTransportProtocolHandler:
         handler_server.on(EventType.STREAM_OPENED, handler)
 
         await handler_server._handle_webtransport_stream_data(
-            WebTransportStreamDataReceived(stream_id=5, data=initial_data, stream_ended=initial_ended, session_id=0)
+            WebTransportStreamDataReceived(
+                stream_id=5, data=initial_data, stream_ended=initial_ended, session_id=session_control_stream_id
+            )
         )
 
         event_result = await asyncio.wait_for(opened_future, 1)
@@ -549,21 +549,13 @@ class TestWebTransportProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_data_for_unknown_session(self, handler_server: Any) -> None:
-        handler_server._h3._get_or_create_stream.return_value = StreamInfo(
-            session_id="some-session-id",
-            stream_id=5,
-            direction=StreamDirection.BIDIRECTIONAL,
-            state=StreamState.OPEN,
-            created_at=0,
-        )
-
         await handler_server._handle_webtransport_stream_data(
-            WebTransportStreamDataReceived(stream_id=5, data=b"", stream_ended=True, session_id=0)
+            WebTransportStreamDataReceived(stream_id=5, data=b"", stream_ended=True, session_id=999)
         )
 
     @pytest.mark.asyncio
     async def test_handle_datagram_for_unknown_session(self, handler_server: Any) -> None:
-        await handler_server._handle_datagram_received(DatagramReceived(stream_id=0, data=b""))
+        await handler_server._handle_datagram_received(DatagramReceived(stream_id=999, data=b""))
 
     def test_stream_state_transitions_to_closed(self, handler_client: Any) -> None:
         session_info = WebTransportSessionInfo(

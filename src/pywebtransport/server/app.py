@@ -61,35 +61,6 @@ class ServerApp:
         await self._server.close()
         logger.info("ServerApp stopped.")
 
-    async def startup(self) -> None:
-        """Run all registered startup handlers and enter stateful middleware."""
-        for middleware in self._stateful_middleware:
-            if hasattr(middleware, "__aenter__"):
-                await middleware.__aenter__()
-        for handler in self._startup_handlers:
-            if asyncio.iscoroutinefunction(handler):
-                await handler()
-            else:
-                handler()
-
-    async def shutdown(self) -> None:
-        """Run all registered shutdown handlers and exit stateful middleware."""
-        for handler in self._shutdown_handlers:
-            if asyncio.iscoroutinefunction(handler):
-                await handler()
-            else:
-                handler()
-        for middleware in reversed(self._stateful_middleware):
-            if hasattr(middleware, "__aexit__"):
-                await middleware.__aexit__(None, None, None)
-
-    async def serve(self, *, host: str | None = None, port: int | None = None, **kwargs: Any) -> None:
-        """Start the server and serve forever."""
-        final_host = host if host is not None else self.server.config.bind_host
-        final_port = port if port is not None else self.server.config.bind_port
-        await self._server.listen(host=final_host, port=final_port)
-        await self._server.serve_forever()
-
     def run(self, *, host: str | None = None, port: int | None = None, **kwargs: Any) -> None:
         """Run the server application in a new asyncio event loop."""
         final_host = host if host is not None else self.server.config.bind_host
@@ -104,14 +75,55 @@ class ServerApp:
         except KeyboardInterrupt:
             logger.info("Server stopped by user.")
 
-    def route(self, path: str) -> Callable[[SessionHandler], SessionHandler]:
-        """Register a session handler for a specific path."""
+    async def serve(self, *, host: str | None = None, port: int | None = None, **kwargs: Any) -> None:
+        """Start the server and serve forever."""
+        final_host = host if host is not None else self.server.config.bind_host
+        final_port = port if port is not None else self.server.config.bind_port
+        await self._server.listen(host=final_host, port=final_port)
+        await self._server.serve_forever()
 
-        def decorator(handler: SessionHandler) -> SessionHandler:
-            self._router.add_route(path, handler)
-            return handler
+    async def shutdown(self) -> None:
+        """Run all registered shutdown handlers and exit stateful middleware."""
+        for handler in self._shutdown_handlers:
+            if asyncio.iscoroutinefunction(handler):
+                await handler()
+            else:
+                handler()
+        for middleware in reversed(self._stateful_middleware):
+            if hasattr(middleware, "__aexit__"):
+                await middleware.__aexit__(None, None, None)
 
-        return decorator
+    async def startup(self) -> None:
+        """Run all registered startup handlers and enter stateful middleware."""
+        for middleware in self._stateful_middleware:
+            if hasattr(middleware, "__aenter__"):
+                await middleware.__aenter__()
+        for handler in self._startup_handlers:
+            if asyncio.iscoroutinefunction(handler):
+                await handler()
+            else:
+                handler()
+
+    def add_middleware(self, middleware: Callable[..., Any]) -> None:
+        """Add a middleware to the processing chain."""
+        self._middleware_manager.add_middleware(middleware)
+        if hasattr(middleware, "__aenter__") and hasattr(middleware, "__aexit__"):
+            self._stateful_middleware.append(middleware)
+
+    def middleware(self, middleware_func: F) -> F:
+        """Register a middleware function."""
+        self.add_middleware(middleware_func)
+        return middleware_func
+
+    def on_shutdown(self, handler: F) -> F:
+        """Register a handler to run on application shutdown."""
+        self._shutdown_handlers.append(handler)
+        return handler
+
+    def on_startup(self, handler: F) -> F:
+        """Register a handler to run on application startup."""
+        self._startup_handlers.append(handler)
+        return handler
 
     def pattern_route(self, pattern: str) -> Callable[[SessionHandler], SessionHandler]:
         """Register a session handler for a URL pattern."""
@@ -122,26 +134,14 @@ class ServerApp:
 
         return decorator
 
-    def middleware(self, middleware_func: F) -> F:
-        """Register a middleware function."""
-        self.add_middleware(middleware_func)
-        return middleware_func
+    def route(self, path: str) -> Callable[[SessionHandler], SessionHandler]:
+        """Register a session handler for a specific path."""
 
-    def on_startup(self, handler: F) -> F:
-        """Register a handler to run on application startup."""
-        self._startup_handlers.append(handler)
-        return handler
+        def decorator(handler: SessionHandler) -> SessionHandler:
+            self._router.add_route(path, handler)
+            return handler
 
-    def on_shutdown(self, handler: F) -> F:
-        """Register a handler to run on application shutdown."""
-        self._shutdown_handlers.append(handler)
-        return handler
-
-    def add_middleware(self, middleware: Callable[..., Any]) -> None:
-        """Add a middleware to the processing chain."""
-        self._middleware_manager.add_middleware(middleware)
-        if hasattr(middleware, "__aenter__") and hasattr(middleware, "__aexit__"):
-            self._stateful_middleware.append(middleware)
+        return decorator
 
     async def _handle_session_request(self, event: Event) -> None:
         """Handle an incoming session request event from the server."""

@@ -84,7 +84,7 @@ class ServerMonitor:
             if success_rate < 0.9:
                 return {"status": "degraded", "reason": f"Low connection success rate: {success_rate:.2%}"}
 
-        if connections.get("active", 0) > 0:
+        if connections and connections.get("active", 0) > 0:
             return {"status": "healthy", "reason": "Server is operating normally."}
 
         return {"status": "idle", "reason": "Server is running but has no active connections."}
