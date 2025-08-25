@@ -15,14 +15,14 @@ from aioquic.quic.events import QuicEvent, StreamReset
 from pywebtransport.events import Event, EventEmitter
 from pywebtransport.exceptions import ConnectionError, ProtocolError, TimeoutError
 from pywebtransport.protocol import utils as protocol_utils
-from pywebtransport.protocol.h3 import (
+from pywebtransport.protocol.events import (
     DatagramReceived,
     DataReceived,
-    H3Connection,
     H3Event,
     HeadersReceived,
     WebTransportStreamDataReceived,
 )
+from pywebtransport.protocol.h3_engine import WebTransportH3Engine
 from pywebtransport.protocol.session_info import StreamInfo, WebTransportSessionInfo
 from pywebtransport.types import (
     ConnectionState,
@@ -69,7 +69,7 @@ class WebTransportProtocolHandler(EventEmitter):
         self._quic = quic_connection
         self._is_client = is_client
         self._connection_ref = weakref.ref(connection) if connection else None
-        self._h3 = H3Connection(quic=self._quic, enable_webtransport=True)
+        self._h3: WebTransportH3Engine = WebTransportH3Engine(quic=self._quic, enable_webtransport=True)
         self._sessions: dict[SessionId, WebTransportSessionInfo] = {}
         self._streams: dict[StreamId, StreamInfo] = {}
         self._session_control_streams: dict[StreamId, SessionId] = {}
@@ -157,7 +157,7 @@ class WebTransportProtocolHandler(EventEmitter):
         if not session_info or session_info.stream_id != stream_id:
             raise ProtocolError(f"No pending session found for stream {stream_id} and id {session_id}")
 
-        self._h3.send_headers(stream_id, [(b":status", b"200")])
+        self._h3.send_headers(stream_id, {":status": "200"})
         session_info.state = SessionState.CONNECTED
         session_info.ready_at = get_timestamp()
 
@@ -187,20 +187,18 @@ class WebTransportProtocolHandler(EventEmitter):
             raise ProtocolError("Only clients can create WebTransport sessions")
 
         session_id = generate_session_id()
-        headers_dict = dict(headers) if headers else {}
+        headers_dict = headers or {}
         server_name = self._quic.configuration.server_name
         authority = headers_dict.get("host") or server_name or "localhost"
 
-        connect_headers: list[tuple[bytes, bytes]] = [
-            (b":method", b"CONNECT"),
-            (b":protocol", b"webtransport"),
-            (b":scheme", b"https"),
-            (b":path", path.encode()),
-            (b":authority", authority.encode()),
-        ]
-        for key, value in headers_dict.items():
-            if not key.startswith(":") and isinstance(value, str):
-                connect_headers.append((key.encode(), value.encode()))
+        connect_headers: Headers = {
+            ":method": "CONNECT",
+            ":protocol": "webtransport",
+            ":scheme": "https",
+            ":path": path,
+            ":authority": authority,
+            **headers_dict,
+        }
 
         stream_id = self._quic.get_next_available_stream_id(is_unidirectional=False)
         self._h3.send_headers(stream_id, connect_headers, end_stream=False)
@@ -412,19 +410,19 @@ class WebTransportProtocolHandler(EventEmitter):
             if self._sessions.get(session_id):
                 await self.emit(EventType.DATAGRAM_RECEIVED, data={"session_id": session_id, "data": event.data})
 
-    async def _handle_h3_event(self, event: H3Event) -> None:
+    async def _handle_h3_event(self, h3_event: H3Event) -> None:
         """Route H3 events to their specific handlers."""
-        match event:
+        match h3_event:
             case HeadersReceived():
-                await self._handle_session_headers(event)
+                await self._handle_session_headers(h3_event)
             case WebTransportStreamDataReceived():
-                await self._handle_webtransport_stream_data(event)
+                await self._handle_webtransport_stream_data(h3_event)
             case DatagramReceived():
-                await self._handle_datagram_received(event)
+                await self._handle_datagram_received(h3_event)
             case DataReceived():
                 pass
             case _:
-                logger.debug(f"Ignoring unhandled H3 event: {type(event)}")
+                logger.debug(f"Ignoring unhandled H3 event: {type(h3_event)}")
 
     async def _handle_session_headers(self, event: HeadersReceived) -> None:
         """Handle HEADERS frames for session negotiation."""
@@ -432,28 +430,28 @@ class WebTransportProtocolHandler(EventEmitter):
             if hasattr(connection, "record_activity"):
                 connection.record_activity()
         self._last_activity = get_timestamp()
-        headers_dict = dict(event.headers)
+        headers_dict = event.headers
         logger.debug(f"H3 headers received on stream {event.stream_id}: {headers_dict}")
 
         if self._is_client:
             if session_id := self._session_control_streams.get(event.stream_id):
-                if session_id in self._sessions and headers_dict.get(b":status") == b"200":
+                if session_id in self._sessions and headers_dict.get(":status") == "200":
                     session = self._sessions[session_id]
                     session.state = SessionState.CONNECTED
                     session.ready_at = get_timestamp()
                     logger.info(f"Client session {session_id} is ready.")
                     await self.emit(EventType.SESSION_READY, data=session.to_dict())
                 elif session_id:
-                    status = headers_dict.get(b":status", b"unknown").decode()
+                    status = headers_dict.get(":status", "unknown")
                     logger.error(f"Session {session_id} creation failed with status {status}")
                     await self.emit(
                         EventType.SESSION_CLOSED,
                         data={"session_id": session_id, "code": 1, "reason": f"HTTP status {status}"},
                     )
                     self._cleanup_session(session_id)
-        elif headers_dict.get(b":method") == b"CONNECT" and headers_dict.get(b":protocol") == b"webtransport":
+        elif headers_dict.get(":method") == "CONNECT" and headers_dict.get(":protocol") == "webtransport":
             session_id = generate_session_id()
-            app_headers = {k.decode("utf-8", "ignore"): v.decode("utf-8", "ignore") for k, v in event.headers}
+            app_headers = headers_dict
             session_info = WebTransportSessionInfo(
                 session_id=session_id,
                 stream_id=event.stream_id,

@@ -7,10 +7,9 @@ from unittest import mock
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import StreamError, StreamState, WebTransportSendStream, WebTransportStream
+from pywebtransport import StreamError, StreamId, StreamState, WebTransportSendStream, WebTransportStream
 from pywebtransport.stream import StreamManager
 from pywebtransport.stream.manager import StreamType
-from pywebtransport.types import StreamId
 
 TEST_STREAM_ID: StreamId = 4
 

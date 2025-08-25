@@ -11,6 +11,7 @@ from pywebtransport import (
     Event,
     StreamDirection,
     StreamError,
+    StreamId,
     StreamState,
     TimeoutError,
     WebTransportReceiveStream,
@@ -18,7 +19,6 @@ from pywebtransport import (
     WebTransportStream,
 )
 from pywebtransport.stream import StreamBuffer, StreamStats
-from pywebtransport.types import StreamId
 
 DEFAULT_BUFFER_SIZE = 65536
 TEST_STREAM_ID: StreamId = 123

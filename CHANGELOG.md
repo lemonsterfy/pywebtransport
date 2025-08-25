@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.4.0] - 2025-08-26
+
+This is a major architectural release that marks a significant milestone in the library's maturity. The core of this update is the complete re-architecture of the protocol layer, replacing the generic, `aioquic`-derived H3 component with a specialized, in-house `WebTransportH3Engine`. This change dramatically improves maintainability, reduces complexity, and perfectly aligns the protocol implementation with the specific needs of WebTransport, solidifying the library's foundation as a truly independent and production-grade solution.
+
+**Note on Versioning:** While originally slated as a patch release (`v0.3.2`), the complete re-architecture of the core protocol engine represents a major architectural milestone for the library. To accurately reflect the significance and value of this change, it has been designated as `v0.4.0`.
+
+### Added
+
+- **Exposed `StreamId` and `SessionId` in the Public API**:
+  - The `StreamId` and `SessionId` type aliases are now available for direct import from the top-level `pywebtransport` package. This improves the developer experience for users employing type hinting in their applications.
+- **Added Comprehensive Unit Tests for the New Protocol Engine**:
+  - Implemented a robust and highly-structured test suite for the new `WebTransportH3Engine` and its associated events. The tests utilize extensive mocking and parametrization to ensure correctness, protocol compliance, and resilience against errors.
+
+### Changed
+
+- **Re-architected the Core Protocol Engine**:
+  - Replaced the general-purpose `H3Connection` with `WebTransportH3Engine`, a new, purpose-built protocol engine exclusively designed for WebTransport-over-H3. This change removes all unnecessary HTTP/3 features (like Server Push), resulting in a simpler, more efficient, and highly maintainable codebase.
+  - Decoupled the protocol layer from underlying `aioquic` types by introducing a dedicated internal event system (`pywebtransport.protocol.events`). The engine now emits library-native, structured events, creating a clean and stable abstraction boundary.
+  - Improved internal API ergonomics by transitioning header representation from `list[tuple[bytes, bytes]]` to the more Pythonic `dict[str, str]`, simplifying the logic in the `WebTransportProtocolHandler`.
+
+### Fixed
+
+- **Improved Code Consistency in the Test Suite**:
+  - Updated the test suites for `WebTransportProtocolHandler`, `WebTransportStream`, and `StreamManager` to align with the new protocol engine APIs and the newly exposed public types, ensuring the entire codebase follows a consistent and modern approach.
+
 ## [0.3.1] - 2025-08-25
 
 This is a landmark release focused on solidifying the library's architecture for production use. It addresses deep-seated concurrency flaws, enhances performance across the entire stack, and systematically modernizes the codebase to align with the latest asynchronous best practices.
@@ -182,7 +207,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.0...v0.2.1

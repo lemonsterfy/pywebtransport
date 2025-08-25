@@ -141,7 +141,7 @@ source = ["src"]
 branch = true
 parallel = true
 data_file = ".cache/coverage/.coverage"
-omit = ["tests/*", "src/pywebtransport/protocol/h3.py"]
+omit = ["tests/*"]
 
 [tool.coverage.report]
 exclude_lines = [

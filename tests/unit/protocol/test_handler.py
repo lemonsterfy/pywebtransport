@@ -21,16 +21,21 @@ from pywebtransport import (
 )
 from pywebtransport.events import EventEmitter
 from pywebtransport.protocol import WebTransportProtocolHandler, WebTransportSessionInfo
-from pywebtransport.protocol.h3 import DatagramReceived
-from pywebtransport.protocol.h3 import DataReceived as H3DataReceived
-from pywebtransport.protocol.h3 import H3Connection, HeadersReceived, WebTransportStreamDataReceived
+from pywebtransport.protocol.events import (
+    DatagramReceived,
+    DataReceived,
+    HeadersReceived,
+    WebTransportStreamDataReceived,
+)
+from pywebtransport.protocol.h3_engine import WebTransportH3Engine
+from pywebtransport.types import Headers
 
 
 @pytest.fixture
 def handler_client(
-    mocker: MockerFixture, mock_quic_connection: Any, mock_parent_connection: Any, mock_h3_connection: Any
+    mocker: MockerFixture, mock_quic_connection: Any, mock_parent_connection: Any, mock_h3_engine: Any
 ) -> WebTransportProtocolHandler:
-    mocker.patch("pywebtransport.protocol.handler.H3Connection", return_value=mock_h3_connection)
+    mocker.patch("pywebtransport.protocol.handler.WebTransportH3Engine", return_value=mock_h3_engine)
     handler = WebTransportProtocolHandler(
         quic_connection=mock_quic_connection,
         is_client=True,
@@ -41,9 +46,9 @@ def handler_client(
 
 @pytest.fixture
 def handler_server(
-    mocker: MockerFixture, mock_quic_connection: Any, mock_parent_connection: Any, mock_h3_connection: Any
+    mocker: MockerFixture, mock_quic_connection: Any, mock_parent_connection: Any, mock_h3_engine: Any
 ) -> WebTransportProtocolHandler:
-    mocker.patch("pywebtransport.protocol.handler.H3Connection", return_value=mock_h3_connection)
+    mocker.patch("pywebtransport.protocol.handler.WebTransportH3Engine", return_value=mock_h3_engine)
     handler = WebTransportProtocolHandler(
         quic_connection=mock_quic_connection,
         is_client=False,
@@ -53,8 +58,8 @@ def handler_server(
 
 
 @pytest.fixture
-def mock_h3_connection(mocker: MockerFixture) -> Any:
-    return mocker.create_autospec(H3Connection, instance=True)
+def mock_h3_engine(mocker: MockerFixture) -> Any:
+    return mocker.create_autospec(WebTransportH3Engine, instance=True)
 
 
 @pytest.fixture
@@ -167,18 +172,18 @@ class TestWebTransportProtocolHandler:
     @pytest.mark.parametrize(
         "headers, expected_authority",
         [
-            (None, b"test.server"),
-            ({"host": "custom.host"}, b"custom.host"),
-            ({"x-custom": "value"}, b"test.server"),
+            (None, "test.server"),
+            ({"host": "custom.host"}, "custom.host"),
+            ({"x-custom": "value"}, "test.server"),
         ],
     )
     async def test_create_webtransport_session_client_success(
         self,
         handler_client: Any,
         mock_quic_connection: Any,
-        mock_h3_connection: Any,
+        mock_h3_engine: Any,
         headers: Any,
-        expected_authority: bytes,
+        expected_authority: str,
     ) -> None:
         mock_quic_connection.get_next_available_stream_id.return_value = 8
 
@@ -186,13 +191,13 @@ class TestWebTransportProtocolHandler:
 
         assert session_id == "test-session-id"
         assert stream_id == 8
-        mock_h3_connection.send_headers.assert_called_once()
-        sent_headers = dict(mock_h3_connection.send_headers.call_args[0][1])
-        assert sent_headers[b":method"] == b"CONNECT"
-        assert sent_headers[b":path"] == b"/test"
-        assert sent_headers[b":authority"] == expected_authority
+        mock_h3_engine.send_headers.assert_called_once()
+        sent_headers = mock_h3_engine.send_headers.call_args[0][1]
+        assert sent_headers[":method"] == "CONNECT"
+        assert sent_headers[":path"] == "/test"
+        assert sent_headers[":authority"] == expected_authority
         if headers and "x-custom" in headers:
-            assert sent_headers[b"x-custom"] == b"value"
+            assert sent_headers["x-custom"] == "value"
 
     @pytest.mark.asyncio
     async def test_create_webtransport_session_server_raises_error(self, handler_server: Any) -> None:
@@ -201,14 +206,14 @@ class TestWebTransportProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_create_session_with_no_server_name(
-        self, handler_client: Any, mock_quic_connection: Any, mock_h3_connection: Any
+        self, handler_client: Any, mock_quic_connection: Any, mock_h3_engine: Any
     ) -> None:
         mock_quic_connection.configuration.server_name = None
 
         await handler_client.create_webtransport_session(path="/")
 
-        sent_headers = dict(mock_h3_connection.send_headers.call_args[0][1])
-        assert sent_headers[b":authority"] == b"localhost"
+        sent_headers = mock_h3_engine.send_headers.call_args[0][1]
+        assert sent_headers[":authority"] == "localhost"
 
     @pytest.mark.asyncio
     async def test_establish_session_not_connected(self, handler_client: Any) -> None:
@@ -258,7 +263,7 @@ class TestWebTransportProtocolHandler:
         assert create_session_mock.call_count == 3
         assert await handler_client.recover_session(session_id="s-none") is False
 
-    def test_accept_webtransport_session_server_success(self, handler_server: Any, mock_h3_connection: Any) -> None:
+    def test_accept_webtransport_session_server_success(self, handler_server: Any, mock_h3_engine: Any) -> None:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTING, path="/", created_at=0
         )
@@ -266,7 +271,7 @@ class TestWebTransportProtocolHandler:
 
         handler_server.accept_webtransport_session(stream_id=0, session_id="s1")
 
-        mock_h3_connection.send_headers.assert_called_once_with(0, [(b":status", b"200")])
+        mock_h3_engine.send_headers.assert_called_once_with(0, {":status": "200"})
 
     def test_accept_webtransport_session_client_raises_error(self, handler_client: Any) -> None:
         with pytest.raises(ProtocolError):
@@ -299,23 +304,23 @@ class TestWebTransportProtocolHandler:
 
     @pytest.mark.parametrize("is_unidirectional", [True, False])
     def test_create_webtransport_stream(
-        self, handler_client: Any, mock_h3_connection: Any, is_unidirectional: bool
+        self, handler_client: Any, mock_h3_engine: Any, is_unidirectional: bool
     ) -> None:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
         handler_client._register_session("s1", session_info)
-        mock_h3_connection.create_webtransport_stream.return_value = 8
+        mock_h3_engine.create_webtransport_stream.return_value = 8
 
         handler_client.create_webtransport_stream("s1", is_unidirectional=is_unidirectional)
 
-        mock_h3_connection.create_webtransport_stream.assert_called_once()
+        mock_h3_engine.create_webtransport_stream.assert_called_once()
 
     def test_create_stream_on_invalid_session_raises_error(self, handler_client: Any) -> None:
         with pytest.raises(ProtocolError):
             handler_client.create_webtransport_stream("none")
 
-    def test_send_webtransport_stream_data(self, handler_client: Any, mock_h3_connection: Any) -> None:
+    def test_send_webtransport_stream_data(self, handler_client: Any, mock_h3_engine: Any) -> None:
         s_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
@@ -324,7 +329,7 @@ class TestWebTransportProtocolHandler:
 
         handler_client.send_webtransport_stream_data(4, b"data", end_stream=True)
 
-        mock_h3_connection.send_data.assert_called_once_with(stream_id=4, data=b"data", end_stream=True)
+        mock_h3_engine.send_data.assert_called_once_with(stream_id=4, data=b"data", end_stream=True)
 
     def test_send_to_unwritable_stream_raises_error(self, handler_client: Any) -> None:
         session_info = WebTransportSessionInfo(
@@ -386,7 +391,7 @@ class TestWebTransportProtocolHandler:
         mock_quic_connection.reset_stream.assert_called_once_with(4, 555)
         assert 4 not in handler_client._streams
 
-    def test_send_webtransport_datagram(self, handler_client: Any, mock_h3_connection: Any) -> None:
+    def test_send_webtransport_datagram(self, handler_client: Any, mock_h3_engine: Any) -> None:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
@@ -394,18 +399,18 @@ class TestWebTransportProtocolHandler:
 
         handler_client.send_webtransport_datagram("s1", b"dgram")
 
-        mock_h3_connection.send_datagram.assert_called_once_with(stream_id=0, data=b"dgram")
+        mock_h3_engine.send_datagram.assert_called_once_with(stream_id=0, data=b"dgram")
         assert handler_client.stats["datagrams_sent"] == 1
         with pytest.raises(ProtocolError):
             handler_client.send_webtransport_datagram("s-none", b"dgram")
 
     @pytest.mark.asyncio
     async def test_handle_h3_event_routes_correctly(self, handler_client: Any, mocker: MockerFixture) -> None:
-        mock_h3_connection = handler_client._h3
-        headers_event = HeadersReceived(stream_id=0, headers=[], stream_ended=False)
+        mock_h3_engine = handler_client._h3
+        headers_event = HeadersReceived(stream_id=0, headers={}, stream_ended=False)
         data_event = WebTransportStreamDataReceived(stream_id=4, data=b"", stream_ended=False, session_id=0)
         datagram_event = DatagramReceived(stream_id=0, data=b"")
-        mock_h3_connection.handle_event.return_value = [headers_event, data_event, datagram_event]
+        mock_h3_engine.handle_event.return_value = [headers_event, data_event, datagram_event]
         handler_client._handle_session_headers = mocker.AsyncMock()
         handler_client._handle_webtransport_stream_data = mocker.AsyncMock()
         handler_client._handle_datagram_received = mocker.AsyncMock()
@@ -448,7 +453,7 @@ class TestWebTransportProtocolHandler:
         handler_client.on(EventType.SESSION_READY, handler)
 
         await handler_client._handle_session_headers(
-            HeadersReceived(stream_id=stream_id, headers=[(b":status", b"200")], stream_ended=False)
+            HeadersReceived(stream_id=stream_id, headers={":status": "200"}, stream_ended=False)
         )
 
         event_result = await asyncio.wait_for(future, 1)
@@ -466,7 +471,7 @@ class TestWebTransportProtocolHandler:
         handler_client.on(EventType.SESSION_CLOSED, handler)
 
         await handler_client._handle_session_headers(
-            HeadersReceived(stream_id=stream_id, headers=[(b":status", b"404")], stream_ended=True)
+            HeadersReceived(stream_id=stream_id, headers={":status": "404"}, stream_ended=True)
         )
 
         result = await asyncio.wait_for(future, 1)
@@ -482,7 +487,7 @@ class TestWebTransportProtocolHandler:
             future.set_result(event)
 
         handler_server.on(EventType.SESSION_REQUEST, handler)
-        headers = [(b":method", b"CONNECT"), (b":protocol", b"webtransport"), (b":path", b"/")]
+        headers: Headers = {":method": "CONNECT", ":protocol": "webtransport", ":path": "/"}
 
         await handler_server._handle_session_headers(HeadersReceived(stream_id=0, headers=headers, stream_ended=False))
 
@@ -542,7 +547,7 @@ class TestWebTransportProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_unhandled_h3_event(self, handler_client: Any) -> None:
-        unhandled_event = H3DataReceived(stream_id=0, data=b"", stream_ended=False)
+        unhandled_event = DataReceived(stream_id=0, data=b"", stream_ended=False)
         handler_client._h3.handle_event.return_value = [unhandled_event]
 
         await handler_client.handle_quic_event(StreamDataReceived(stream_id=0, data=b"", end_stream=False))
