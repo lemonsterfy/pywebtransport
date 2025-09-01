@@ -1,8 +1,10 @@
 """Unit tests for the pywebtransport.session.manager module."""
 
 import asyncio
-from typing import AsyncGenerator, cast
+from collections.abc import AsyncGenerator
+from typing import Any, cast
 from unittest import mock
+from unittest.mock import AsyncMock
 
 import pytest
 from pytest_mock import MockerFixture
@@ -59,6 +61,28 @@ class TestSessionManager:
         mock_shutdown.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_shutdown(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
+        assert manager._cleanup_task is not None
+        assert not manager._cleanup_task.done()
+        the_task = manager._cleanup_task
+        await manager.add_session(mock_session)
+
+        await manager.shutdown()
+
+        assert the_task.done()
+        cast(mock.AsyncMock, mock_session.close).assert_awaited_once()
+        assert manager.get_session_count() == 0
+
+    @pytest.mark.asyncio
+    async def test_shutdown_no_cleanup_task(self, manager: SessionManager) -> None:
+        assert manager._cleanup_task is not None
+        manager._cleanup_task.cancel()
+        await asyncio.sleep(0)
+        manager._cleanup_task = None
+
+        await manager.shutdown()
+
+    @pytest.mark.asyncio
     async def test_add_session_success(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
         session_id = await manager.add_session(mock_session)
 
@@ -72,29 +96,14 @@ class TestSessionManager:
         cast(mock.MagicMock, mock_session.once).assert_called_once_with(EventType.SESSION_CLOSED, mock.ANY)
 
     @pytest.mark.asyncio
-    async def test_automatic_removal_on_session_close(
-        self, manager: SessionManager, mock_session: WebTransportSession, mocker: MockerFixture
-    ) -> None:
-        close_handler = None
+    async def test_add_session_limit_exceeded(self, mock_session: WebTransportSession, mocker: MockerFixture) -> None:
+        async with SessionManager(max_sessions=1) as manager:
+            await manager.add_session(mock_session)
+            another_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="session-2")
+            another_session.once = mocker.MagicMock()
 
-        def capture_handler(event_type: EventType, handler: mock.ANY) -> None:
-            nonlocal close_handler
-            if event_type == EventType.SESSION_CLOSED:
-                close_handler = handler
-
-        cast(mock.MagicMock, mock_session.once).side_effect = capture_handler
-
-        await manager.add_session(mock_session)
-        assert manager.get_session_count() == 1
-        assert close_handler is not None
-
-        close_event = mocker.MagicMock()
-        close_event.data = {"session_id": mock_session.session_id}
-        await close_handler(close_event)
-
-        assert manager.get_session_count() == 0
-        stats = await manager.get_stats()
-        assert stats["total_closed"] == 1
+            with pytest.raises(SessionError, match=r"Maximum sessions \(1\) exceeded"):
+                await manager.add_session(another_session)
 
     @pytest.mark.asyncio
     async def test_get_session(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
@@ -119,6 +128,58 @@ class TestSessionManager:
         assert stats["total_created"] == 1
         assert stats["total_closed"] == 1
         assert stats["current_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_remove_non_existent_session(self, manager: SessionManager) -> None:
+        removed = await manager.remove_session("non-existent-id")
+
+        assert removed is None
+        stats = await manager.get_stats()
+        assert stats["total_closed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_automatic_removal_on_session_close(
+        self, manager: SessionManager, mock_session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        close_handler = None
+
+        def capture_handler(event_type: EventType, handler: Any) -> None:
+            nonlocal close_handler
+            if event_type == EventType.SESSION_CLOSED:
+                close_handler = handler
+
+        cast(mock.MagicMock, mock_session.once).side_effect = capture_handler
+        await manager.add_session(mock_session)
+        assert manager.get_session_count() == 1
+        assert close_handler is not None
+        close_event = mocker.MagicMock()
+        close_event.data = {"session_id": mock_session.session_id}
+
+        await close_handler(close_event)
+
+        assert manager.get_session_count() == 0
+        stats = await manager.get_stats()
+        assert stats["total_closed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_on_close_handler_with_dead_weakref(
+        self, manager: SessionManager, mock_session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        close_handler = None
+
+        def capture_handler(event_type: EventType, handler: Any) -> None:
+            nonlocal close_handler
+            if event_type == EventType.SESSION_CLOSED:
+                close_handler = handler
+
+        cast(mock.MagicMock, mock_session.once).side_effect = capture_handler
+        await manager.add_session(mock_session)
+        assert close_handler is not None
+        mocker.patch("weakref.ref", return_value=lambda: None)
+        close_event = mocker.MagicMock()
+        close_event.data = {"session_id": mock_session.session_id}
+
+        await close_handler(close_event)
 
     @pytest.mark.asyncio
     async def test_get_all_and_by_state(self, manager: SessionManager, mocker: MockerFixture) -> None:
@@ -146,6 +207,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_get_stats(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
         await manager.add_session(mock_session)
+
         stats = await manager.get_stats()
 
         assert stats["active_sessions"] == 1
@@ -157,22 +219,24 @@ class TestSessionManager:
         assert stats["max_sessions"] > 0
 
     @pytest.mark.asyncio
-    async def test_add_session_limit_exceeded(self, mock_session: WebTransportSession, mocker: MockerFixture) -> None:
-        async with SessionManager(max_sessions=1) as manager:
-            await manager.add_session(mock_session)
-            another_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="session-2")
-            another_session.once = mocker.MagicMock()
+    async def test_close_all_sessions_empty(self, manager: SessionManager) -> None:
+        await manager.close_all_sessions()
 
-            with pytest.raises(SessionError, match=r"Maximum sessions \(1\) exceeded"):
-                await manager.add_session(another_session)
-
-    @pytest.mark.asyncio
-    async def test_remove_non_existent_session(self, manager: SessionManager) -> None:
-        removed = await manager.remove_session("non-existent-id")
-
-        assert removed is None
         stats = await manager.get_stats()
         assert stats["total_closed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_close_all_sessions_raises_exception_group(
+        self, manager: SessionManager, mock_session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        cast(AsyncMock, mock_session.close).side_effect = ValueError("Close failed")
+        await manager.add_session(mock_session)
+
+        with pytest.raises(ExceptionGroup) as excinfo:
+            await manager.close_all_sessions()
+
+        assert len(excinfo.value.exceptions) == 1
+        assert isinstance(excinfo.value.exceptions[0], ValueError)
 
     @pytest.mark.asyncio
     async def test_cleanup_closed_sessions(self, manager: SessionManager, mocker: MockerFixture) -> None:
@@ -196,6 +260,12 @@ class TestSessionManager:
         assert stats["total_closed"] == 1
 
     @pytest.mark.asyncio
+    async def test_cleanup_closed_sessions_no_sessions_to_clean(self, manager: SessionManager) -> None:
+        cleaned_count = await manager.cleanup_closed_sessions()
+
+        assert cleaned_count == 0
+
+    @pytest.mark.asyncio
     async def test_periodic_cleanup_task(self, mocker: MockerFixture) -> None:
         mock_cleanup = mocker.patch.object(SessionManager, "cleanup_closed_sessions", new_callable=mocker.AsyncMock)
 
@@ -203,6 +273,16 @@ class TestSessionManager:
             await asyncio.sleep(0)
 
         mock_cleanup.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_start_cleanup_task_is_idempotent(self, manager: SessionManager) -> None:
+        first_task = manager._cleanup_task
+        assert first_task is not None
+
+        manager._start_cleanup_task()
+        second_task = manager._cleanup_task
+
+        assert first_task is second_task
 
     @pytest.mark.asyncio
     async def test_periodic_cleanup_handles_exception(self, mocker: MockerFixture) -> None:
@@ -216,15 +296,28 @@ class TestSessionManager:
         mock_logger.error.assert_called_with("Session cleanup cycle failed: Cleanup failed", exc_info=mock.ANY)
         mock_cleanup.assert_awaited()
 
+
+class TestSessionManagerUninitialized:
+    @pytest.fixture
+    def uninitialized_manager(self) -> SessionManager:
+        return SessionManager()
+
     @pytest.mark.asyncio
-    async def test_shutdown(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
-        assert manager._cleanup_task is not None
-        assert not manager._cleanup_task.done()
-        the_task = manager._cleanup_task
-        await manager.add_session(mock_session)
-
-        await manager.shutdown()
-
-        assert the_task.done()
-        cast(mock.AsyncMock, mock_session.close).assert_awaited_once()
-        assert manager.get_session_count() == 0
+    @pytest.mark.parametrize(
+        "method_name, args",
+        [
+            ("add_session", (mock.Mock(),)),
+            ("close_all_sessions", ()),
+            ("get_session", ("id-1",)),
+            ("remove_session", ("id-1",)),
+            ("cleanup_closed_sessions", ()),
+            ("get_all_sessions", ()),
+            ("get_sessions_by_state", (SessionState.CONNECTED,)),
+            ("get_stats", ()),
+        ],
+    )
+    async def test_methods_raise_before_activated(
+        self, uninitialized_manager: SessionManager, method_name: str, args: tuple
+    ) -> None:
+        with pytest.raises(SessionError, match="SessionManager has not been activated"):
+            await getattr(uninitialized_manager, method_name)(*args)

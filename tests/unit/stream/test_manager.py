@@ -1,8 +1,10 @@
 """Unit tests for the pywebtransport.stream.manager module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, cast
+from collections.abc import AsyncGenerator, Coroutine
+from typing import Any, cast
 from unittest import mock
+from unittest.mock import AsyncMock
 
 import pytest
 from pytest_mock import MockerFixture
@@ -14,17 +16,18 @@ from pywebtransport.stream.manager import StreamType
 TEST_STREAM_ID: StreamId = 4
 
 
+@pytest.fixture
+def mock_session(mocker: MockerFixture) -> Any:
+    session = mocker.create_autospec("pywebtransport.session.WebTransportSession", instance=True)
+    session._create_stream_on_protocol = mocker.AsyncMock(return_value=TEST_STREAM_ID)
+    return session
+
+
 class TestStreamManager:
     @pytest.fixture
     async def manager(self, mock_session: Any) -> AsyncGenerator[StreamManager, None]:
         async with StreamManager(mock_session) as mgr:
             yield mgr
-
-    @pytest.fixture
-    def mock_session(self, mocker: MockerFixture) -> Any:
-        session = mocker.create_autospec("pywebtransport.session.WebTransportSession", instance=True)
-        session._create_stream_on_protocol = mocker.AsyncMock(return_value=TEST_STREAM_ID)
-        return session
 
     @pytest.fixture
     def mock_stream(self, mocker: MockerFixture) -> Any:
@@ -59,8 +62,8 @@ class TestStreamManager:
     @pytest.mark.asyncio
     async def test_async_iterator(self, manager: StreamManager, mock_stream: Any) -> None:
         await manager.add_stream(mock_stream)
-
         streams_iterated: list[StreamType] = []
+
         async for stream in manager:
             streams_iterated.append(stream)
 
@@ -76,6 +79,57 @@ class TestStreamManager:
             start_mock.assert_called_once_with()
 
         shutdown_mock.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_shutdown(self, manager: StreamManager, mocker: MockerFixture) -> None:
+        close_all_mock = mocker.patch.object(manager, "close_all_streams", new_callable=mocker.AsyncMock)
+        assert manager._cleanup_task is not None
+        the_task = manager._cleanup_task
+
+        await manager.shutdown()
+
+        assert the_task.done()
+        close_all_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_no_task(self, mock_session: Any, mocker: MockerFixture) -> None:
+        close_all_mock = mocker.patch.object(StreamManager, "close_all_streams", new_callable=mocker.AsyncMock)
+        manager = StreamManager(mock_session)
+
+        await manager.__aenter__()
+        assert manager._cleanup_task is not None
+        manager._cleanup_task.cancel()
+        await asyncio.sleep(0)
+        await manager.shutdown()
+
+        close_all_mock.assert_awaited_once()
+        await manager.__aexit__(None, None, None)
+
+    @pytest.mark.asyncio
+    async def test_close_all_streams(self, manager: StreamManager, mock_stream: Any) -> None:
+        await manager.add_stream(mock_stream)
+
+        await manager.close_all_streams()
+
+        cast(mock.AsyncMock, mock_stream.close).assert_awaited_once()
+        assert len(manager) == 0
+
+    @pytest.mark.asyncio
+    async def test_close_all_streams_with_errors(self, manager: StreamManager, mock_stream: Any) -> None:
+        cast(AsyncMock, mock_stream.close).side_effect = ValueError("Close failed")
+        await manager.add_stream(mock_stream)
+
+        with pytest.raises(ExceptionGroup) as excinfo:
+            await manager.close_all_streams()
+
+        assert len(excinfo.value.exceptions) == 1
+        assert isinstance(excinfo.value.exceptions[0], ValueError)
+
+    @pytest.mark.asyncio
+    async def test_close_all_streams_empty(self, manager: StreamManager) -> None:
+        await manager.close_all_streams()
+
+        assert len(manager) == 0
 
     @pytest.mark.asyncio
     async def test_create_bidirectional_stream(
@@ -106,7 +160,6 @@ class TestStreamManager:
     @pytest.mark.asyncio
     async def test_add_and_remove_stream(self, manager: StreamManager, mock_stream: Any) -> None:
         await manager.add_stream(mock_stream)
-
         stats = await manager.get_stats()
         assert stats["total_created"] == 1
         assert stats["current_count"] == 1
@@ -117,7 +170,6 @@ class TestStreamManager:
 
         removed_stream = await manager.remove_stream(mock_stream.stream_id)
         assert removed_stream is mock_stream
-
         stats_after_remove = await manager.get_stats()
         assert stats_after_remove["total_closed"] == 1
         assert stats_after_remove["current_count"] == 0
@@ -132,27 +184,12 @@ class TestStreamManager:
         assert streams[0] is mock_stream
 
     @pytest.mark.asyncio
-    async def test_get_stats(self, manager: StreamManager, mock_stream: Any) -> None:
-        await manager.add_stream(mock_stream)
+    async def test_remove_nonexistent_stream(self, manager: StreamManager) -> None:
+        removed_stream = await manager.remove_stream(999)
 
+        assert removed_stream is None
         stats = await manager.get_stats()
-
-        assert stats["active_streams"] == 1
-        assert stats["max_streams"] == 100
-        assert stats["states"] == {"open": 1}
-        assert stats["directions"] == {"bidirectional": 1}
-
-    @pytest.mark.asyncio
-    async def test_create_stream_releases_semaphore_on_error(self, mock_session: Any) -> None:
-        mock_session._create_stream_on_protocol.side_effect = RuntimeError("Protocol error")
-
-        async with StreamManager(mock_session, max_streams=1) as manager:
-            with pytest.raises(RuntimeError, match="Protocol error"):
-                await manager.create_bidirectional_stream()
-
-            assert manager._creation_semaphore is not None
-            assert not manager._creation_semaphore.locked()
-            assert manager._creation_semaphore._value == 1
+        assert stats["total_closed"] == 0
 
     @pytest.mark.asyncio
     async def test_concurrency_limit(self, mock_session: Any) -> None:
@@ -173,12 +210,27 @@ class TestStreamManager:
             assert stream2 is not None
 
     @pytest.mark.asyncio
-    async def test_remove_nonexistent_stream(self, manager: StreamManager) -> None:
-        removed_stream = await manager.remove_stream(999)
+    async def test_create_stream_releases_semaphore_on_error(self, mock_session: Any) -> None:
+        mock_session._create_stream_on_protocol.side_effect = RuntimeError("Protocol error")
 
-        assert removed_stream is None
+        async with StreamManager(mock_session, max_streams=1) as manager:
+            with pytest.raises(RuntimeError, match="Protocol error"):
+                await manager.create_bidirectional_stream()
+
+            assert manager._creation_semaphore is not None
+            assert not manager._creation_semaphore.locked()
+            assert manager._creation_semaphore._value == 1
+
+    @pytest.mark.asyncio
+    async def test_get_stats(self, manager: StreamManager, mock_stream: Any) -> None:
+        await manager.add_stream(mock_stream)
+
         stats = await manager.get_stats()
-        assert stats["total_closed"] == 0
+
+        assert stats["active_streams"] == 1
+        assert stats["max_streams"] == 100
+        assert stats["states"] == {"open": 1}
+        assert stats["directions"] == {"bidirectional": 1}
 
     @pytest.mark.asyncio
     async def test_cleanup_closed_streams(self, manager: StreamManager, mocker: MockerFixture) -> None:
@@ -237,43 +289,49 @@ class TestStreamManager:
         assert mock_logger_error.call_count > 0
         mock_logger_error.assert_any_call("Stream cleanup cycle failed: Cleanup failed", exc_info=mock.ANY)
 
-    @pytest.mark.asyncio
-    async def test_shutdown(self, manager: StreamManager, mocker: MockerFixture) -> None:
-        close_all_mock = mocker.patch.object(manager, "close_all_streams", new_callable=mocker.AsyncMock)
-        assert manager._cleanup_task is not None
-        the_task = manager._cleanup_task
-
-        await manager.shutdown()
-
-        assert the_task.done()
-        close_all_mock.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_shutdown_no_task(self, mock_session: Any, mocker: MockerFixture) -> None:
-        close_all_mock = mocker.patch.object(StreamManager, "close_all_streams", new_callable=mocker.AsyncMock)
+    def test_start_cleanup_task_no_event_loop(self, mock_session: Any, mocker: MockerFixture) -> None:
         manager = StreamManager(mock_session)
 
-        await manager.__aenter__()
-        assert manager._cleanup_task is not None
-        manager._cleanup_task.cancel()
-        await asyncio.sleep(0)
+        def mock_create_task(coro: Coroutine[Any, Any, None], *args: Any, **kwargs: Any) -> None:
+            coro.close()
+            raise RuntimeError("No event loop")
 
-        await manager.shutdown()
+        mocker.patch("asyncio.create_task", side_effect=mock_create_task)
+        mock_logger_warning = mocker.patch("pywebtransport.stream.manager.logger.warning")
 
-        close_all_mock.assert_awaited_once()
-        await manager.__aexit__(None, None, None)
+        manager._start_cleanup_task()
 
-    @pytest.mark.asyncio
-    async def test_close_all_streams(self, manager: StreamManager, mock_stream: Any) -> None:
-        await manager.add_stream(mock_stream)
+        mock_logger_warning.assert_called_once_with("Could not start cleanup task: no running event loop.")
 
-        await manager.close_all_streams()
 
-        cast(mock.AsyncMock, mock_stream.close).assert_awaited_once()
-        assert len(manager) == 0
+class TestStreamManagerUninitialized:
+    @pytest.fixture
+    def uninitialized_manager(self, mock_session: Any) -> StreamManager:
+        return StreamManager(mock_session)
 
     @pytest.mark.asyncio
-    async def test_close_all_streams_empty(self, manager: StreamManager) -> None:
-        await manager.close_all_streams()
+    @pytest.mark.parametrize(
+        "method_name, args",
+        [
+            ("add_stream", (mock.Mock(),)),
+            ("close_all_streams", ()),
+            ("get_stream", ("id-1",)),
+            ("remove_stream", ("id-1",)),
+            ("cleanup_closed_streams", ()),
+            ("get_all_streams", ()),
+            ("get_stats", ()),
+            ("create_bidirectional_stream", ()),
+            ("create_unidirectional_stream", ()),
+        ],
+    )
+    async def test_async_methods_raise_before_activated(
+        self, uninitialized_manager: StreamManager, method_name: str, args: tuple
+    ) -> None:
+        with pytest.raises(StreamError, match="StreamManager has not been activated"):
+            await getattr(uninitialized_manager, method_name)(*args)
 
-        assert len(manager) == 0
+    @pytest.mark.asyncio
+    async def test_aiter_raises_before_activated(self, uninitialized_manager: StreamManager) -> None:
+        with pytest.raises(StreamError, match="StreamManager has not been activated"):
+            async for _ in uninitialized_manager:
+                pass

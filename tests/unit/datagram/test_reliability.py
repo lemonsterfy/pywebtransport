@@ -1,11 +1,14 @@
 """Unit tests for the pywebtransport.datagram.reliability module."""
 
 import asyncio
+import logging
 import struct
 from collections import deque
-from typing import Any, AsyncGenerator, Coroutine, NoReturn
+from collections.abc import AsyncGenerator, Coroutine
+from typing import Any, NoReturn
 
 import pytest
+from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import DatagramError, Event, EventType, TimeoutError, WebTransportDatagramDuplexStream
@@ -132,6 +135,13 @@ class TestDatagramReliabilityLayer:
             await reliability_layer.send(b"test")
 
     @pytest.mark.asyncio
+    async def test_send_before_activation_raises_error(self, mock_stream: Any) -> None:
+        layer = DatagramReliabilityLayer(mock_stream)
+
+        with pytest.raises(DatagramError, match="has not been activated"):
+            await layer.send(b"test")
+
+    @pytest.mark.asyncio
     async def test_receive_timeout(self, mocker: MockerFixture, reliability_layer: DatagramReliabilityLayer) -> None:
         async def mock_wait_for(coro: Coroutine[Any, Any, None], timeout: float) -> NoReturn:
             coro.close()
@@ -148,6 +158,13 @@ class TestDatagramReliabilityLayer:
 
         with pytest.raises(DatagramError, match="Reliability layer is closed"):
             await reliability_layer.receive()
+
+    @pytest.mark.asyncio
+    async def test_receive_before_activation_raises_error(self, mock_stream: Any) -> None:
+        layer = DatagramReliabilityLayer(mock_stream)
+
+        with pytest.raises(DatagramError, match="has not been activated"):
+            await layer.receive()
 
     def test_get_stream(self, mock_stream: Any, reliability_layer: DatagramReliabilityLayer) -> None:
         assert reliability_layer._get_stream() is mock_stream
@@ -221,18 +238,16 @@ class TestDatagramReliabilityLayer:
         mock_handle_ack = mocker.patch.object(reliability_layer, "_handle_ack_message", new_callable=mocker.AsyncMock)
         mock_handle_data = mocker.patch.object(reliability_layer, "_handle_data_message", new_callable=mocker.AsyncMock)
         ack_payload = b"123"
-        ack_event = Event(type=EventType.DATAGRAM_RECEIVED, data={"type": "ACK", "data": b"\x03ACK" + ack_payload})
+        ack_event = Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"\x03ACK" + ack_payload})
 
         await reliability_layer._on_datagram_received(ack_event)
-
         mock_handle_ack.assert_awaited_once_with(ack_payload)
         mock_handle_data.assert_not_called()
+
         mock_handle_ack.reset_mock()
         data_payload = struct.pack("!I", 456) + b"payload"
-        data_event = Event(type=EventType.DATAGRAM_RECEIVED, data={"type": "DATA", "data": b"\x04DATA" + data_payload})
-
+        data_event = Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"\x04DATA" + data_payload})
         await reliability_layer._on_datagram_received(data_event)
-
         mock_handle_data.assert_awaited_once_with(data_payload)
         mock_handle_ack.assert_not_called()
 
@@ -263,6 +278,16 @@ class TestDatagramReliabilityLayer:
         await reliability_layer._on_datagram_received(malformed_event)
 
         mock_handle_ack.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_on_datagram_received_general_exception(
+        self, mocker: MockerFixture, reliability_layer: DatagramReliabilityLayer
+    ) -> None:
+        mocker.patch.object(reliability_layer, "_handle_ack_message", side_effect=Exception("test error"))
+        ack_payload = b"123"
+        ack_event = Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"\x03ACK" + ack_payload})
+
+        await reliability_layer._on_datagram_received(ack_event)
 
     @pytest.mark.asyncio
     async def test_handle_data_message_new(self, mock_stream: Any, reliability_layer: DatagramReliabilityLayer) -> None:
@@ -410,8 +435,28 @@ class TestDatagramReliabilityLayer:
 
     @pytest.mark.asyncio
     async def test_retry_loop_unexpected_exception(
-        self, mocker: MockerFixture, reliability_layer: DatagramReliabilityLayer
+        self, mocker: MockerFixture, reliability_layer: DatagramReliabilityLayer, caplog: LogCaptureFixture
     ) -> None:
         mocker.patch("asyncio.sleep", side_effect=ValueError("Unexpected error"))
 
+        with caplog.at_level(logging.ERROR):
+            await reliability_layer._retry_loop()
+            assert "Reliability retry loop crashed: Unexpected error" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_retry_loop_taskgroup_exception(
+        self, mocker: MockerFixture, mock_stream: Any, reliability_layer: DatagramReliabilityLayer
+    ) -> None:
+        mocker.patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError])
+        mock_time = mocker.patch("pywebtransport.datagram.reliability.get_timestamp")
+        seq = TEST_START_SEQ
+        datagram = _ReliableDatagram(data=b"retry-data", sequence=seq)
+        assert reliability_layer._lock is not None
+        async with reliability_layer._lock:
+            reliability_layer._pending_acks[seq] = datagram
+        mock_time.return_value = datagram.timestamp + reliability_layer._ack_timeout + 0.1
+        mock_stream.send_structured.side_effect = Exception("TaskGroup error")
+
         await reliability_layer._retry_loop()
+
+        assert reliability_layer._pending_acks[seq].retry_count == 1

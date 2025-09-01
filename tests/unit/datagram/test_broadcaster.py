@@ -1,14 +1,15 @@
 """Unit tests for the pywebtransport.datagram.broadcaster module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, cast
+from collections.abc import AsyncGenerator
+from typing import Any, cast
 from unittest import mock
 
 import pytest
 from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
-from pywebtransport import ConnectionError, WebTransportDatagramDuplexStream
+from pywebtransport import ConnectionError, DatagramError, WebTransportDatagramDuplexStream
 from pywebtransport.datagram import DatagramBroadcaster
 
 
@@ -64,12 +65,6 @@ class TestDatagramBroadcaster:
         assert await broadcaster.get_stream_count() == 0
 
     @pytest.mark.asyncio
-    async def test_broadcast_empty(self, broadcaster: DatagramBroadcaster) -> None:
-        sent_count = await broadcaster.broadcast(b"data")
-
-        assert sent_count == 0
-
-    @pytest.mark.asyncio
     async def test_broadcast_success_all(
         self, broadcaster: DatagramBroadcaster, mock_stream: Any, mocker: MockerFixture
     ) -> None:
@@ -86,6 +81,12 @@ class TestDatagramBroadcaster:
         cast(mock.AsyncMock, stream1.send).assert_awaited_once_with(b"ping", priority=1, ttl=10.0)
         cast(mock.AsyncMock, stream2.send).assert_awaited_once_with(b"ping", priority=1, ttl=10.0)
         assert await broadcaster.get_stream_count() == 2
+
+    @pytest.mark.asyncio
+    async def test_broadcast_empty(self, broadcaster: DatagramBroadcaster) -> None:
+        sent_count = await broadcaster.broadcast(b"data")
+
+        assert sent_count == 0
 
     @pytest.mark.asyncio
     async def test_broadcast_with_pre_closed_stream(
@@ -168,3 +169,26 @@ class TestDatagramBroadcaster:
 
         assert sent_count == 0
         assert await broadcaster.get_stream_count() == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method_name, args",
+        [
+            ("add_stream", [mock.MagicMock()]),
+            ("remove_stream", [mock.MagicMock()]),
+            ("broadcast", [b"data"]),
+            ("get_stream_count", []),
+        ],
+    )
+    async def test_methods_on_uninitialized_raises_error(self, method_name: str, args: list[Any]) -> None:
+        broadcaster = DatagramBroadcaster.create()
+        method = getattr(broadcaster, method_name)
+
+        with pytest.raises(DatagramError, match="has not been activated"):
+            await method(*args)
+
+    @pytest.mark.asyncio
+    async def test_aexit_uninitialized(self) -> None:
+        broadcaster = DatagramBroadcaster.create()
+
+        await broadcaster.__aexit__(None, None, None)

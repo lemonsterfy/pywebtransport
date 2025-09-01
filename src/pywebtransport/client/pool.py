@@ -34,18 +34,18 @@ class ClientPool:
 
     @classmethod
     def create(cls, *, num_clients: int = 10, base_config: ClientConfig | None = None) -> Self:
-        """Factory method to create a client pool with a specified number of clients."""
+        """Create a client pool with a specified number of clients."""
         configs = [base_config for _ in range(num_clients)]
         return cls(configs=configs)
 
     async def __aenter__(self) -> Self:
         """Enter the async context and activate all clients in the pool."""
-        self._lock = asyncio.Lock()
-
         if self._clients:
             return self
 
+        self._lock = asyncio.Lock()
         created_clients = [WebTransportClient.create(config=config) for config in self._configs]
+
         try:
             async with asyncio.TaskGroup() as tg:
                 for client in created_clients:
@@ -59,7 +59,7 @@ class ClientPool:
                         cleanup_tg.create_task(client.close())
             except* Exception as cleanup_eg:
                 logger.error(f"Errors during client pool startup cleanup: {cleanup_eg.exceptions}")
-            raise eg.exceptions[0]
+            raise eg
 
         logger.info(f"Client pool started with {len(self._clients)} clients.")
         return self
@@ -75,10 +75,15 @@ class ClientPool:
 
     async def close_all(self) -> None:
         """Close all clients in the pool concurrently."""
-        logger.info(f"Closing all {len(self._clients)} clients in the pool.")
+        if self._lock is None:
+            raise ClientError(
+                "ClientPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
         if not self._clients:
             return
 
+        logger.info(f"Closing all {len(self._clients)} clients in the pool.")
         try:
             async with asyncio.TaskGroup() as tg:
                 for client in self._clients:
@@ -90,7 +95,7 @@ class ClientPool:
         logger.info("Client pool closed.")
 
     async def connect_all(self, url: str) -> list[WebTransportSession]:
-        """Instruct all clients in the pool to connect to a single URL concurrently."""
+        """Connect all clients in the pool to a URL concurrently."""
         if self._lock is None:
             raise ClientError(
                 "ClientPool has not been activated. It must be used as an "

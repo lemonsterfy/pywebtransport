@@ -17,7 +17,7 @@ cache:
 
 lint:
   stage: lint
-  image: python:3.11-slim
+  image: python:3.12-slim
   before_script:
     - python -m pip install --upgrade pip
     - pip install -r dev-requirements.txt
@@ -48,7 +48,7 @@ test:
 
 build:
   stage: build
-  image: python:3.11-slim
+  image: python:3.12-slim
   before_script:
     - python -m pip install --upgrade pip
     - pip install hatch
@@ -65,7 +65,7 @@ build:
 
 deploy:
   stage: deploy
-  image: python:3.11-slim
+  image: python:3.12-slim
   variables:
     GIT_DEPTH: 0
   dependencies:
@@ -91,8 +91,8 @@ deploy:
     - git tag "v$VERSION"
     - git push origin "v$VERSION"
     - git remote add github "https://$GITHUB_TOKEN@github.com/lemonsterfy/pywebtransport.git"
-    - git checkout $CI_COMMIT_BRANCH
-    - git push github $CI_COMMIT_BRANCH --tags || echo "GitHub sync failed (release still successful)"
+    - git push github $CI_COMMIT_SHA:refs/heads/$CI_COMMIT_BRANCH
+    - git push github --tags
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   environment:

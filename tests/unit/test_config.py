@@ -1,7 +1,6 @@
 """Unit tests for the pywebtransport.config module."""
 
 import ssl
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,13 +13,17 @@ from pywebtransport.config import ConfigBuilder, _validate_port, _validate_timeo
 
 @pytest.fixture
 def mock_path_exists(mocker: MockerFixture) -> Any:
-    return mocker.patch.object(Path, "exists", return_value=True)
+    return mocker.patch("pywebtransport.config.Path.exists", return_value=True)
 
 
 class TestConfigHelpers:
     @pytest.mark.parametrize("value", [5, 10.5, None])
     def test_validate_timeout_valid(self, value: Any) -> None:
         _validate_timeout(value)
+
+    @pytest.mark.parametrize("value", [1, 80, 4433, 65535])
+    def test_validate_port_valid(self, value: int) -> None:
+        _validate_port(value)
 
     @pytest.mark.parametrize("value", [0, -1, -10.5])
     def test_validate_timeout_invalid_value(self, value: Any) -> None:
@@ -31,10 +34,6 @@ class TestConfigHelpers:
         with pytest.raises(TypeError, match="must be a number or None"):
             invalid_value: Any = "abc"
             _validate_timeout(invalid_value)
-
-    @pytest.mark.parametrize("value", [1, 80, 4433, 65535])
-    def test_validate_port_valid(self, value: int) -> None:
-        _validate_port(value)
 
     @pytest.mark.parametrize("value", [0, 65536, -1, "80", 80.5])
     def test_validate_port_invalid(self, value: Any) -> None:
@@ -50,6 +49,12 @@ class TestClientConfig:
         assert config.verify_mode == ssl.CERT_REQUIRED
         assert config.user_agent == f"pywebtransport/{real_version}"
         assert config.headers["user-agent"] == f"pywebtransport/{real_version}"
+
+    def test_post_init_preserves_user_agent(self) -> None:
+        config = ClientConfig(headers={"user-agent": "custom-agent/1.0"})
+
+        assert config.user_agent == f"pywebtransport/{real_version}"
+        assert config.headers["user-agent"] == "custom-agent/1.0"
 
     def test_post_init_normalizes_headers(self, mocker: MockerFixture) -> None:
         mock_normalize = mocker.patch("pywebtransport.config.normalize_headers", return_value={})
@@ -109,14 +114,13 @@ class TestClientConfig:
         mocker.stopall()
 
         merged_config = config1.merge(config2)
+        merged_from_dict = config1.merge({"write_timeout": 35})
+
         assert merged_config.read_timeout == 20
         assert merged_config.write_timeout == 25
         assert merged_config.max_retries == 1
-
-        merged_from_dict = config1.merge({"write_timeout": 35})
         assert merged_from_dict.read_timeout == 10
         assert merged_from_dict.write_timeout == 35
-
         with pytest.raises(TypeError):
             invalid_value: Any = 123
             config1.merge(invalid_value)
@@ -143,6 +147,8 @@ class TestClientConfig:
             ({"certfile": "a.pem", "keyfile": None}, "both must be provided together"),
             ({"http_version": "1.1"}, "must be '2' or '3'"),
             ({"alpn_protocols": []}, "cannot be empty"),
+            ({"max_datagram_size": 0}, "must be 1-65535"),
+            ({"max_datagram_size": 65536}, "must be 1-65535"),
         ],
     )
     def test_validation_failures(self, invalid_attrs: dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
@@ -162,11 +168,23 @@ class TestClientConfig:
         with pytest.raises(ConfigurationError, match=error_match):
             ClientConfig(**invalid_attrs)
 
-    def test_validation_cert_not_found(self, mock_path_exists: Any) -> None:
-        mock_path_exists.return_value = False
+    def test_validation_certfile_not_found(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.config.Path.exists", return_value=False)
 
-        with pytest.raises(CertificateError, match="Certificate file not found"):
-            ClientConfig(certfile="nonexistent.pem", keyfile="nonexistent.key")
+        with pytest.raises(CertificateError, match="not found"):
+            ClientConfig(certfile="cert.pem", keyfile="key.pem")
+
+    def test_validation_keyfile_not_found(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.config.Path.exists", side_effect=[True, False])
+
+        with pytest.raises(CertificateError, match="not found"):
+            ClientConfig(certfile="cert.pem", keyfile="key.pem")
+
+    def test_validation_cacerts_not_found(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.config.Path.exists", return_value=False)
+
+        with pytest.raises(CertificateError, match="not found"):
+            ClientConfig(ca_certs="ca.pem")
 
 
 class TestServerConfig:
@@ -197,6 +215,12 @@ class TestServerConfig:
         assert config.certfile == ""
         assert config.keyfile == ""
 
+    def test_create_for_development_factory_one_cert(self, mock_path_exists: Any) -> None:
+        config = ServerConfig.create_for_development(certfile="c.pem")
+
+        assert config.certfile == ""
+        assert config.keyfile == ""
+
     def test_create_for_production_factory(self, mock_path_exists: Any) -> None:
         config = ServerConfig.create_for_production(
             host="prodhost", port=443, certfile="c.pem", keyfile="k.pem", ca_certs="ca.pem"
@@ -211,7 +235,9 @@ class TestServerConfig:
     def test_get_bind_address(self) -> None:
         config = ServerConfig(bind_host="127.0.0.1", bind_port=8888)
 
-        assert config.get_bind_address() == ("127.0.0.1", 8888)
+        result = config.get_bind_address()
+
+        assert result == ("127.0.0.1", 8888)
 
     def test_merge_method(self) -> None:
         config1 = ServerConfig(max_connections=100)
@@ -221,6 +247,15 @@ class TestServerConfig:
 
         assert merged.max_connections == 200
         assert merged.backlog == 256
+        with pytest.raises(TypeError):
+            invalid_value: Any = 123
+            config1.merge(invalid_value)
+
+    def test_update_method(self) -> None:
+        config = ServerConfig()
+
+        with pytest.raises(ConfigurationError, match="unknown configuration key"):
+            config.update(unknown_key="value")
 
     def test_to_dict_method(self) -> None:
         config = ServerConfig(verify_mode=ssl.CERT_REQUIRED, reuse_port=False)
@@ -242,11 +277,36 @@ class TestServerConfig:
             ({"connection_keepalive_timeout": 0}, "invalid timeout value"),
             ({"certfile": "a.pem", "keyfile": ""}, "certfile and keyfile must be provided together"),
             ({"backlog": 0}, "must be positive"),
+            ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
+            ({"http_version": "1.1"}, "must be '2' or '3'"),
+            ({"alpn_protocols": []}, "cannot be empty"),
+            ({"stream_buffer_size": 0}, "must be positive"),
+            ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
+            ({"max_datagram_size": 0}, "must be 1-65535"),
+            ({"max_datagram_size": 65536}, "must be 1-65535"),
         ],
     )
     def test_validation_failures(self, invalid_attrs: dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
         with pytest.raises(ConfigurationError, match=error_match):
             ServerConfig(**invalid_attrs)
+
+    def test_validation_certfile_not_found(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.config.Path.exists", return_value=False)
+
+        with pytest.raises(CertificateError, match="not found"):
+            ServerConfig(certfile="cert.pem", keyfile="key.pem")
+
+    def test_validation_keyfile_not_found(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.config.Path.exists", side_effect=[True, False])
+
+        with pytest.raises(CertificateError, match="not found"):
+            ServerConfig(certfile="cert.pem", keyfile="key.pem")
+
+    def test_validation_cacerts_not_found(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.config.Path.exists", return_value=False)
+
+        with pytest.raises(CertificateError, match="not found"):
+            ServerConfig(certfile="cert.pem", keyfile="key.pem", ca_certs="ca.pem")
 
 
 class TestConfigBuilder:
@@ -255,8 +315,13 @@ class TestConfigBuilder:
 
         config = (
             builder.debug(log_level="INFO")
-            .timeout(connect=15, read=45)
-            .security(certfile="c.pem", keyfile="k.pem")
+            .timeout(connect=15, read=45, write=30)
+            .security(
+                certfile="c.pem",
+                keyfile="k.pem",
+                ca_certs="ca.pem",
+                verify_mode=ssl.CERT_OPTIONAL,
+            )
             .performance(max_streams=50, buffer_size=12345)
             .build()
         )
@@ -264,7 +329,11 @@ class TestConfigBuilder:
         assert isinstance(config, ClientConfig)
         assert config.debug is True
         assert config.connect_timeout == 15
+        assert config.read_timeout == 45
+        assert config.write_timeout == 30
         assert config.max_streams == 50
+        assert config.ca_certs == "ca.pem"
+        assert config.verify_mode == ssl.CERT_OPTIONAL
 
     def test_server_build_flow(self, mock_path_exists: Any) -> None:
         builder = ConfigBuilder(config_type="server")
@@ -285,6 +354,13 @@ class TestConfigBuilder:
 
         with pytest.raises(ConfigurationError, match="bind\\(\\) can only be used with server config"):
             builder.bind("localhost", 8080)
+
+    def test_client_builder_ignores_server_options(self) -> None:
+        builder = ConfigBuilder(config_type="client")
+
+        builder.performance(max_connections=999)
+
+        assert "max_connections" not in builder._config_dict
 
     def test_builder_unknown_type(self) -> None:
         builder = ConfigBuilder(config_type="unknown")

@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import asyncio
 import weakref
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, AsyncIterator, Self, Type
+from typing import Any, Self, Type
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection import WebTransportConnection

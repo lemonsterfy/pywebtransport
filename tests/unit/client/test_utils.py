@@ -1,6 +1,7 @@
 """Unit tests for the pywebtransport.client.utils module."""
 
-from typing import Any, Awaitable, NoReturn, cast
+from collections.abc import Awaitable
+from typing import Any, NoReturn, cast
 
 import pytest
 from pytest_mock import MockerFixture

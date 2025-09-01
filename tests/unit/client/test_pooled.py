@@ -1,22 +1,18 @@
 """Unit tests for the pywebtransport.client.pooled module."""
 
 import asyncio
-from asyncio import Task
-from typing import Any, AsyncGenerator, Coroutine, cast
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, ClientError, WebTransportClient, WebTransportSession
+from pywebtransport import ClientConfig, ClientError, ConnectionError, WebTransportClient, WebTransportSession
 from pywebtransport.client import PooledClient
 
 
 class TestPooledClient:
-    @pytest.fixture
-    def mock_client_config(self, mocker: MockerFixture) -> Any:
-        return mocker.MagicMock(spec=ClientConfig)
-
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
         session = mocker.create_autospec(WebTransportSession, instance=True)
@@ -34,12 +30,6 @@ class TestPooledClient:
         client.connect = mocker.AsyncMock()
         client.close = mocker.AsyncMock()
         return client
-
-    @pytest.fixture
-    async def pool(self) -> AsyncGenerator[PooledClient, None]:
-        pool_instance = PooledClient()
-        async with pool_instance as activated_pool:
-            yield activated_pool
 
     @pytest.fixture(autouse=True)
     def setup_common_mocks(self, mocker: MockerFixture, mock_underlying_client: Any) -> None:
@@ -60,155 +50,198 @@ class TestPooledClient:
 
         mock_init.assert_called_once_with(config=mock_config, pool_size=5, cleanup_interval=30.0)
 
+    @pytest.mark.parametrize("invalid_size", [0, -1])
+    def test_init_with_invalid_pool_size(self, invalid_size: int) -> None:
+        with pytest.raises(ValueError, match="pool_size must be a positive integer"):
+            PooledClient(pool_size=invalid_size)
+
     @pytest.mark.asyncio
     async def test_aenter_and_aexit(self, mocker: MockerFixture, mock_underlying_client: Any) -> None:
         mock_start_cleanup = mocker.patch("pywebtransport.client.pooled.PooledClient._start_cleanup_task")
+        completed_task = asyncio.create_task(asyncio.sleep(0))
+        await asyncio.sleep(0)
 
         async with PooledClient() as pool:
+            pool._cleanup_task = completed_task
             mock_underlying_client.__aenter__.assert_awaited_once()
             mock_start_cleanup.assert_called_once()
-            assert pool._cleanup_task is None
 
-        mock_underlying_client.close.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_close_with_sessions(self, pool: PooledClient, mocker: MockerFixture, mock_session: Any) -> None:
-        pool._pools["key1"] = [mock_session, mock_session]
-        pool._pools["key2"] = [mock_session]
-        mock_underlying_client = pool._client
-
-        await pool.close()
-
-        cast(AsyncMock, mock_session.close).assert_awaited()
-        assert cast(AsyncMock, mock_session.close).await_count == 3
+        assert completed_task.cancelled()
         cast(AsyncMock, mock_underlying_client.close).assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_close_without_starting(self, mock_underlying_client: Any) -> None:
-        pool = PooledClient()
-        with pytest.raises(ClientError, match="PooledClient has not been activated"):
+    async def test_close_with_sessions_and_failures(
+        self, mocker: MockerFixture, mock_session: Any, caplog: LogCaptureFixture
+    ) -> None:
+        async with PooledClient() as pool:
+            failing_session = mocker.create_autospec(WebTransportSession, instance=True)
+            failing_session.close.side_effect = IOError("Close failed")
+            pool._pools["key1"] = [mock_session]
+            pool._pools["key2"] = [failing_session]
+            mock_underlying_client = pool._client
+
             await pool.close()
 
-    @pytest.mark.asyncio
-    async def test_get_session_from_pool(self, pool: PooledClient, mock_session: Any) -> None:
-        pool._pools["example.com:443/"] = [mock_session]
-
-        session = await pool.get_session("https://example.com")
-
-        assert session is mock_session
-        assert not pool._pools["example.com:443/"]
+            cast(AsyncMock, mock_session.close).assert_awaited_once()
+            failing_session.close.assert_awaited_once()
+            cast(AsyncMock, mock_underlying_client.close).assert_awaited_once()
+            assert "Errors occurred while closing pooled sessions" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_get_session_from_empty_pool(
-        self, pool: PooledClient, mock_underlying_client: Any, mock_session: Any
+    async def test_get_session_from_pool(self, mock_underlying_client: Any, mock_session: Any) -> None:
+        async with PooledClient() as pool:
+            pool._pools["example.com:443/"] = [mock_session]
+
+            session = await pool.get_session("https://example.com")
+
+            assert session is mock_session
+            assert not pool._pools["example.com:443/"]
+            cast(AsyncMock, mock_underlying_client.connect).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_return_session(self, mock_session: Any) -> None:
+        async with PooledClient() as pool:
+            await pool.return_session(mock_session)
+
+            assert pool._pools["example.com:443/"] == [mock_session]
+            cast(AsyncMock, mock_session.close).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_session_discards_stale_and_creates_new(
+        self, mock_underlying_client: Any, mock_session: Any, mocker: MockerFixture
     ) -> None:
-        mock_underlying_client.connect.return_value = mock_session
+        async with PooledClient() as pool:
+            stale_session = mocker.create_autospec(WebTransportSession, instance=True, is_ready=False)
+            mock_underlying_client.connect.return_value = mock_session
+            pool._pools["example.com:443/"] = [stale_session]
+            pool._total_sessions["example.com:443/"] = 1
 
-        session = await pool.get_session("https://example.com")
+            session = await pool.get_session("https://example.com")
 
-        assert session is mock_session
-        mock_underlying_client.connect.assert_awaited_once_with("https://example.com")
-
-    @pytest.mark.asyncio
-    async def test_get_session_with_stale_session_in_pool(
-        self, pool: PooledClient, mock_underlying_client: Any, mock_session: Any, mocker: MockerFixture
-    ) -> None:
-        stale_session = mocker.MagicMock(spec=WebTransportSession, is_ready=False)
-        mock_underlying_client.connect.return_value = mock_session
-        pool._pools["example.com:443/"] = [stale_session]
-
-        session = await pool.get_session("https://example.com")
-
-        assert session is mock_session
-        assert not pool._pools["example.com:443/"]
-        mock_underlying_client.connect.assert_awaited_once()
+            assert session is mock_session
+            assert not pool._pools["example.com:443/"]
+            assert pool._total_sessions["example.com:443/"] == 1
+            cast(AsyncMock, mock_underlying_client.connect).assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_return_session_to_pool(self, pool: PooledClient, mock_session: Any) -> None:
-        await pool.return_session(mock_session)
+    async def test_get_session_creation_failure_decrements_count(self, mock_underlying_client: Any) -> None:
+        mock_underlying_client.connect.side_effect = ConnectionError("Failed")
 
-        assert pool._pools["example.com:443/"] == [mock_session]
-        cast(AsyncMock, mock_session.close).assert_not_awaited()
+        async with PooledClient() as pool:
+            pool_key = "example.com:443/"
+
+            with pytest.raises(ConnectionError):
+                await pool.get_session("https://example.com")
+
+            assert pool._total_sessions[pool_key] == 0
 
     @pytest.mark.asyncio
-    async def test_return_session_to_full_pool(self, mock_session: Any, mocker: MockerFixture) -> None:
+    async def test_return_session_to_full_pool_closes_it(self, mock_session: Any, mocker: MockerFixture) -> None:
         async with PooledClient(pool_size=1) as pool:
-            session_in_pool = mocker.create_autospec(WebTransportSession, instance=True)
-            session_in_pool.close = mocker.AsyncMock()
-            pool._pools["example.com:443/"] = [session_in_pool]
+            pool._pools["example.com:443/"].append(mock_session)
+            pool._total_sessions["example.com:443/"] = 1
+            another_session = mocker.create_autospec(WebTransportSession, instance=True, is_ready=True)
+            another_session.connection = mocker.MagicMock()
+            another_session.connection.remote_address = ("example.com", 443)
+            another_session.path = "/"
+            another_session.close = mocker.AsyncMock()
+
+            await pool.return_session(another_session)
+
+            assert len(pool._pools["example.com:443/"]) == 1
+            another_session.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_return_stale_session_updates_count(self, mock_session: Any) -> None:
+        async with PooledClient() as pool:
+            pool_key = "example.com:443/"
+            pool._total_sessions[pool_key] = 1
+            mock_session.is_ready = False
 
             await pool.return_session(mock_session)
 
-            assert len(pool._pools["example.com:443/"]) == 1
+            assert not pool._pools.get(pool_key)
+            assert pool._total_sessions[pool_key] == 0
             cast(AsyncMock, mock_session.close).assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_return_stale_session(self, pool: PooledClient, mock_session: Any) -> None:
-        mock_session.is_ready = False
+    async def test_return_session_with_no_connection_closes_it(self, mock_session: Any) -> None:
+        async with PooledClient() as pool:
+            mock_session.connection = None
+            pool._total_sessions["unknown"] = 1
 
-        await pool.return_session(mock_session)
+            await pool.return_session(mock_session)
 
-        assert not pool._pools.get("example.com:443/")
-        cast(AsyncMock, mock_session.close).assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_return_session_with_no_pool_key(self, pool: PooledClient, mock_session: Any) -> None:
-        mock_session.connection = None
-
-        await pool.return_session(mock_session)
-
-        assert not pool._pools
-        cast(AsyncMock, mock_session.close).assert_awaited_once()
+            cast(AsyncMock, mock_session.close).assert_awaited_once()
+            assert not pool._pools
 
     @pytest.mark.asyncio
-    async def test_start_cleanup_task_idempotent(self, mocker: MockerFixture) -> None:
-        mock_task = mocker.create_autospec(asyncio.Task, instance=True)
-        mock_task.done.return_value = False
+    async def test_get_session_concurrent_requests_respects_pool_size(
+        self, mock_underlying_client: Any, mock_session: Any
+    ) -> None:
+        async with PooledClient(pool_size=1) as pool:
+            mock_underlying_client.connect.return_value = mock_session
+            task_a = asyncio.create_task(pool.get_session("https://example.com"))
+            await asyncio.sleep(0.01)
+            task_b = asyncio.create_task(pool.get_session("https://example.com"))
+            await asyncio.sleep(0.01)
 
-        def cleanup_side_effect(coro: Coroutine) -> asyncio.Task:
-            coro.close()
-            return mock_task
+            cast(AsyncMock, mock_underlying_client.connect).assert_awaited_once()
+            assert not task_b.done()
 
-        mock_create_task = mocker.patch("asyncio.create_task", side_effect=cleanup_side_effect)
-        pool = PooledClient()
+            session_a = await task_a
+            await pool.return_session(session_a)
+            session_b = await asyncio.wait_for(task_b, timeout=1.0)
 
-        pool._start_cleanup_task()
-        pool._start_cleanup_task()
-
-        mock_create_task.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_start_cleanup_task_after_done(self, mocker: MockerFixture) -> None:
-        mock_task = mocker.create_autospec(asyncio.Task, instance=True)
-
-        def cleanup_side_effect(coro: Coroutine) -> asyncio.Task:
-            coro.close()
-            return mock_task
-
-        mock_create_task = mocker.patch("asyncio.create_task", side_effect=cleanup_side_effect)
-        pool = PooledClient()
-        done_task: asyncio.Future[Any] = asyncio.Future()
-        done_task.set_result(None)
-        pool._cleanup_task = cast(Task, done_task)
-
-        pool._start_cleanup_task()
-
-        mock_create_task.assert_called_once()
+            assert session_b is mock_session
+            cast(AsyncMock, mock_underlying_client.connect).assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_periodic_cleanup(self, mocker: MockerFixture, mock_session: Any) -> None:
-        mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
-        mock_sleep.side_effect = [None, asyncio.CancelledError]
-        stale_session = mocker.create_autospec(WebTransportSession, instance=True)
-        stale_session.is_ready = False
+    async def test_periodic_cleanup_handles_all_cases(
+        self, mocker: MockerFixture, mock_session: Any, caplog: LogCaptureFixture
+    ) -> None:
+        mocker.patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError])
+        stale_session = mocker.create_autospec(WebTransportSession, instance=True, is_ready=False)
+        failing_stale_session = mocker.create_autospec(WebTransportSession, instance=True, is_ready=False)
+        pool_key1, pool_key2, pool_key3 = "key1", "key2_empty", "key3_failing"
 
         async with PooledClient(cleanup_interval=0.01) as pool:
-            pool._pools["example.com:443/"] = [mock_session, stale_session]
-            cleanup_task = pool._cleanup_task
-            assert cleanup_task is not None
+            pool._pools[pool_key1] = [mock_session, stale_session]
+            pool._total_sessions[pool_key1] = 2
+            pool._pools[pool_key2] = []
+            pool._total_sessions[pool_key2] = 0
+            pool._pools[pool_key3] = [failing_stale_session]
+            pool._total_sessions[pool_key3] = 1
 
             with pytest.raises(asyncio.CancelledError):
-                await cleanup_task
+                await pool._periodic_cleanup()
 
-            mock_sleep.assert_any_await(0.01)
-            assert pool._pools["example.com:443/"] == [mock_session]
+            assert pool._pools[pool_key1] == [mock_session]
+            assert pool._total_sessions[pool_key1] == 1
+            assert not pool._pools.get(pool_key2)
+            assert not pool._pools.get(pool_key3)
+            assert pool._total_sessions[pool_key3] == 0
+
+    def test_get_pool_key_with_invalid_url(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.client.pooled.parse_webtransport_url", side_effect=ValueError)
+        pool = PooledClient()
+        url = "invalid-url"
+
+        key = pool._get_pool_key(url)
+
+        assert key == url
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method_name", ["close", "get_session", "return_session"])
+    async def test_methods_raise_if_not_activated(self, method_name: str, mock_session: Any) -> None:
+        pool = PooledClient()
+        method = getattr(pool, method_name)
+        if method_name == "return_session":
+            args: tuple[Any, ...] = (mock_session,)
+        elif method_name == "close":
+            args = ()
+        else:
+            args = ("https://url",)
+
+        with pytest.raises(ClientError, match="PooledClient has not been activated"):
+            await method(*args)

@@ -1,7 +1,8 @@
 """Unit tests for the pywebtransport.connection.load_balancer module."""
 
 import asyncio
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from typing import Any
 
 import pytest
 from pytest_mock import MockerFixture
@@ -44,6 +45,11 @@ class TestConnectionLoadBalancer:
         assert all(key in lb._target_weights for key in [f"{h}:{p}" for h, p in targets])
         assert all(key in lb._target_latencies for key in [f"{h}:{p}" for h, p in targets])
 
+    def test_len_method(self, targets: list[tuple[str, int]]) -> None:
+        lb = ConnectionLoadBalancer(targets=targets)
+
+        assert len(lb) == len(targets)
+
     def test_initialization_empty_targets(self) -> None:
         with pytest.raises(ValueError, match="Targets list cannot be empty"):
             ConnectionLoadBalancer(targets=[])
@@ -72,6 +78,43 @@ class TestConnectionLoadBalancer:
             assert isinstance(lb, ConnectionLoadBalancer)
 
         shutdown_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown(self, lb: ConnectionLoadBalancer, mocker: MockerFixture) -> None:
+        close_all_mock = mocker.patch.object(lb, "close_all_connections", new_callable=mocker.AsyncMock)
+        assert lb._health_check_task is not None
+        task = lb._health_check_task
+
+        await lb.shutdown()
+
+        assert task.done()
+        close_all_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancellation(self, lb: ConnectionLoadBalancer, mocker: MockerFixture) -> None:
+        hanging_task = asyncio.create_task(asyncio.sleep(3600))
+        lb._health_check_task = hanging_task
+        close_all_mock = mocker.patch.object(lb, "close_all_connections", new_callable=mocker.AsyncMock)
+        shutdown_task = asyncio.create_task(lb.shutdown())
+        await asyncio.sleep(0)
+
+        shutdown_task.cancel()
+        await shutdown_task
+
+        close_all_mock.assert_awaited_once()
+        hanging_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await hanging_task
+
+    @pytest.mark.asyncio
+    async def test_close_all_connections_no_connections(
+        self, lb: ConnectionLoadBalancer, mocker: MockerFixture
+    ) -> None:
+        task_group_mock = mocker.patch("asyncio.TaskGroup")
+
+        await lb.close_all_connections()
+
+        task_group_mock.assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("strategy", ["round_robin", "weighted", "least_latency"])
@@ -113,6 +156,36 @@ class TestConnectionLoadBalancer:
         conn2 = await lb.get_connection(config=mock_client_config)
 
         assert conn1 is conn2
+        mock_create_client.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_connection_concurrent_waiter(
+        self, lb: ConnectionLoadBalancer, mock_client_config: Any, mocker: MockerFixture
+    ) -> None:
+        target = lb._targets[0]
+        mocker.patch.object(lb, "_get_next_target", new_callable=mocker.AsyncMock, return_value=target)
+        creation_started = asyncio.Event()
+        creation_finished = asyncio.Event()
+        mock_instance = mocker.create_autospec(WebTransportConnection, instance=True)
+
+        async def slow_create(*args: Any, **kwargs: Any) -> WebTransportConnection:
+            creation_started.set()
+            await creation_finished.wait()
+            return mock_instance
+
+        mock_create_client = mocker.patch(
+            "pywebtransport.connection.load_balancer.WebTransportConnection.create_client", side_effect=slow_create
+        )
+
+        task1 = asyncio.create_task(lb.get_connection(config=mock_client_config))
+        await creation_started.wait()
+        task2 = asyncio.create_task(lb.get_connection(config=mock_client_config))
+        await asyncio.sleep(0)
+        creation_finished.set()
+        results = await asyncio.gather(task1, task2)
+
+        assert results[0] is mock_instance
+        assert results[1] is mock_instance
         mock_create_client.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -206,18 +279,15 @@ class TestConnectionLoadBalancer:
             lb._target_latencies[lb._get_target_key(*lb._targets[0])] = 0.5
             lb._target_latencies[lb._get_target_key(*lb._targets[1])] = 0.1
             lb._target_latencies[lb._get_target_key(*lb._targets[2])] = 0.8
-
             host, port = await lb._get_next_target("least_latency")
-
             assert (host, port) == lb._targets[1]
         elif setup == "setup_zero_weights":
             for key in lb._target_weights:
                 lb._target_weights[key] = 0.0
             mock_choice = mocker.patch("random.choice", return_value=lb._targets[2])
-
-            await lb._get_next_target("weighted")
-
+            target = await lb._get_next_target("weighted")
             mock_choice.assert_called_once()
+            assert target == lb._targets[2]
         elif strategy == "invalid_strategy":
             with pytest.raises(ValueError, match="Unknown load balancing strategy"):
                 await lb._get_next_target("invalid_strategy")
@@ -273,17 +343,6 @@ class TestConnectionLoadBalancer:
         assert stats["available_targets"] == 2
 
     @pytest.mark.asyncio
-    async def test_shutdown(self, lb: ConnectionLoadBalancer, mocker: MockerFixture) -> None:
-        close_all_mock = mocker.patch.object(lb, "close_all_connections", new_callable=mocker.AsyncMock)
-        assert lb._health_check_task is not None
-        task = lb._health_check_task
-
-        await lb.shutdown()
-
-        assert task.done()
-        close_all_mock.assert_awaited_once()
-
-    @pytest.mark.asyncio
     async def test_start_health_check_task_already_running(
         self, targets: list[tuple[str, int]], mocker: MockerFixture
     ) -> None:
@@ -298,10 +357,13 @@ class TestConnectionLoadBalancer:
     def test_start_health_check_task_no_running_loop(
         self, targets: list[tuple[str, int]], mocker: MockerFixture
     ) -> None:
-        mocker.patch("asyncio.create_task", side_effect=RuntimeError)
+        def mock_create_task(coro: Coroutine[Any, Any, None]) -> None:
+            coro.close()
+            raise RuntimeError("no running loop")
+
+        mocker.patch("pywebtransport.connection.load_balancer.asyncio.create_task", side_effect=mock_create_task)
         logger_mock = mocker.patch("pywebtransport.connection.load_balancer.logger")
         lb = ConnectionLoadBalancer(targets=targets)
-        mocker.patch.object(lb, "_health_check_loop", new=lambda: None)
 
         lb._start_health_check_task()
 
@@ -364,8 +426,7 @@ class TestConnectionLoadBalancer:
         error = ValueError("Critical loop error")
         error_logged = asyncio.Event()
         mocker.patch(
-            "pywebtransport.connection.load_balancer.asyncio.sleep",
-            side_effect=[error, asyncio.CancelledError],
+            "pywebtransport.connection.load_balancer.asyncio.sleep", side_effect=[error, asyncio.CancelledError]
         )
         logger_mock.error.side_effect = lambda *args, **kwargs: error_logged.set()
 
@@ -373,3 +434,23 @@ class TestConnectionLoadBalancer:
             await asyncio.wait_for(error_logged.wait(), timeout=1.0)
 
         logger_mock.error.assert_called_once_with(f"Health check loop critical error: {error}", exc_info=error)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method_name, args",
+        [
+            ("close_all_connections", {}),
+            ("get_connection", {"config": None}),
+            ("get_load_balancer_stats", {}),
+            ("get_target_stats", {}),
+            ("update_target_weight", {"host": "h", "port": 1, "weight": 1.0}),
+        ],
+    )
+    async def test_methods_fail_if_not_activated(
+        self, targets: list[tuple[str, int]], method_name: str, args: dict[str, Any]
+    ) -> None:
+        lb = ConnectionLoadBalancer(targets=targets)
+        method: Callable[..., Coroutine[Any, Any, Any]] = getattr(lb, method_name)
+
+        with pytest.raises(ConnectionError, match="has not been activated"):
+            await method(**args)

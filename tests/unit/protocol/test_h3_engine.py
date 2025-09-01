@@ -9,6 +9,8 @@ import pytest
 from aioquic.quic.connection import QuicConfiguration, QuicConnection
 from aioquic.quic.events import DatagramFrameReceived, QuicEvent, StreamDataReceived
 
+from pywebtransport import ProtocolError
+from pywebtransport.constants import ErrorCodes
 from pywebtransport.protocol.events import (
     DatagramReceived,
     DataReceived,
@@ -38,7 +40,6 @@ def mock_quic(mocker: MagicMock) -> MagicMock:
     mock.configuration = QuicConfiguration(is_client=True)
     mock._quic_logger = MagicMock()
     mock._remote_max_datagram_frame_size = 65536
-
     stream_counters = {True: 2, False: 0}
 
     def get_next_available_stream_id(*, is_unidirectional: bool = False) -> int:
@@ -93,6 +94,7 @@ class TestWebTransportH3EngineInitialization:
 
         settings_frame_payload = mock_quic.send_stream_data.call_args_list[1].args[1]
         settings_bytes = settings_frame_payload[2:]
+
         assert Setting.H3_DATAGRAM.to_bytes(1, "big") not in settings_bytes
         assert Setting.ENABLE_WEBTRANSPORT.to_bytes(4, "big") not in settings_bytes
 
@@ -104,6 +106,13 @@ class TestWebTransportH3EngineInitialization:
 
         assert engine._quic_logger is None
         mock_quic.send_stream_data.assert_called()
+
+    def test_init_connection_fails(self, mock_quic: MagicMock, mocker: MagicMock) -> None:
+        mocker.patch.object(
+            WebTransportH3Engine, "_create_uni_stream", side_effect=RuntimeError("Failed to create stream")
+        )
+        with pytest.raises(RuntimeError, match="Failed to create stream"):
+            WebTransportH3Engine(mock_quic)
 
 
 class TestWebTransportH3EngineSending:
@@ -134,6 +143,13 @@ class TestWebTransportH3EngineSending:
         expected_frame = encode_frame(FrameType.HEADERS, b"headers-payload")
         mock_quic.send_stream_data.assert_any_call(CLIENT_BIDI_STREAM_ID, expected_frame, True)
 
+    def test_send_data_with_end_stream(self, mock_quic: MagicMock) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+
+        engine.send_data(CLIENT_BIDI_STREAM_ID, b"", end_stream=True)
+
+        mock_quic.send_stream_data.assert_any_call(CLIENT_BIDI_STREAM_ID, b"", True)
+
     def test_send_datagram_success(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
 
@@ -142,12 +158,24 @@ class TestWebTransportH3EngineSending:
         expected_payload = encode_uint_var(0) + b"hello"
         mock_quic.send_datagram_frame.assert_called_with(expected_payload)
 
-    def test_send_data_with_end_stream(self, mock_quic: MagicMock) -> None:
+    def test_send_headers_twice_fails(self, mock_quic: MagicMock) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        engine.send_headers(CLIENT_BIDI_STREAM_ID, {":method": "GET"})
+
+        with pytest.raises(ProtocolError, match="HEADERS frame is not allowed after initial headers") as excinfo:
+            engine.send_headers(CLIENT_BIDI_STREAM_ID, {":method": "POST"})
+
+        assert excinfo.value.error_code == ErrorCodes.H3_FRAME_UNEXPECTED
+
+    def test_send_datagram_on_uni_stream_fails(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
 
-        engine.send_data(CLIENT_BIDI_STREAM_ID, b"", end_stream=True)
+        with pytest.raises(
+            ProtocolError, match="Datagrams can only be sent for client-initiated bidirectional streams"
+        ) as excinfo:
+            engine.send_datagram(CLIENT_UNI_STREAM_ID, b"fail")
 
-        mock_quic.send_stream_data.assert_any_call(CLIENT_BIDI_STREAM_ID, b"", True)
+        assert excinfo.value.error_code == ErrorCodes.H3_STREAM_CREATION_ERROR
 
 
 class TestWebTransportH3EngineEventHandling:
@@ -185,20 +213,6 @@ class TestWebTransportH3EngineEventHandling:
         assert isinstance(h3_events[0], WebTransportStreamDataReceived)
         assert h3_events[0].session_id == 101
 
-    def test_handle_control_stream_settings(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
-        engine = WebTransportH3Engine(mock_quic)
-        settings = {Setting.H3_DATAGRAM: 1, Setting.ENABLE_WEBTRANSPORT: 1}
-        settings_frame = encode_frame(
-            FrameType.SETTINGS,
-            encode_settings({int(k): v for k, v in settings.items()}),
-        )
-        data = encode_uint_var(StreamType.CONTROL) + settings_frame
-        event = StreamDataReceived(data=data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
-
-        engine.handle_event(event)
-
-        assert engine._settings_received is True
-
     def test_handle_request_headers_and_data(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
         mock_quic.configuration.is_client = False
         engine = WebTransportH3Engine(mock_quic)
@@ -218,6 +232,17 @@ class TestWebTransportH3EngineEventHandling:
         assert isinstance(h3_events1[0], HeadersReceived)
         assert len(h3_events2) == 1
         assert isinstance(h3_events2[0], DataReceived)
+
+    def test_handle_control_stream_settings(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        settings = {Setting.H3_DATAGRAM: 1, Setting.ENABLE_WEBTRANSPORT: 1}
+        settings_frame = encode_frame(FrameType.SETTINGS, encode_settings({int(k): v for k, v in settings.items()}))
+        data = encode_uint_var(StreamType.CONTROL) + settings_frame
+        event = StreamDataReceived(data=data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
+
+        engine.handle_event(event)
+
+        assert engine._settings_received is True
 
     def test_handle_qpack_streams(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -246,18 +271,6 @@ class TestWebTransportH3EngineEventHandling:
         assert isinstance(h3_events2[0], DataReceived)
         assert h3_events2[0].data == b"4567890"
 
-    def test_client_receives_response_headers(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
-        mock_quic.configuration.is_client = True
-        engine = WebTransportH3Engine(mock_quic)
-        headers_frame = encode_frame(FrameType.HEADERS, b"response-headers")
-        event = StreamDataReceived(data=headers_frame, stream_id=SERVER_BIDI_STREAM_ID, end_stream=True)
-
-        h3_events = engine.handle_event(event)
-
-        assert len(h3_events) == 1
-        assert isinstance(h3_events[0], HeadersReceived)
-        assert h3_events[0].headers == {":status": "200"}
-
     def test_empty_data_frame_with_end_stream(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
         stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
@@ -272,31 +285,53 @@ class TestWebTransportH3EngineEventHandling:
         assert h3_events[0].data == b""
         assert h3_events[0].stream_ended is True
 
-    def test_unknown_uni_stream_is_ignored(self, mock_quic: MagicMock) -> None:
+    def test_empty_data_frame_without_end_stream(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
-        unknown_stream_data = encode_uint_var(0x99) + b"some data"
-        event = StreamDataReceived(data=unknown_stream_data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
+        stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
+        stream.headers_recv_state = HeadersState.AFTER_HEADERS
+        data_frame = encode_frame(FrameType.DATA, b"")
+        event = StreamDataReceived(data=data_frame, stream_id=CLIENT_BIDI_STREAM_ID, end_stream=False)
 
         h3_events = engine.handle_event(event)
 
         assert not h3_events
-        assert not mock_quic.close.called
 
-    def test_handle_qpack_resume_header(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
+    def test_handle_qpack_stream_blocked_and_resumed(
+        self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]
+    ) -> None:
+        mock_pylsqpack["decoder_instance"].feed_header.side_effect = pylsqpack.StreamBlocked
+        engine = WebTransportH3Engine(mock_quic)
+        headers_frame = encode_frame(FrameType.HEADERS, b"blocked-headers")
+        event = StreamDataReceived(data=headers_frame, stream_id=CLIENT_BIDI_STREAM_ID, end_stream=False)
+
+        h3_events_blocked = engine.handle_event(event)
+        assert not h3_events_blocked
+
+        stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
+        assert stream.blocked is True
+        mock_pylsqpack["decoder_instance"].feed_encoder.return_value = [CLIENT_BIDI_STREAM_ID]
+        qpack_data = encode_uint_var(StreamType.QPACK_ENCODER) + b"qpack-unblock-data"
+        qpack_event = StreamDataReceived(data=qpack_data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
+        h3_events_resumed = engine.handle_event(qpack_event)
+
+        assert len(h3_events_resumed) == 1
+        assert isinstance(h3_events_resumed[0], HeadersReceived)
+        assert h3_events_resumed[0].headers == {":status": "201"}
+        assert stream.blocked is False
+
+    def test_unblocked_stream_reblocks(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
         engine = WebTransportH3Engine(mock_quic)
         stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
         stream.blocked = True
-        stream.blocked_frame_size = 10
         mock_pylsqpack["decoder_instance"].feed_encoder.return_value = [CLIENT_BIDI_STREAM_ID]
+        mock_pylsqpack["decoder_instance"].resume_header.side_effect = pylsqpack.StreamBlocked
         qpack_data = encode_uint_var(StreamType.QPACK_ENCODER) + b"qpack-unblock-data"
         qpack_event = StreamDataReceived(data=qpack_data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
 
         h3_events = engine.handle_event(qpack_event)
 
-        assert len(h3_events) == 1
-        assert isinstance(h3_events[0], HeadersReceived)
-        assert h3_events[0].headers == {":status": "201"}
-        assert stream.blocked is False
+        assert not h3_events
+        assert stream.blocked is True
 
     def test_unblocked_stream_with_buffered_data(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]
@@ -317,19 +352,118 @@ class TestWebTransportH3EngineEventHandling:
         assert isinstance(h3_events[1], DataReceived)
         assert h3_events[1].data == b"buffered"
 
-    def test_stream_ended_with_empty_buffer(self, mock_quic: MagicMock) -> None:
-        engine = WebTransportH3Engine(mock_quic, enable_webtransport=False)
-        stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
-        stream.headers_recv_state = HeadersState.AFTER_HEADERS
-        stream.buffer = b""
-        event = StreamDataReceived(data=b"", stream_id=CLIENT_BIDI_STREAM_ID, end_stream=True)
+    @pytest.mark.parametrize("partial_data", [b"\x41", encode_uint_var(FrameType.WEBTRANSPORT_STREAM) + b"\x9f"])
+    def test_partial_bidi_webtransport_frame(self, mock_quic: MagicMock, partial_data: bytes) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        event = StreamDataReceived(data=partial_data, stream_id=CLIENT_BIDI_STREAM_ID, end_stream=False)
 
         h3_events = engine.handle_event(event)
 
-        assert len(h3_events) == 1
-        assert isinstance(h3_events[0], DataReceived)
-        assert h3_events[0].data == b""
-        assert h3_events[0].stream_ended is True
+        assert not h3_events
+        assert engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID).buffer == partial_data
+
+    @pytest.mark.parametrize(
+        "partial_data, expected_buffer",
+        [(b"\x54", b"\x54"), (encode_uint_var(StreamType.WEBTRANSPORT) + b"\x9f", b"\x9f")],
+    )
+    def test_partial_uni_webtransport_frame(
+        self, mock_quic: MagicMock, partial_data: bytes, expected_buffer: bytes
+    ) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        event = StreamDataReceived(data=partial_data, stream_id=CLIENT_UNI_STREAM_ID, end_stream=False)
+
+        h3_events = engine.handle_event(event)
+
+        assert not h3_events
+        assert engine._get_or_create_stream(CLIENT_UNI_STREAM_ID).buffer == expected_buffer
+
+    def test_partial_non_data_frame(self, mock_quic: MagicMock) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        headers_frame = encode_frame(FrameType.HEADERS, b"some-header-payload")
+        event = StreamDataReceived(data=headers_frame[:-1], stream_id=CLIENT_BIDI_STREAM_ID, end_stream=False)
+
+        h3_events = engine.handle_event(event)
+
+        assert not h3_events
+        assert engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID).buffer == b"some-header-payloa"
+
+    def test_receive_data_on_blocked_stream(self, mock_quic: MagicMock) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
+        stream.blocked = True
+        event = StreamDataReceived(data=b"some data", stream_id=CLIENT_BIDI_STREAM_ID, end_stream=False)
+
+        h3_events = engine.handle_event(event)
+
+        assert not h3_events
+        assert stream.buffer == b"some data"
+
+    def test_unblocked_stream_resume_fails_with_protocol_error(
+        self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]
+    ) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
+        stream.blocked = True
+        mock_pylsqpack["decoder_instance"].feed_encoder.return_value = [CLIENT_BIDI_STREAM_ID]
+        mock_pylsqpack["decoder_instance"].resume_header.side_effect = ProtocolError(
+            "Resumption failed", error_code=ErrorCodes.H3_GENERAL_PROTOCOL_ERROR
+        )
+        qpack_data = encode_uint_var(StreamType.QPACK_ENCODER) + b"qpack-unblock-data"
+        qpack_event = StreamDataReceived(data=qpack_data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
+
+        engine.handle_event(qpack_event)
+
+        expected_reason = str(ProtocolError("Resumption failed", error_code=ErrorCodes.H3_GENERAL_PROTOCOL_ERROR))
+        mock_quic.close.assert_called_once_with(
+            error_code=ErrorCodes.H3_GENERAL_PROTOCOL_ERROR, reason_phrase=expected_reason
+        )
+
+    def test_handle_event_protocol_error(self, mock_quic: MagicMock, mocker: MagicMock) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        error = ProtocolError("Test error", error_code=ErrorCodes.H3_GENERAL_PROTOCOL_ERROR)
+        mocker.patch.object(engine, "_get_or_create_stream", side_effect=error)
+        event = StreamDataReceived(data=b"some data", stream_id=CLIENT_UNI_STREAM_ID, end_stream=False)
+
+        h3_events = engine.handle_event(event)
+
+        assert not h3_events
+        mock_quic.close.assert_called_once_with(
+            error_code=ErrorCodes.H3_GENERAL_PROTOCOL_ERROR, reason_phrase=str(error)
+        )
+
+    def test_handle_partial_uni_webtransport_data(self, mock_quic: MagicMock) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        event1 = StreamDataReceived(
+            data=encode_uint_var(StreamType.WEBTRANSPORT), stream_id=CLIENT_UNI_STREAM_ID, end_stream=False
+        )
+        h3_events1 = engine.handle_event(event1)
+        assert not h3_events1
+
+        event2 = StreamDataReceived(data=encode_uint_var(101), stream_id=CLIENT_UNI_STREAM_ID, end_stream=False)
+        h3_events2 = engine.handle_event(event2)
+        assert not h3_events2
+
+        event3 = StreamDataReceived(data=b"uni data", stream_id=CLIENT_UNI_STREAM_ID, end_stream=True)
+        h3_events3 = engine.handle_event(event3)
+        assert len(h3_events3) == 1
+        assert isinstance(h3_events3[0], WebTransportStreamDataReceived)
+        assert h3_events3[0].session_id == 101
+        assert h3_events3[0].data == b"uni data"
+        assert h3_events3[0].stream_ended is True
+
+    def test_unblocked_stream_with_no_blocked_frame_size(
+        self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]
+    ) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        stream = engine._get_or_create_stream(CLIENT_BIDI_STREAM_ID)
+        stream.blocked = True
+        stream.blocked_frame_size = None
+        mock_pylsqpack["decoder_instance"].feed_encoder.return_value = [CLIENT_BIDI_STREAM_ID]
+        qpack_data = encode_uint_var(StreamType.QPACK_ENCODER) + b"qpack-unblock-data"
+        qpack_event = StreamDataReceived(data=qpack_data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
+
+        with pytest.raises(AssertionError, match="Frame length for logging cannot be None"):
+            engine.handle_event(qpack_event)
 
     def test_unhandled_quic_event_is_ignored(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -358,7 +492,10 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event)
 
-        mock_quic.close.assert_called_once_with(error_code=10, reason_phrase=f"[10] {error_phrase}")
+        expected_reason = str(ProtocolError(error_phrase, error_code=ErrorCodes.H3_FRAME_UNEXPECTED))
+        mock_quic.close.assert_called_once_with(
+            error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
+        )
 
     def test_data_before_headers_fails(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -367,7 +504,12 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event)
 
-        mock_quic.close.assert_called_once_with(error_code=10, reason_phrase="[10] DATA frame received before HEADERS")
+        expected_reason = str(
+            ProtocolError("DATA frame received before HEADERS", error_code=ErrorCodes.H3_FRAME_UNEXPECTED)
+        )
+        mock_quic.close.assert_called_once_with(
+            error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
+        )
 
     def test_second_settings_frame_fails(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -380,7 +522,10 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event2)
 
-        mock_quic.close.assert_called_once_with(error_code=10, reason_phrase="[10] SETTINGS frame received twice")
+        expected_reason = str(ProtocolError("SETTINGS frame received twice", error_code=ErrorCodes.H3_FRAME_UNEXPECTED))
+        mock_quic.close.assert_called_once_with(
+            error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
+        )
 
     def test_invalid_settings_fails(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -391,10 +536,10 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event)
 
-        mock_quic.close.assert_called_once_with(
-            error_code=10,
-            reason_phrase="[10] ENABLE_WEBTRANSPORT requires H3_DATAGRAM",
+        expected_reason = str(
+            ProtocolError("ENABLE_WEBTRANSPORT requires H3_DATAGRAM", error_code=ErrorCodes.H3_SETTINGS_ERROR)
         )
+        mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_SETTINGS_ERROR, reason_phrase=expected_reason)
 
     def test_qpack_decompression_failed(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
         mock_pylsqpack["decoder_instance"].feed_header.side_effect = pylsqpack.DecompressionFailed("error")
@@ -404,7 +549,12 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event)
 
-        mock_quic.close.assert_called_once_with(error_code=10, reason_phrase="[10] QPACK decompression failed")
+        expected_reason = str(
+            ProtocolError("QPACK decompression failed", error_code=ErrorCodes.QPACK_DECOMPRESSION_FAILED)
+        )
+        mock_quic.close.assert_called_once_with(
+            error_code=ErrorCodes.QPACK_DECOMPRESSION_FAILED, reason_phrase=expected_reason
+        )
 
     def test_first_control_frame_not_settings_fails(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -414,24 +564,27 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event)
 
+        expected_reason = str(
+            ProtocolError("First frame on control stream must be SETTINGS", error_code=ErrorCodes.H3_MISSING_SETTINGS)
+        )
         mock_quic.close.assert_called_once_with(
-            error_code=10,
-            reason_phrase="[10] First frame on control stream must be SETTINGS",
+            error_code=ErrorCodes.H3_MISSING_SETTINGS, reason_phrase=expected_reason
         )
 
-    @pytest.mark.parametrize("stream_type", [StreamType.QPACK_DECODER, StreamType.QPACK_ENCODER])
-    def test_duplicate_qpack_streams_fail(self, mock_quic: MagicMock, stream_type: StreamType) -> None:
+    @pytest.mark.parametrize("stream_type", [StreamType.CONTROL, StreamType.QPACK_DECODER, StreamType.QPACK_ENCODER])
+    def test_duplicate_uni_streams_fail(self, mock_quic: MagicMock, stream_type: StreamType) -> None:
         engine = WebTransportH3Engine(mock_quic)
         stream_data = encode_uint_var(stream_type)
-
         event1 = StreamDataReceived(data=stream_data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
         engine.handle_event(event1)
         assert not mock_quic.close.called
-
         event2 = StreamDataReceived(data=stream_data, stream_id=SERVER_UNI_STREAM_ID + 4, end_stream=False)
+
         engine.handle_event(event2)
+
         mock_quic.close.assert_called_once()
         assert "Only one" in mock_quic.close.call_args[1]["reason_phrase"]
+        assert mock_quic.close.call_args[1]["error_code"] == ErrorCodes.H3_STREAM_CREATION_ERROR
 
     def test_h3_datagram_without_transport_param_fails(self, mock_quic: MagicMock) -> None:
         mock_quic._remote_max_datagram_frame_size = None
@@ -443,10 +596,13 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event)
 
-        mock_quic.close.assert_called_once_with(
-            error_code=10,
-            reason_phrase="[10] H3_DATAGRAM requires max_datagram_frame_size transport parameter",
+        expected_reason = str(
+            ProtocolError(
+                "H3_DATAGRAM requires max_datagram_frame_size transport parameter",
+                error_code=ErrorCodes.H3_SETTINGS_ERROR,
+            )
         )
+        mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_SETTINGS_ERROR, reason_phrase=expected_reason)
 
     def test_control_stream_closed_fails(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -455,35 +611,65 @@ class TestWebTransportH3EngineProtocolErrors:
 
         engine.handle_event(event)
 
+        expected_reason = str(
+            ProtocolError("Closing control stream is not allowed", error_code=ErrorCodes.H3_CLOSED_CRITICAL_STREAM)
+        )
         mock_quic.close.assert_called_once_with(
-            error_code=10, reason_phrase="[10] Closing control stream is not allowed"
+            error_code=ErrorCodes.H3_CLOSED_CRITICAL_STREAM, reason_phrase=expected_reason
         )
 
     @pytest.mark.parametrize(
-        "error_fixture",
+        "error_fixture, stream_type, reason, error_code",
         [
-            pylsqpack.EncoderStreamError("encoder error"),
-            pylsqpack.DecoderStreamError("decoder error"),
+            (
+                pylsqpack.EncoderStreamError("encoder error"),
+                StreamType.QPACK_ENCODER,
+                "QPACK encoder stream error",
+                ErrorCodes.QPACK_ENCODER_STREAM_ERROR,
+            ),
+            (
+                pylsqpack.DecoderStreamError("decoder error"),
+                StreamType.QPACK_DECODER,
+                "QPACK decoder stream error",
+                ErrorCodes.QPACK_DECODER_STREAM_ERROR,
+            ),
         ],
     )
     def test_qpack_stream_errors(
-        self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], error_fixture: Exception
+        self,
+        mock_quic: MagicMock,
+        mock_pylsqpack: dict[str, MagicMock],
+        error_fixture: Exception,
+        stream_type: StreamType,
+        reason: str,
+        error_code: int,
     ) -> None:
         if isinstance(error_fixture, pylsqpack.EncoderStreamError):
             mock_pylsqpack["decoder_instance"].feed_encoder.side_effect = error_fixture
-            stream_type = StreamType.QPACK_ENCODER
-            reason = "QPACK encoder stream error"
         else:
             mock_pylsqpack["encoder_instance"].feed_decoder.side_effect = error_fixture
-            stream_type = StreamType.QPACK_DECODER
-            reason = "QPACK decoder stream error"
         engine = WebTransportH3Engine(mock_quic)
         stream_data = encode_uint_var(stream_type) + b"some-qpack-data"
         event = StreamDataReceived(data=stream_data, stream_id=SERVER_UNI_STREAM_ID, end_stream=False)
 
         engine.handle_event(event)
 
-        mock_quic.close.assert_called_once_with(error_code=10, reason_phrase=f"[10] {reason}")
+        expected_reason = str(ProtocolError(reason, error_code=error_code))
+        mock_quic.close.assert_called_once_with(error_code=error_code, reason_phrase=expected_reason)
+
+    def test_handle_malformed_datagram(self, mock_quic: MagicMock) -> None:
+        engine = WebTransportH3Engine(mock_quic)
+        event = DatagramFrameReceived(data=b"\xc0")
+
+        engine.handle_event(event)
+
+        expected_reason = str(
+            ProtocolError(
+                "Could not parse quarter stream ID from datagram",
+                error_code=ErrorCodes.H3_DATAGRAM_ERROR,
+            )
+        )
+        mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_DATAGRAM_ERROR, reason_phrase=expected_reason)
 
 
 class TestWebTransportH3EngineHeaderValidation:
@@ -496,6 +682,7 @@ class TestWebTransportH3EngineHeaderValidation:
             ([(b":method", b"GET"), (b":method", b"POST")], "is included twice"),
             ([(b":invalid", b"pseudo")], "is not valid"),
             ([(b"invalid name ", b"value")], "contains invalid characters"),
+            ([(b"key:other", b"value")], "contains a non-initial colon"),
             ([(b"key", b"invalid\nvalue")], "has forbidden characters"),
             ([(b":method", b"GET"), (b":scheme", b"http"), (b":authority", b"")], "cannot be empty"),
             (
@@ -520,6 +707,7 @@ class TestWebTransportH3EngineHeaderValidation:
         mock_quic.close.assert_called_once()
         reason_phrase = mock_quic.close.call_args[1]["reason_phrase"]
         assert re.search(error_match, reason_phrase)
+        assert mock_quic.close.call_args[1]["error_code"] == ErrorCodes.H3_MESSAGE_ERROR
 
     def test_invalid_response_headers(self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock]) -> None:
         mock_quic.configuration.is_client = True
@@ -533,6 +721,7 @@ class TestWebTransportH3EngineHeaderValidation:
         mock_quic.close.assert_called_once()
         reason_phrase = mock_quic.close.call_args[1]["reason_phrase"]
         assert re.search("Pseudo-headers.*:status.*are missing", reason_phrase)
+        assert mock_quic.close.call_args[1]["error_code"] == ErrorCodes.H3_MESSAGE_ERROR
 
 
 class TestWebTransportH3EngineMiscErrors:
@@ -544,7 +733,8 @@ class TestWebTransportH3EngineMiscErrors:
 
         engine.handle_event(event)
 
-        mock_quic.close.assert_called_once_with(error_code=10, reason_phrase="[10] Malformed SETTINGS frame payload")
+        expected_reason = str(ProtocolError("Malformed SETTINGS frame payload", error_code=ErrorCodes.H3_FRAME_ERROR))
+        mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_FRAME_ERROR, reason_phrase=expected_reason)
 
     def test_buffer_read_error_on_frame_header(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -569,6 +759,7 @@ class TestWebTransportH3EngineMiscErrors:
 
         mock_quic.close.assert_called_once()
         assert "setting must be 0 or 1" in mock_quic.close.call_args[1]["reason_phrase"]
+        assert mock_quic.close.call_args[1]["error_code"] == ErrorCodes.H3_SETTINGS_ERROR
 
     def test_reserved_setting_fails(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -581,6 +772,7 @@ class TestWebTransportH3EngineMiscErrors:
 
         mock_quic.close.assert_called_once()
         assert "Setting identifier 0x2 is reserved" in mock_quic.close.call_args[1]["reason_phrase"]
+        assert mock_quic.close.call_args[1]["error_code"] == ErrorCodes.H3_SETTINGS_ERROR
 
     def test_handle_event_after_done(self, mock_quic: MagicMock) -> None:
         engine = WebTransportH3Engine(mock_quic)
@@ -604,8 +796,11 @@ class TestWebTransportH3EngineMiscErrors:
 
         engine.handle_event(event2)
 
+        expected_reason = str(
+            ProtocolError("Invalid frame type on control stream", error_code=ErrorCodes.H3_FRAME_UNEXPECTED)
+        )
         mock_quic.close.assert_called_once_with(
-            error_code=10, reason_phrase="[10] Invalid frame type on control stream"
+            error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
         )
 
     def test_duplicate_setting_fails(self, mock_quic: MagicMock) -> None:
@@ -620,3 +815,4 @@ class TestWebTransportH3EngineMiscErrors:
 
         mock_quic.close.assert_called_once()
         assert "is included twice" in mock_quic.close.call_args[1]["reason_phrase"]
+        assert mock_quic.close.call_args[1]["error_code"] == ErrorCodes.H3_SETTINGS_ERROR

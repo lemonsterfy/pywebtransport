@@ -32,13 +32,16 @@ class PooledClient:
         cleanup_interval: float = 60.0,
     ):
         """Initialize the pooled client."""
+        if pool_size <= 0:
+            raise ValueError("pool_size must be a positive integer.")
+
         self._client = WebTransportClient.create(config=config)
         self._pool_size = pool_size
         self._cleanup_interval = cleanup_interval
         self._pools: dict[str, list[WebTransportSession]] = defaultdict(list)
-        self._locks: defaultdict[str, asyncio.Lock] | None = None
+        self._conditions: defaultdict[str, asyncio.Condition] | None = None
+        self._total_sessions: defaultdict[str, int] = defaultdict(int)
         self._cleanup_task: asyncio.Task[None] | None = None
-        self._pending_creations: dict[str, asyncio.Event] = {}
 
     @classmethod
     def create(
@@ -48,12 +51,12 @@ class PooledClient:
         pool_size: int = 10,
         cleanup_interval: float = 60.0,
     ) -> Self:
-        """Factory method to create a new pooled client instance."""
+        """Create a new pooled client instance."""
         return cls(config=config, pool_size=pool_size, cleanup_interval=cleanup_interval)
 
     async def __aenter__(self) -> Self:
         """Enter the async context, activating the client and background tasks."""
-        self._locks = defaultdict(asyncio.Lock)
+        self._conditions = defaultdict(asyncio.Condition)
         await self._client.__aenter__()
         self._start_cleanup_task()
         logger.info("PooledClient started and is active.")
@@ -70,11 +73,12 @@ class PooledClient:
 
     async def close(self) -> None:
         """Close all pooled sessions and the underlying client."""
-        if self._locks is None:
+        if self._conditions is None:
             raise ClientError(
                 "PooledClient has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
+
         logger.info("Closing PooledClient...")
         if self._cleanup_task:
             self._cleanup_task.cancel()
@@ -84,11 +88,12 @@ class PooledClient:
                 pass
 
         sessions_to_close: list[WebTransportSession] = []
-        pool_keys = list(self._pools.keys())
-        for pool_key in pool_keys:
-            async with self._locks[pool_key]:
+        for pool_key in list(self._pools.keys()):
+            condition = self._conditions[pool_key]
+            async with condition:
                 sessions = self._pools.pop(pool_key, [])
                 sessions_to_close.extend(sessions)
+                self._total_sessions[pool_key] = 0
 
         if sessions_to_close:
             try:
@@ -103,18 +108,17 @@ class PooledClient:
 
     async def get_session(self, url: URL) -> WebTransportSession:
         """Get a session from the pool or create a new one."""
-        if self._locks is None:
+        if self._conditions is None:
             raise ClientError(
                 "PooledClient has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
-        pool_key = self._get_pool_key(url)
 
-        while True:
-            is_creator = False
-            lock = self._locks[pool_key]
-            event = None
-            async with lock:
+        pool_key = self._get_pool_key(url)
+        condition = self._conditions[pool_key]
+
+        async with condition:
+            while True:
                 pool = self._pools[pool_key]
                 while pool:
                     session = pool.pop(0)
@@ -123,55 +127,54 @@ class PooledClient:
                         return session
                     else:
                         logger.debug(f"Discarding stale session for {pool_key}")
+                        self._total_sessions[pool_key] -= 1
 
-                if event := self._pending_creations.get(pool_key):
-                    pass
-                else:
-                    is_creator = True
-                    event = asyncio.Event()
-                    self._pending_creations[pool_key] = event
+                if self._total_sessions[pool_key] < self._pool_size:
+                    self._total_sessions[pool_key] += 1
+                    break
 
-            if not is_creator:
-                await event.wait()
-                continue
+                logger.debug(f"Pool for {pool_key} is full. Waiting for a session to be returned.")
+                await condition.wait()
 
-            try:
-                logger.debug(f"Pool for {pool_key} is empty, creating new session.")
-                session = await self._client.connect(url)
-                return session
-            finally:
-                async with lock:
-                    self._pending_creations.pop(pool_key, None)
-                    event.set()
+        try:
+            logger.debug(f"Creating new session for {pool_key}")
+            session = await self._client.connect(url)
+            return session
+        except Exception:
+            async with condition:
+                self._total_sessions[pool_key] -= 1
+                condition.notify()
+            raise
 
     async def return_session(self, session: WebTransportSession) -> None:
         """Return a session to the pool for potential reuse."""
-        if self._locks is None:
+        if self._conditions is None:
             raise ClientError(
                 "PooledClient has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
 
-        if not session.is_ready:
+        pool_key = self._get_pool_key_from_session(session)
+        should_close = not session.is_ready or not pool_key
+
+        if not should_close and pool_key:
+            condition = self._conditions[pool_key]
+            async with condition:
+                pool = self._pools[pool_key]
+                if len(pool) >= self._pool_size:
+                    should_close = True
+                else:
+                    pool.append(session)
+                    logger.debug(f"Returned session to pool for {pool_key}")
+                    condition.notify()
+
+        if should_close:
+            if pool_key:
+                condition = self._conditions[pool_key]
+                async with condition:
+                    self._total_sessions[pool_key] -= 1
+                    condition.notify()
             await session.close()
-            return
-
-        if not (pool_key := self._get_pool_key_from_session(session)):
-            await session.close()
-            return
-
-        session_to_close: WebTransportSession | None = None
-        async with self._locks[pool_key]:
-            pool = self._pools[pool_key]
-            if len(pool) >= self._pool_size:
-                logger.debug(f"Pool for {pool_key} is full, closing returned session.")
-                session_to_close = session
-            else:
-                pool.append(session)
-                logger.debug(f"Returned session to pool for {pool_key}")
-
-        if session_to_close:
-            await session_to_close.close()
 
     def _get_pool_key(self, url: URL) -> str:
         """Get a normalized pool key from a URL."""
@@ -190,45 +193,33 @@ class PooledClient:
         return None
 
     async def _periodic_cleanup(self) -> None:
-        """Periodically check for and remove stale sessions from all pools."""
-        if self._locks is None:
+        """Periodically remove stale sessions from all pools."""
+        if self._conditions is None:
             return
 
         while True:
             await asyncio.sleep(self._cleanup_interval)
             logger.debug("Running stale session cleanup for all pools...")
 
-            stale_sessions_to_close: list[WebTransportSession] = []
-            pool_keys = list(self._pools.keys())
-
-            for pool_key in pool_keys:
-                async with self._locks[pool_key]:
+            for pool_key in list(self._pools.keys()):
+                condition = self._conditions[pool_key]
+                async with condition:
                     sessions = self._pools.get(pool_key)
                     if not sessions:
                         continue
 
-                    ready_sessions: list[WebTransportSession] = []
-                    for s in sessions:
-                        if s.is_ready:
-                            ready_sessions.append(s)
-                        else:
-                            stale_sessions_to_close.append(s)
+                    original_len = len(sessions)
+                    ready_sessions = [s for s in sessions if s.is_ready]
 
-                    if len(ready_sessions) < len(sessions):
-                        logger.info(
-                            f"Pruned {len(sessions) - len(ready_sessions)} stale sessions from pool '{pool_key}'"
-                        )
+                    if len(ready_sessions) < original_len:
+                        pruned_count = original_len - len(ready_sessions)
+                        logger.info(f"Pruned {pruned_count} stale sessions from pool '{pool_key}'")
                         self._pools[pool_key] = ready_sessions
-
-            if stale_sessions_to_close:
-                try:
-                    async with asyncio.TaskGroup() as tg:
-                        for s in stale_sessions_to_close:
-                            tg.create_task(s.close())
-                except* Exception as eg:
-                    logger.warning(f"Errors closing stale sessions during cleanup: {eg.exceptions}")
+                        self._total_sessions[pool_key] -= pruned_count
+                        for _ in range(pruned_count):
+                            condition.notify()
 
     def _start_cleanup_task(self) -> None:
-        """Start the periodic cleanup task if not already running."""
+        """Start the periodic cleanup task."""
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._periodic_cleanup())

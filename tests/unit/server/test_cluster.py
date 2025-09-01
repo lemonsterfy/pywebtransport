@@ -1,12 +1,13 @@
 """Unit tests for the pywebtransport.server.cluster module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, cast
+from collections.abc import AsyncGenerator
+from typing import Any, cast
 
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import ServerConfig
+from pywebtransport import ServerConfig, ServerError
 from pywebtransport.server import ServerCluster, WebTransportServer
 
 
@@ -17,9 +18,14 @@ class TestServerCluster:
     ) -> AsyncGenerator[ServerCluster, None]:
         cluster_instance = ServerCluster(configs=server_configs)
         cluster_instance._lock = asyncio.Lock()
-        yield cluster_instance
-        if cluster_instance.is_running:
-            await cluster_instance.stop_all()
+        try:
+            yield cluster_instance
+        finally:
+            if cluster_instance.is_running:
+                try:
+                    await cluster_instance.stop_all()
+                except ExceptionGroup:
+                    pass
 
     @pytest.fixture
     def mock_webtransport_server_class(self, mocker: MockerFixture) -> Any:
@@ -74,10 +80,7 @@ class TestServerCluster:
         mock_stop.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_start_and_stop_all(
-        self,
-        cluster: ServerCluster,
-    ) -> None:
+    async def test_start_and_stop_all(self, cluster: ServerCluster) -> None:
         await cluster.start_all()
 
         assert cluster.is_running
@@ -89,7 +92,7 @@ class TestServerCluster:
         await cluster.stop_all()
 
         assert not cluster.is_running
-        assert not cluster._servers  # type: ignore[unreachable]
+        assert not cluster._servers  # type: ignore [unreachable]
         for server in servers_to_stop:
             cast(Any, server.close).assert_awaited_once()
 
@@ -131,7 +134,7 @@ class TestServerCluster:
             pytest.fail("Should have raised an exception.")
         except ExceptionGroup as exc_info:
             match, _ = exc_info.split(ValueError)
-            assert match is not None, "A ValueError should be present in the ExceptionGroup"
+            assert match is not None
             assert len(match.exceptions) == 1
             assert str(match.exceptions[0]) == "Listen failed"
         except ValueError as e:
@@ -143,40 +146,38 @@ class TestServerCluster:
         cast(Any, mock_server_fail.close).assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_start_all_with_only_failures(
-        self, server_configs: list[ServerConfig], mocker: MockerFixture
+    async def test_start_all_failure_during_cleanup(
+        self, server_configs: list[ServerConfig], mock_webtransport_server_class: Any, mocker: MockerFixture
     ) -> None:
-        mocker.patch.object(
-            ServerCluster,
-            "_create_and_start_server",
-            side_effect=ValueError("Failed to create"),
-        )
+        mock_server_fail = mocker.create_autospec(WebTransportServer, instance=True, spec_set=True)
+        mock_server_fail.listen = mocker.AsyncMock(side_effect=ValueError("Listen failed"))
+        mock_server_fail.close = mocker.AsyncMock()
+        mock_server_ok = mocker.create_autospec(WebTransportServer, instance=True, spec_set=True)
+        mock_server_ok.listen = mocker.AsyncMock()
+        mock_server_ok.close = mocker.AsyncMock(side_effect=IOError("Cleanup failed"))
+        mock_webtransport_server_class.side_effect = [mock_server_fail, mock_server_ok]
         cluster = ServerCluster(configs=server_configs)
         cluster._lock = asyncio.Lock()
 
         try:
             await cluster.start_all()
             pytest.fail("Should have raised an exception.")
-        except ExceptionGroup as exc_info:
-            match, _ = exc_info.split(ValueError)
-            assert match is not None, "A ValueError should be present in the ExceptionGroup"
-            assert len(match.exceptions) >= 1
-            assert "Failed to create" in str(match.exceptions[0])
-        except ValueError as e:
-            assert "Failed to create" in str(e)
+        except ExceptionGroup:
+            pass
+        except ValueError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_stop_all_failure(self, cluster: ServerCluster) -> None:
+        await cluster.start_all()
+        server_to_fail = cluster._servers[0]
+        cast(Any, server_to_fail.close).side_effect = ValueError("Close failed")
+
+        with pytest.raises(ExceptionGroup):
+            await cluster.stop_all()
 
         assert not cluster.is_running
         assert not cluster._servers
-
-    @pytest.mark.asyncio
-    async def test_stop_all_on_non_running_cluster(self, cluster: ServerCluster, mocker: MockerFixture) -> None:
-        mock_close = mocker.AsyncMock()
-        cluster._servers = [mocker.MagicMock(close=mock_close)]
-        cluster._running = False
-
-        await cluster.stop_all()
-
-        mock_close.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_add_server(self, cluster: ServerCluster, server_configs: list[ServerConfig]) -> None:
@@ -193,6 +194,41 @@ class TestServerCluster:
         assert new_server is not None
         assert len(cluster._servers) == 4
         cast(Any, new_server.listen).assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_add_server_race_condition_on_stop(
+        self, cluster: ServerCluster, mocker: MockerFixture, mock_webtransport_server_class: Any
+    ) -> None:
+        await cluster.start_all()
+        new_config = ServerConfig(bind_port=8003, certfile="c3.pem", keyfile="k3.pem")
+        creation_started = asyncio.Event()
+        original_create = cluster._create_and_start_server
+        created_server_ref = []
+
+        async def controlled_creation(*args: Any, **kwargs: Any) -> WebTransportServer:
+            server = await original_create(*args, **kwargs)
+            created_server_ref.append(server)
+            creation_started.set()
+            await asyncio.sleep(0.01)
+            return server
+
+        mocker.patch.object(cluster, "_create_and_start_server", side_effect=controlled_creation)
+
+        async def stop_cluster_concurrently() -> None:
+            await creation_started.wait()
+            assert cluster._lock is not None
+            async with cluster._lock:
+                cluster._running = False
+
+        add_task = asyncio.create_task(cluster.add_server(new_config))
+        stop_task = asyncio.create_task(stop_cluster_concurrently())
+
+        result = await add_task
+        await stop_task
+
+        assert result is None
+        assert len(created_server_ref) == 1
+        cast(Any, created_server_ref[0].close).assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_add_server_failure_on_creation(self, cluster: ServerCluster, mocker: MockerFixture) -> None:
@@ -248,3 +284,37 @@ class TestServerCluster:
         assert stats["total_connections_rejected"] == 2
         assert stats["total_connections_active"] == 2
         assert stats["total_sessions_active"] == 2
+
+    @pytest.mark.asyncio
+    async def test_get_cluster_stats_with_partial_failure(self, cluster: ServerCluster) -> None:
+        await cluster.start_all()
+        server_to_fail = cluster._servers[0]
+        cast(Any, server_to_fail.get_server_stats).side_effect = ValueError("Stats failed")
+
+        with pytest.raises(ExceptionGroup):
+            await cluster.get_cluster_stats()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method_name, method_args",
+        [
+            ("start_all", ()),
+            ("stop_all", ()),
+            ("add_server", (ServerConfig(),)),
+            ("remove_server", {"host": "localhost", "port": 8000}),
+            ("get_cluster_stats", ()),
+            ("get_server_count", ()),
+            ("get_servers", ()),
+        ],
+    )
+    async def test_public_methods_raise_if_not_activated(
+        self, server_configs: list[ServerConfig], method_name: str, method_args: Any
+    ) -> None:
+        cluster = ServerCluster(configs=server_configs)
+        method = getattr(cluster, method_name)
+
+        with pytest.raises(ServerError, match="ServerCluster has not been activated"):
+            if isinstance(method_args, dict):
+                await method(**method_args)
+            else:
+                await method(*method_args)

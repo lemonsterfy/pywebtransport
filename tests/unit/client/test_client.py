@@ -6,10 +6,9 @@ from typing import Any, Type
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, ClientError, TimeoutError
+from pywebtransport import ClientConfig, ClientError, TimeoutError, WebTransportSession
 from pywebtransport.client import ClientStats, WebTransportClient
 from pywebtransport.connection import ConnectionManager, WebTransportConnection
-from pywebtransport.session import WebTransportSession
 
 
 class TestClientStats:

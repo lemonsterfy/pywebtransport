@@ -7,8 +7,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Self, TypeVar
+from typing import Any, Self, TypeVar
 
 from pywebtransport.types import EventData, EventHandler, EventType, Timeout
 from pywebtransport.utils import get_logger, get_timestamp

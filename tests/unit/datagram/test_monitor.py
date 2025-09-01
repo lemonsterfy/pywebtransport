@@ -1,7 +1,8 @@
 """Unit tests for the pywebtransport.datagram.monitor module."""
 
 import asyncio
-from typing import Any, Coroutine, NoReturn
+from collections.abc import Coroutine
+from typing import Any, NoReturn
 
 import pytest
 from _pytest.logging import LogCaptureFixture

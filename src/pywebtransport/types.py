@@ -5,20 +5,9 @@ Core Type Definitions.
 from __future__ import annotations
 
 import ssl
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from enum import StrEnum
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    AsyncContextManager,
-    AsyncGenerator,
-    AsyncIterator,
-    Awaitable,
-    Callable,
-    Protocol,
-    TypeAlias,
-    TypeVar,
-    runtime_checkable,
-)
+from typing import TYPE_CHECKING, Any, AsyncContextManager, Protocol, TypeAlias, TypeVar, runtime_checkable
 
 if TYPE_CHECKING:
     from pywebtransport.connection import WebTransportConnection
