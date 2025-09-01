@@ -13,10 +13,11 @@ import socket
 import ssl
 import time
 import urllib.parse
+from collections.abc import Callable, Coroutine
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Callable, Coroutine, Self, Type, TypeVar
+from typing import Any, Self, Type, TypeVar
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization

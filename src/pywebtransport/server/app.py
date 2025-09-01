@@ -5,8 +5,9 @@ WebTransport Application Framework.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from types import TracebackType
-from typing import Any, Callable, Self, Type, TypeVar
+from typing import Any, Self, Type, TypeVar
 
 from pywebtransport.config import ServerConfig
 from pywebtransport.connection import WebTransportConnection

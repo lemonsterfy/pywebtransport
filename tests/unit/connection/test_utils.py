@@ -2,7 +2,9 @@
 
 import asyncio
 import re
+from collections.abc import Coroutine
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from pytest_mock import MockerFixture
@@ -73,6 +75,49 @@ class TestConnectionUtils:
         assert mock_create.await_count == 4
 
     @pytest.mark.asyncio
+    async def test_create_multiple_connections_all_succeed(
+        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
+    ) -> None:
+        targets = [("h1", 1), ("h2", 2)]
+        mocker.patch.object(WebTransportConnection, "create_client", return_value=mock_connection)
+
+        connections = await connection_utils.create_multiple_connections(config=mock_client_config, targets=targets)
+
+        assert len(connections) == 2
+        assert "h1:1" in connections
+        assert "h2:2" in connections
+        assert connections["h1:1"] is mock_connection
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_connections_some_fail(
+        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
+    ) -> None:
+        targets = [("h1", 1), ("h2", 2)]
+        mocker.patch.object(
+            WebTransportConnection, "create_client", side_effect=[mock_connection, ConnectionError("failed")]
+        )
+
+        connections = await connection_utils.create_multiple_connections(config=mock_client_config, targets=targets)
+
+        assert len(connections) == 1
+        assert "h1:1" in connections
+        assert "h2:2" not in connections
+
+    @pytest.mark.asyncio
+    async def test_create_multiple_connections_taskgroup_failure(
+        self, mock_client_config: ClientConfig, mocker: MockerFixture
+    ) -> None:
+        targets = [("h1", 1)]
+        mocker.patch(
+            "pywebtransport.connection.utils.WebTransportConnection.create_client",
+            side_effect=asyncio.CancelledError,
+        )
+
+        connections = await connection_utils.create_multiple_connections(config=mock_client_config, targets=targets)
+
+        assert connections == {}
+
+    @pytest.mark.asyncio
     async def test_ensure_connection_already_connected(
         self, mock_client_config: ClientConfig, mock_connection: Any
     ) -> None:
@@ -107,33 +152,49 @@ class TestConnectionUtils:
             )
 
     @pytest.mark.asyncio
-    async def test_create_multiple_connections_all_succeed(
-        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
-    ) -> None:
-        targets = [("h1", 1), ("h2", 2)]
-        mocker.patch.object(WebTransportConnection, "create_client", return_value=mock_connection)
-
-        connections = await connection_utils.create_multiple_connections(config=mock_client_config, targets=targets)
-
-        assert len(connections) == 2
-        assert "h1:1" in connections
-        assert "h2:2" in connections
-        assert connections["h1:1"] is mock_connection
-
-    @pytest.mark.asyncio
-    async def test_create_multiple_connections_some_fail(
-        self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
-    ) -> None:
-        targets = [("h1", 1), ("h2", 2)]
-        mocker.patch.object(
-            WebTransportConnection, "create_client", side_effect=[mock_connection, ConnectionError("failed")]
+    async def test_test_multiple_connections(self, mocker: MockerFixture) -> None:
+        targets = [("h1", 1), ("h2", 2), ("h3", 3)]
+        mock_test_tcp = mocker.patch(
+            "pywebtransport.connection.utils.test_tcp_connection", side_effect=[True, False, True]
         )
 
-        connections = await connection_utils.create_multiple_connections(config=mock_client_config, targets=targets)
+        results = await connection_utils.test_multiple_connections(targets=targets)
 
-        assert len(connections) == 1
-        assert "h1:1" in connections
-        assert "h2:2" not in connections
+        assert results == {"h1:1": True, "h2:2": False, "h3:3": True}
+        assert mock_test_tcp.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_test_multiple_connections_handles_undone_task(self, mocker: MockerFixture) -> None:
+        targets = [("h1", 1), ("h2", 2)]
+        task1 = MagicMock(spec=asyncio.Task)
+        task1.done.return_value = True
+        task1.cancelled.return_value = False
+        task1.result.return_value = True
+        task2 = MagicMock(spec=asyncio.Task)
+        task2.done.return_value = False
+        task2.cancelled.return_value = False
+        create_task_mock = mocker.patch("asyncio.TaskGroup.create_task")
+
+        def side_effect(coro: Coroutine[Any, Any, Any], *args: Any, **kwargs: Any) -> MagicMock:
+            coro.close()
+            if create_task_mock.call_count == 1:
+                return task1
+            return task2
+
+        create_task_mock.side_effect = side_effect
+
+        results = await connection_utils.test_multiple_connections(targets=targets)
+
+        assert results == {"h1:1": True, "h2:2": False}
+
+    @pytest.mark.asyncio
+    async def test_test_multiple_connections_taskgroup_failure(self, mocker: MockerFixture) -> None:
+        targets = [("h1", 1)]
+        mocker.patch("pywebtransport.connection.utils.test_tcp_connection", side_effect=ValueError("TCP test failed"))
+
+        results = await connection_utils.test_multiple_connections(targets=targets)
+
+        assert results == {"h1:1": False}
 
     @pytest.mark.asyncio
     async def test_test_tcp_connection_success(self, mocker: MockerFixture) -> None:
@@ -158,15 +219,3 @@ class TestConnectionUtils:
         result = await connection_utils.test_tcp_connection(host="h", port=1)
 
         assert result is False
-
-    @pytest.mark.asyncio
-    async def test_test_multiple_connections(self, mocker: MockerFixture) -> None:
-        targets = [("h1", 1), ("h2", 2), ("h3", 3)]
-        mock_test_tcp = mocker.patch(
-            "pywebtransport.connection.utils.test_tcp_connection", side_effect=[True, False, True]
-        )
-
-        results = await connection_utils.test_multiple_connections(targets=targets)
-
-        assert results == {"h1:1": True, "h2:2": False, "h3:3": True}
-        assert mock_test_tcp.await_count == 3

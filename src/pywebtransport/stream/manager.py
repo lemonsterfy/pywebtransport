@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, AsyncIterator, Self, Type
+from typing import TYPE_CHECKING, Any, Self, Type
 
 from pywebtransport.constants import WebTransportConstants
 from pywebtransport.exceptions import StreamError

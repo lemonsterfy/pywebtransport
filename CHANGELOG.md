@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.4.1] - 2025-09-01
+
+This is a critical stability and quality release focused on hardening the library for production use. It addresses deep-seated concurrency flaws in all pooling mechanisms, improves the robustness of the core protocol engine, enhances error handling and diagnostics, and continues the systematic modernization of the codebase.
+
+### Added
+
+- **Enhanced Error Diagnostics**: Added several specific H3 and QPACK error codes to the `ErrorCodes` enum, allowing for more granular and precise protocol-level error reporting.
+- **Improved Test Coverage**: Significantly increased unit test coverage from 91% to 96%, enhancing the reliability and correctness of the entire library.
+
+### Changed
+
+- **Modernized Codebase Style**: Systematically modernized type hint imports across the entire codebase (including `app`, `events`, `middleware`, `session`, `stream`, `types`, and `utils` modules) by migrating from the `typing` module to `collections.abc` in accordance with Python 3.11+ best practices.
+
+### Fixed
+
+- **Fixed Critical Concurrency Flaws in All Pooling Mechanisms**:
+  - Re-architected `client.PooledClient`, `connection.ConnectionPool`, and `stream.StreamPool` to use a robust **`asyncio.Condition`**-based pattern. This resolves fundamental correctness issues, properly enforces resource limits (`pool_size`/`max_size`), and eliminates performance bottlenecks caused by "thundering herd" problems in previous implementations.
+- **Improved Robustness of the Core Protocol Engine**:
+  - Fixed multiple correctness and robustness issues in the `WebTransportH3Engine`, including correctly handling the non-fatal `pylsqpack.StreamBlocked` signal, improving the logical flow of unidirectional stream parsing, and propagating more specific error codes.
+- **Improved Error Handling Consistency and Usability**:
+  - Fixed an issue in `ServerCluster` where exceptions during `stop_all` and `get_cluster_stats` were silently ignored; they are now correctly propagated as an `ExceptionGroup`.
+  - Changed the string representation of all `WebTransportError` exceptions to display error codes in hexadecimal format for better readability and alignment with protocol specifications.
+- **Fixed Silent Failure in `DatagramQueue`**:
+  - The `clear()` method on an uninitialized `DatagramQueue` no longer fails silently and now correctly raises a `DatagramError`, ensuring consistent fail-fast behavior across the component's API.
+
 ## [0.4.0] - 2025-08-26
 
 This is a major architectural release that marks a significant milestone in the library's maturity. The core of this update is the complete re-architecture of the protocol layer, replacing the generic, `aioquic`-derived H3 component with a specialized, in-house `WebTransportH3Engine`. This change dramatically improves maintainability, reduces complexity, and perfectly aligns the protocol implementation with the specific needs of WebTransport, solidifying the library's foundation as a truly independent and production-grade solution.
@@ -207,7 +232,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.2.1...v0.3.0

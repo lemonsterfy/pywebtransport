@@ -44,7 +44,7 @@ class TestExceptionClasses:
         assert exc.message == "Base error"
         assert exc.error_code == 100
         assert exc.details == {"info": "abc"}
-        assert str(exc) == "[100] Base error"
+        assert str(exc) == "[0x64] Base error"
         assert repr(exc) == "WebTransportError(message='Base error', error_code=100)"
         assert exc.to_dict() == {
             "type": "WebTransportError",
@@ -155,10 +155,10 @@ class TestExceptionClasses:
 
     def test_stream_error_custom_str(self) -> None:
         exc_no_id = StreamError("No ID")
-        assert str(exc_no_id) == f"[{exc_no_id.error_code}] No ID"
+        assert str(exc_no_id) == f"[{hex(exc_no_id.error_code)}] No ID"
 
         exc_with_id = StreamError("With ID", stream_id=5)
-        assert str(exc_with_id) == f"[{exc_with_id.error_code}] With ID (stream_id=5)"
+        assert str(exc_with_id) == f"[{hex(exc_with_id.error_code)}] With ID (stream_id=5)"
 
 
 class TestExceptionFactories:

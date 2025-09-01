@@ -7,8 +7,8 @@ import pytest
 from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
+from pywebtransport import WebTransportSession
 from pywebtransport.server import RequestRouter
-from pywebtransport.session import WebTransportSession
 
 
 class TestRequestRouter:

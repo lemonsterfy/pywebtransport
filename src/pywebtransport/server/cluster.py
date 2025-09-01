@@ -109,6 +109,7 @@ class ServerCluster:
                         tg.create_task(server.close())
             except* Exception as eg:
                 logger.error(f"Errors occurred while stopping server cluster: {eg.exceptions}")
+                raise eg
         logger.info("Stopped server cluster")
 
     async def add_server(self, config: ServerConfig) -> WebTransportServer | None:
@@ -187,6 +188,7 @@ class ServerCluster:
                     tasks.append(tg.create_task(s.get_server_stats()))
         except* Exception as eg:
             logger.error(f"Failed to fetch stats from some servers: {eg.exceptions}")
+            raise eg
 
         stats_list = [task.result() for task in tasks if task.done() and not task.exception()]
 

@@ -12,6 +12,7 @@ from aioquic.quic.connection import QuicConnection, stream_is_unidirectional
 from aioquic.quic.events import DatagramFrameReceived, QuicEvent, StreamDataReceived
 from aioquic.quic.logger import QuicLoggerTrace
 
+from pywebtransport.constants import ErrorCodes
 from pywebtransport.exceptions import ProtocolError
 from pywebtransport.protocol.events import (
     DatagramReceived,
@@ -40,7 +41,7 @@ _RawHeaders = list[tuple[bytes, bytes]]
 
 
 class FrameType(IntEnum):
-    """Enumeration of HTTP/3 frame types."""
+    """An enumeration of HTTP/3 frame types."""
 
     DATA = 0x0
     HEADERS = 0x1
@@ -50,14 +51,14 @@ class FrameType(IntEnum):
 
 
 class HeadersState(Enum):
-    """State for tracking header frames on a stream."""
+    """The state for tracking header frames on a stream."""
 
     INITIAL = 0
     AFTER_HEADERS = 1
 
 
 class Setting(IntEnum):
-    """Enumeration of HTTP/3 settings."""
+    """An enumeration of HTTP/3 settings."""
 
     QPACK_MAX_TABLE_CAPACITY = 0x1
     MAX_FIELD_SECTION_SIZE = 0x6
@@ -69,7 +70,7 @@ class Setting(IntEnum):
 
 
 class StreamType(IntEnum):
-    """Enumeration of unidirectional stream types."""
+    """An enumeration of unidirectional stream types."""
 
     CONTROL = 0
     QPACK_ENCODER = 2
@@ -78,7 +79,7 @@ class StreamType(IntEnum):
 
 
 class H3Stream:
-    """Represents the state of a single HTTP/3 stream."""
+    """The state of a single HTTP/3 stream."""
 
     def __init__(self, stream_id: int) -> None:
         """Initialize an H3Stream."""
@@ -160,8 +161,6 @@ class WebTransportH3Engine:
         except ProtocolError as exc:
             self._is_done = True
             self._quic.close(error_code=exc.error_code, reason_phrase=str(exc))
-        except pylsqpack.StreamBlocked:
-            pass
         return []
 
     def send_data(self, stream_id: int, data: bytes, end_stream: bool) -> None:
@@ -172,7 +171,10 @@ class WebTransportH3Engine:
     def send_datagram(self, stream_id: int, data: bytes) -> None:
         """Send a datagram."""
         if not stream_is_request_response(stream_id):
-            raise ProtocolError("Datagrams can only be sent for client-initiated bidirectional streams")
+            raise ProtocolError(
+                "Datagrams can only be sent for client-initiated bidirectional streams",
+                error_code=ErrorCodes.H3_STREAM_CREATION_ERROR,
+            )
 
         self._quic.send_datagram_frame(encode_uint_var(stream_id // 4) + data)
 
@@ -180,7 +182,10 @@ class WebTransportH3Engine:
         """Send headers on a stream."""
         stream = self._get_or_create_stream(stream_id)
         if stream.headers_send_state == HeadersState.AFTER_HEADERS:
-            raise ProtocolError("HEADERS frame is not allowed after initial headers")
+            raise ProtocolError(
+                "HEADERS frame is not allowed after initial headers",
+                error_code=ErrorCodes.H3_FRAME_UNEXPECTED,
+            )
 
         raw_headers: _RawHeaders = [(k.encode("utf-8"), v.encode("utf-8")) for k, v in headers.items()]
         frame_data = self._encode_headers(stream_id, raw_headers)
@@ -215,7 +220,10 @@ class WebTransportH3Engine:
             if self._local_decoder_stream_id is not None:
                 self._quic.send_stream_data(self._local_decoder_stream_id, decoder)
         except pylsqpack.DecompressionFailed as exc:
-            raise ProtocolError("QPACK decompression failed") from exc
+            raise ProtocolError(
+                "QPACK decompression failed",
+                error_code=ErrorCodes.QPACK_DECOMPRESSION_FAILED,
+            ) from exc
 
         app_headers: Headers = {k.decode("utf-8", "ignore"): v.decode("utf-8", "ignore") for k, v in raw_headers}
         return raw_headers, app_headers
@@ -249,12 +257,18 @@ class WebTransportH3Engine:
     def _handle_control_frame(self, frame_type: int, frame_data: bytes) -> None:
         """Handle a frame received on the control stream."""
         if frame_type != FrameType.SETTINGS and not self._settings_received:
-            raise ProtocolError("First frame on control stream must be SETTINGS")
+            raise ProtocolError(
+                "First frame on control stream must be SETTINGS",
+                error_code=ErrorCodes.H3_MISSING_SETTINGS,
+            )
 
         match frame_type:
             case FrameType.SETTINGS:
                 if self._settings_received:
-                    raise ProtocolError("SETTINGS frame received twice")
+                    raise ProtocolError(
+                        "SETTINGS frame received twice",
+                        error_code=ErrorCodes.H3_FRAME_UNEXPECTED,
+                    )
                 settings = parse_settings(frame_data)
                 self._validate_settings(settings)
                 self._received_settings = settings
@@ -266,7 +280,10 @@ class WebTransportH3Engine:
                     self._quic.send_stream_data(self._local_encoder_stream_id, encoder)
                 self._settings_received = True
             case FrameType.HEADERS:
-                raise ProtocolError("Invalid frame type on control stream")
+                raise ProtocolError(
+                    "Invalid frame type on control stream",
+                    error_code=ErrorCodes.H3_FRAME_UNEXPECTED,
+                )
             case _:
                 pass
 
@@ -277,7 +294,10 @@ class WebTransportH3Engine:
         match frame_type:
             case FrameType.DATA:
                 if stream.headers_recv_state != HeadersState.AFTER_HEADERS:
-                    raise ProtocolError("DATA frame received before HEADERS")
+                    raise ProtocolError(
+                        "DATA frame received before HEADERS",
+                        error_code=ErrorCodes.H3_FRAME_UNEXPECTED,
+                    )
                 if stream_ended or frame_data:
                     return [
                         DataReceived(
@@ -288,7 +308,10 @@ class WebTransportH3Engine:
                     ]
             case FrameType.HEADERS:
                 if stream.headers_recv_state == HeadersState.AFTER_HEADERS:
-                    raise ProtocolError("HEADERS frame received after initial headers")
+                    raise ProtocolError(
+                        "HEADERS frame received after initial headers",
+                        error_code=ErrorCodes.H3_FRAME_UNEXPECTED,
+                    )
 
                 raw_headers, app_headers = self._decode_headers(stream.stream_id, frame_data)
 
@@ -316,7 +339,10 @@ class WebTransportH3Engine:
                     )
                 ]
             case FrameType.SETTINGS | FrameType.GOAWAY:
-                raise ProtocolError("Invalid frame type on request stream")
+                raise ProtocolError(
+                    "Invalid frame type on request stream",
+                    error_code=ErrorCodes.H3_FRAME_UNEXPECTED,
+                )
 
         return []
 
@@ -346,7 +372,10 @@ class WebTransportH3Engine:
         try:
             quarter_stream_id = buf.pull_uint_var()
         except BufferReadError:
-            raise ProtocolError("Could not parse quarter stream ID from datagram")
+            raise ProtocolError(
+                "Could not parse quarter stream ID from datagram",
+                error_code=ErrorCodes.H3_DATAGRAM_ERROR,
+            )
 
         return [DatagramReceived(data=data[buf.tell() :], stream_id=quarter_stream_id * 4)]
 
@@ -434,14 +463,19 @@ class WebTransportH3Engine:
                 stream.frame_size = None
                 stream.frame_type = None
 
-            http_events.extend(
-                self._handle_request_frame(
-                    frame_type=frame_type,
-                    frame_data=frame_data,
-                    stream=stream,
-                    stream_ended=stream.ended and buf.eof(),
+            try:
+                http_events.extend(
+                    self._handle_request_frame(
+                        frame_type=frame_type,
+                        frame_data=frame_data,
+                        stream=stream,
+                        stream_ended=stream.ended and buf.eof(),
+                    )
                 )
-            )
+            except pylsqpack.StreamBlocked:
+                stream.blocked = True
+                stream.blocked_frame_size = len(frame_data)
+                break
         stream.buffer = stream.buffer[consumed:]
         return http_events
 
@@ -452,30 +486,10 @@ class WebTransportH3Engine:
         if stream_ended:
             stream.ended = True
 
-        if stream.stream_type == StreamType.WEBTRANSPORT:
-            assert stream.session_id is not None
-            if stream.buffer or stream_ended:
-                http_events.append(
-                    WebTransportStreamDataReceived(
-                        data=stream.buffer,
-                        session_id=stream.session_id,
-                        stream_ended=stream.ended,
-                        stream_id=stream.stream_id,
-                    )
-                )
-                stream.buffer = b""
-            return http_events
-
-        buf = Buffer(data=stream.buffer)
-        consumed = 0
-        unblocked_streams: set[int] = set()
-
-        while not buf.eof():
-            if stream.stream_type is None:
-                try:
-                    stream.stream_type = buf.pull_uint_var()
-                except BufferReadError:
-                    break
+        if stream.stream_type is None:
+            buf = Buffer(data=stream.buffer)
+            try:
+                stream.stream_type = buf.pull_uint_var()
                 consumed = buf.tell()
                 if stream.stream_type not in (
                     StreamType.CONTROL,
@@ -483,47 +497,71 @@ class WebTransportH3Engine:
                     StreamType.QPACK_ENCODER,
                     StreamType.WEBTRANSPORT,
                 ):
-                    break
+                    stream.buffer = b""
+                    return http_events
 
                 if stream.stream_type == StreamType.CONTROL:
                     if self._peer_control_stream_id is not None:
-                        raise ProtocolError("Only one control stream is allowed")
+                        raise ProtocolError(
+                            "Only one control stream is allowed",
+                            error_code=ErrorCodes.H3_STREAM_CREATION_ERROR,
+                        )
                     self._peer_control_stream_id = stream.stream_id
                 elif stream.stream_type == StreamType.QPACK_DECODER:
                     if self._peer_decoder_stream_id is not None:
-                        raise ProtocolError("Only one QPACK decoder stream is allowed")
+                        raise ProtocolError(
+                            "Only one QPACK decoder stream is allowed",
+                            error_code=ErrorCodes.H3_STREAM_CREATION_ERROR,
+                        )
                     self._peer_decoder_stream_id = stream.stream_id
                 elif stream.stream_type == StreamType.QPACK_ENCODER:
                     if self._peer_encoder_stream_id is not None:
-                        raise ProtocolError("Only one QPACK encoder stream is allowed")
+                        raise ProtocolError(
+                            "Only one QPACK encoder stream is allowed",
+                            error_code=ErrorCodes.H3_STREAM_CREATION_ERROR,
+                        )
                     self._peer_encoder_stream_id = stream.stream_id
                 self._log_stream_type(stream_id=stream.stream_id, stream_type=stream.stream_type)
+                stream.buffer = stream.buffer[consumed:]
+            except BufferReadError:
+                return http_events
 
-            if stream.stream_type == StreamType.WEBTRANSPORT:
-                if stream.session_id is None:
-                    try:
-                        stream.session_id = buf.pull_uint_var()
-                    except BufferReadError:
-                        break
+        if stream.stream_type == StreamType.WEBTRANSPORT:
+            buf = Buffer(data=stream.buffer)
+            consumed = 0
+            if stream.session_id is None:
+                try:
+                    stream.session_id = buf.pull_uint_var()
                     consumed = buf.tell()
+                except BufferReadError:
+                    return http_events
 
-                frame_data = stream.buffer[consumed:]
-                if frame_data or stream_ended:
-                    http_events.append(
-                        WebTransportStreamDataReceived(
-                            data=frame_data,
-                            session_id=stream.session_id,
-                            stream_ended=stream.ended,
-                            stream_id=stream.stream_id,
-                        )
+            payload = stream.buffer[consumed:]
+            stream.buffer = b""
+            if payload or stream_ended:
+                assert stream.session_id is not None
+                http_events.append(
+                    WebTransportStreamDataReceived(
+                        data=payload,
+                        session_id=stream.session_id,
+                        stream_ended=stream.ended,
+                        stream_id=stream.stream_id,
                     )
-                consumed += len(frame_data)
-                break
+                )
+            return http_events
 
+        if stream.stream_type == StreamType.CONTROL and stream.ended:
+            raise ProtocolError(
+                "Closing control stream is not allowed",
+                error_code=ErrorCodes.H3_CLOSED_CRITICAL_STREAM,
+            )
+
+        buf = Buffer(data=stream.buffer)
+        consumed = 0
+        unblocked_streams: set[int] = set()
+        while not buf.eof():
             match stream.stream_type:
                 case StreamType.CONTROL:
-                    if stream_ended:
-                        raise ProtocolError("Closing control stream is not allowed")
                     try:
                         frame_type = buf.pull_uint_var()
                         frame_length = buf.pull_uint_var()
@@ -538,29 +576,40 @@ class WebTransportH3Engine:
                     try:
                         self._encoder.feed_decoder(data)
                     except pylsqpack.DecoderStreamError as exc:
-                        raise ProtocolError("QPACK decoder stream error") from exc
+                        raise ProtocolError(
+                            "QPACK decoder stream error",
+                            error_code=ErrorCodes.QPACK_DECODER_STREAM_ERROR,
+                        ) from exc
                 case StreamType.QPACK_ENCODER:
                     data = buf.pull_bytes(buf.capacity - buf.tell())
                     consumed = buf.tell()
                     try:
                         unblocked_streams.update(self._decoder.feed_encoder(data))
                     except pylsqpack.EncoderStreamError as exc:
-                        raise ProtocolError("QPACK encoder stream error") from exc
+                        raise ProtocolError(
+                            "QPACK encoder stream error",
+                            error_code=ErrorCodes.QPACK_ENCODER_STREAM_ERROR,
+                        ) from exc
                 case _:
                     break
-
         stream.buffer = stream.buffer[consumed:]
 
         for stream_id in unblocked_streams:
             stream = self._stream[stream_id]
-            http_events.extend(
-                self._handle_request_frame(
-                    frame_type=FrameType.HEADERS,
-                    frame_data=None,
-                    stream=stream,
-                    stream_ended=stream.ended and not stream.buffer,
+            try:
+                http_events.extend(
+                    self._handle_request_frame(
+                        frame_type=FrameType.HEADERS,
+                        frame_data=None,
+                        stream=stream,
+                        stream_ended=stream.ended and not stream.buffer,
+                    )
                 )
-            )
+            except pylsqpack.StreamBlocked:
+                stream.blocked = True
+                stream.blocked_frame_size = 0
+                continue
+
             stream.blocked = False
             stream.blocked_frame_size = None
             if stream.buffer:
@@ -572,11 +621,20 @@ class WebTransportH3Engine:
         """Validate the peer's HTTP/3 settings."""
         for setting in [Setting.ENABLE_CONNECT_PROTOCOL, Setting.ENABLE_WEBTRANSPORT, Setting.H3_DATAGRAM]:
             if setting in settings and settings[setting] not in (0, 1):
-                raise ProtocolError(f"{setting.name} setting must be 0 or 1")
+                raise ProtocolError(
+                    f"{setting.name} setting must be 0 or 1",
+                    error_code=ErrorCodes.H3_SETTINGS_ERROR,
+                )
         if settings.get(Setting.H3_DATAGRAM) == 1 and self._quic._remote_max_datagram_frame_size is None:
-            raise ProtocolError("H3_DATAGRAM requires max_datagram_frame_size transport parameter")
+            raise ProtocolError(
+                "H3_DATAGRAM requires max_datagram_frame_size transport parameter",
+                error_code=ErrorCodes.H3_SETTINGS_ERROR,
+            )
         if settings.get(Setting.ENABLE_WEBTRANSPORT) == 1 and settings.get(Setting.H3_DATAGRAM) != 1:
-            raise ProtocolError("ENABLE_WEBTRANSPORT requires H3_DATAGRAM")
+            raise ProtocolError(
+                "ENABLE_WEBTRANSPORT requires H3_DATAGRAM",
+                error_code=ErrorCodes.H3_SETTINGS_ERROR,
+            )
 
 
 def encode_frame(frame_type: int, frame_data: bytes) -> bytes:
@@ -607,12 +665,21 @@ def parse_settings(data: bytes) -> dict[int, int]:
             setting = buf.pull_uint_var()
             value = buf.pull_uint_var()
             if setting in RESERVED_SETTINGS:
-                raise ProtocolError(f"Setting identifier 0x{setting:x} is reserved")
+                raise ProtocolError(
+                    f"Setting identifier 0x{setting:x} is reserved",
+                    error_code=ErrorCodes.H3_SETTINGS_ERROR,
+                )
             if setting in settings:
-                raise ProtocolError(f"Setting identifier 0x{setting:x} is included twice")
+                raise ProtocolError(
+                    f"Setting identifier 0x{setting:x} is included twice",
+                    error_code=ErrorCodes.H3_SETTINGS_ERROR,
+                )
             settings[setting] = value
     except BufferReadError as exc:
-        raise ProtocolError("Malformed SETTINGS frame payload") from exc
+        raise ProtocolError(
+            "Malformed SETTINGS frame payload",
+            error_code=ErrorCodes.H3_FRAME_ERROR,
+        ) from exc
     return dict(settings)
 
 
@@ -625,21 +692,36 @@ def validate_header_name(key: bytes) -> None:
     """Validate an HTTP header name."""
     for i, c in enumerate(key):
         if c <= 0x20 or (c >= 0x41 and c <= 0x5A) or c >= 0x7F:
-            raise ProtocolError(f"Header {key!r} contains invalid characters")
+            raise ProtocolError(
+                f"Header {key!r} contains invalid characters",
+                error_code=ErrorCodes.H3_MESSAGE_ERROR,
+            )
         if c == COLON and i != 0:
-            raise ProtocolError(f"Header {key!r} contains a non-initial colon")
+            raise ProtocolError(
+                f"Header {key!r} contains a non-initial colon",
+                error_code=ErrorCodes.H3_MESSAGE_ERROR,
+            )
 
 
 def validate_header_value(key: bytes, value: bytes) -> None:
     """Validate an HTTP header value."""
     for c in value:
         if c == NUL or c == LF or c == CR:
-            raise ProtocolError(f"Header {key!r} value has forbidden characters")
+            raise ProtocolError(
+                f"Header {key!r} value has forbidden characters",
+                error_code=ErrorCodes.H3_MESSAGE_ERROR,
+            )
     if len(value) > 0:
         if value[0] in WHITESPACE:
-            raise ProtocolError(f"Header {key!r} value starts with whitespace")
+            raise ProtocolError(
+                f"Header {key!r} value starts with whitespace",
+                error_code=ErrorCodes.H3_MESSAGE_ERROR,
+            )
         if len(value) > 1 and value[-1] in WHITESPACE:
-            raise ProtocolError(f"Header {key!r} value ends with whitespace")
+            raise ProtocolError(
+                f"Header {key!r} value ends with whitespace",
+                error_code=ErrorCodes.H3_MESSAGE_ERROR,
+            )
 
 
 def validate_headers(
@@ -661,11 +743,20 @@ def validate_headers(
 
         if key.startswith(b":"):
             if after_pseudo_headers:
-                raise ProtocolError(f"Pseudo-header {key!r} is not allowed after regular headers")
+                raise ProtocolError(
+                    f"Pseudo-header {key!r} is not allowed after regular headers",
+                    error_code=ErrorCodes.H3_MESSAGE_ERROR,
+                )
             if key not in allowed_pseudo_headers:
-                raise ProtocolError(f"Pseudo-header {key!r} is not valid")
+                raise ProtocolError(
+                    f"Pseudo-header {key!r} is not valid",
+                    error_code=ErrorCodes.H3_MESSAGE_ERROR,
+                )
             if key in seen_pseudo_headers:
-                raise ProtocolError(f"Pseudo-header {key!r} is included twice")
+                raise ProtocolError(
+                    f"Pseudo-header {key!r} is included twice",
+                    error_code=ErrorCodes.H3_MESSAGE_ERROR,
+                )
             seen_pseudo_headers.add(key)
             if key == b":authority":
                 authority = value
@@ -678,13 +769,22 @@ def validate_headers(
 
     missing = required_pseudo_headers.difference(seen_pseudo_headers)
     if missing:
-        raise ProtocolError(f"Pseudo-headers {sorted(missing)} are missing")
+        raise ProtocolError(
+            f"Pseudo-headers {sorted(missing)} are missing",
+            error_code=ErrorCodes.H3_MESSAGE_ERROR,
+        )
 
     if scheme in (b"http", b"https"):
         if not authority:
-            raise ProtocolError("Pseudo-header b':authority' cannot be empty")
+            raise ProtocolError(
+                "Pseudo-header b':authority' cannot be empty",
+                error_code=ErrorCodes.H3_MESSAGE_ERROR,
+            )
         if not path:
-            raise ProtocolError("Pseudo-header b':path' cannot be empty")
+            raise ProtocolError(
+                "Pseudo-header b':path' cannot be empty",
+                error_code=ErrorCodes.H3_MESSAGE_ERROR,
+            )
 
 
 def validate_request_headers(headers: _RawHeaders) -> None:

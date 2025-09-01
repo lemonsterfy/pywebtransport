@@ -1,7 +1,8 @@
 """Unit tests for the pywebtransport.server.utils module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, cast
+from collections.abc import AsyncGenerator
+from typing import Any, cast
 
 import pytest
 from pytest_mock import MockerFixture

@@ -38,9 +38,9 @@ class StreamPool:
         self._session = session
         self._pool_size = pool_size
         self._maintenance_interval = maintenance_interval
-        self._available: asyncio.Queue[WebTransportStream] | None = None
+        self._available: list[WebTransportStream] = []
         self._total_managed_streams = 0
-        self._lock: asyncio.Lock | None = None
+        self._condition: asyncio.Condition | None = None
         self._maintenance_task: asyncio.Task[None] | None = None
 
     @classmethod
@@ -50,13 +50,12 @@ class StreamPool:
         *,
         pool_size: int = 10,
     ) -> Self:
-        """Factory method to create a new stream pool instance."""
+        """Create a new stream pool instance."""
         return cls(session, pool_size=pool_size)
 
     async def __aenter__(self) -> Self:
         """Enter the async context and initialize the pool."""
-        self._available = asyncio.Queue(maxsize=self._pool_size)
-        self._lock = asyncio.Lock()
+        self._condition = asyncio.Condition()
         await self._initialize_pool()
         return self
 
@@ -71,7 +70,7 @@ class StreamPool:
 
     async def close_all(self) -> None:
         """Close all idle streams and shut down the pool."""
-        if self._lock is None or self._available is None:
+        if self._condition is None:
             raise StreamError(
                 "StreamPool has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
@@ -85,11 +84,10 @@ class StreamPool:
                 pass
 
         streams_to_close: list[WebTransportStream] = []
-        while not self._available.empty():
-            try:
-                streams_to_close.append(self._available.get_nowait())
-            except asyncio.QueueEmpty:
-                break
+        async with self._condition:
+            streams_to_close.extend(self._available)
+            self._available.clear()
+            self._total_managed_streams = 0
 
         if streams_to_close:
             try:
@@ -100,109 +98,142 @@ class StreamPool:
                 logger.error(f"Errors occurred while closing pooled streams: {eg.exceptions}")
             logger.info(f"Closed {len(streams_to_close)} idle streams from the pool.")
 
-        async with self._lock:
-            self._total_managed_streams = 0
-
     async def get_stream(self, *, timeout: float | None = None) -> WebTransportStream:
         """Get a stream from the pool, creating a new one if necessary."""
-        if self._lock is None or self._available is None:
+        if self._condition is None:
             raise StreamError(
                 "StreamPool has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
 
-        while not self._available.empty():
-            try:
-                stream = self._available.get_nowait()
-                if not stream.is_closed:
-                    logger.debug(f"Reusing stream {stream.stream_id} from pool.")
-                    return stream
-                else:
-                    logger.debug(f"Discarding stale stream {stream.stream_id} from pool.")
-                    async with self._lock:
+        async with self._condition:
+            while True:
+                while self._available:
+                    stream = self._available.pop(0)
+                    if not stream.is_closed:
+                        logger.debug(f"Reusing stream {stream.stream_id} from pool.")
+                        return stream
+                    else:
+                        logger.debug(f"Discarding stale stream {stream.stream_id} from pool.")
                         self._total_managed_streams -= 1
-            except asyncio.QueueEmpty:
-                break
 
-        logger.debug("Pool is empty, creating a new unpooled stream.")
+                if self._total_managed_streams < self._pool_size:
+                    self._total_managed_streams += 1
+                    break
+
+                logger.debug("Pool is full. Waiting for a stream to be returned.")
+                try:
+                    await asyncio.wait_for(self._condition.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    raise StreamError(f"Timeout waiting for a stream from the pool after {timeout}s.") from None
+
         try:
+            logger.debug("Creating new stream as pool was empty or depleted.")
             return await self._session.create_bidirectional_stream()
-        except Exception as e:
-            raise StreamError("Failed to create a new stream as pool was empty") from e
+        except Exception:
+            async with self._condition:
+                self._total_managed_streams -= 1
+                self._condition.notify()
+            raise
 
     async def return_stream(self, stream: WebTransportStream) -> None:
         """Return a stream to the pool for potential reuse."""
-        if self._lock is None or self._available is None:
+        if self._condition is None:
             raise StreamError(
                 "StreamPool has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
 
-        if stream.is_closed:
-            async with self._lock:
-                if self._total_managed_streams > self._available.qsize():
-                    self._total_managed_streams -= 1
-            return
+        should_close = stream.is_closed
+        async with self._condition:
+            if not should_close:
+                if len(self._available) >= self._pool_size:
+                    should_close = True
+                else:
+                    self._available.append(stream)
+                    logger.debug(f"Returned stream {stream.stream_id} to pool.")
+                    self._condition.notify()
 
-        try:
-            self._available.put_nowait(stream)
-            logger.debug(f"Returned stream {stream.stream_id} to pool.")
-        except asyncio.QueueFull:
-            logger.debug(f"Stream pool is full, closing returned stream {stream.stream_id}.")
+            if should_close:
+                if self._total_managed_streams > len(self._available):
+                    self._total_managed_streams -= 1
+                    self._condition.notify()
+
+        if should_close:
             await stream.close()
 
     async def _fill_pool(self) -> None:
         """Create new streams concurrently until the pool reaches its target size."""
-        if self._available is None:
+        if self._condition is None:
             return
-
-        needed = self._pool_size - self._total_managed_streams
-        if needed <= 0:
-            return
-
         if self._session.is_closed:
             logger.warning("Session closed, cannot replenish stream pool.")
             return
 
+        created_streams: list[WebTransportStream] = []
+        needed = 0
+        async with self._condition:
+            needed = self._pool_size - self._total_managed_streams
+            if needed <= 0:
+                return
+            self._total_managed_streams += needed
+
         try:
             async with asyncio.TaskGroup() as tg:
                 tasks = [tg.create_task(self._session.create_bidirectional_stream()) for _ in range(needed)]
-
-            created_streams = [task.result() for task in tasks]
-            for stream in created_streams:
-                await self._available.put(stream)
-                self._total_managed_streams += 1
-
+            created_streams = [task.result() for task in tasks if task.done() and not task.exception()]
         except* Exception as eg:
             logger.error(f"Failed to create {needed} streams for the pool: {eg.exceptions}")
+            async with self._condition:
+                self._total_managed_streams -= needed
+                self._condition.notify_all()
+
+        if created_streams:
+            async with self._condition:
+                successful_count = len(created_streams)
+                if successful_count < needed:
+                    self._total_managed_streams -= needed - successful_count
+                self._available.extend(created_streams)
+                if successful_count > 0:
+                    self._condition.notify_all()
 
     async def _initialize_pool(self) -> None:
         """Initialize the pool by pre-filling it with new streams."""
-        if self._lock is None:
+        if self._condition is None:
             return
-        try:
-            async with self._lock:
-                if self._total_managed_streams > 0:
-                    return
+
+        needs_fill = False
+        async with self._condition:
+            if self._total_managed_streams == 0:
+                needs_fill = True
+
+        if needs_fill:
+            try:
                 await self._fill_pool()
                 self._start_maintenance_task()
                 logger.info(f"Stream pool initialized with {self._total_managed_streams} streams.")
-        except Exception as e:
-            logger.error(f"Error initializing stream pool: {e}")
-            await self.close_all()
+            except Exception as e:
+                logger.error(f"Error initializing stream pool: {e}")
+                await self.close_all()
 
     async def _maintain_pool_loop(self) -> None:
         """Periodically check and replenish the stream pool."""
-        if self._lock is None:
+        if self._condition is None:
             return
+
         try:
             while True:
                 await asyncio.sleep(self._maintenance_interval)
-                async with self._lock:
-                    current_total = self._total_managed_streams
-                    if current_total < self._pool_size:
-                        logger.debug(f"Replenishing pool. Size ({current_total}) is below target ({self._pool_size}).")
-                        await self._fill_pool()
+                needs_fill = False
+                async with self._condition:
+                    if self._total_managed_streams < self._pool_size:
+                        logger.debug(
+                            f"Replenishing pool. Size ({self._total_managed_streams}) "
+                            f"is below target ({self._pool_size})."
+                        )
+                        needs_fill = True
+                if needs_fill:
+                    await self._fill_pool()
         except asyncio.CancelledError:
             logger.info("Stream pool maintenance task cancelled.")
         except Exception as e:

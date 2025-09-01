@@ -64,7 +64,7 @@ class WebTransportError(Exception):
 
     def __str__(self) -> str:
         """Return a simple string representation of the error."""
-        return f"[{self.error_code}] {self.message}"
+        return f"[{hex(self.error_code)}] {self.message}"
 
     def __repr__(self) -> str:
         """Return a detailed string representation of the error."""

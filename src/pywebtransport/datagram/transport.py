@@ -283,7 +283,9 @@ class DatagramQueue:
     async def clear(self) -> None:
         """Safely clear all items from the queue."""
         if self._lock is None or self._not_empty is None:
-            return
+            raise DatagramError(
+                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+            )
 
         async with self._lock:
             for priority_queue in self._priority_queues.values():

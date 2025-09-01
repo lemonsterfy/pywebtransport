@@ -8,9 +8,10 @@ import asyncio
 import time
 import weakref
 from collections import deque
+from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, AsyncIterator, Self, Type
+from typing import TYPE_CHECKING, Any, Self, Type
 
 from pywebtransport.constants import WebTransportConstants
 from pywebtransport.events import Event, EventEmitter

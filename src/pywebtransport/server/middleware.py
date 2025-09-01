@@ -5,7 +5,8 @@ WebTransport Middleware Framework.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, Self
+from collections.abc import Awaitable, Callable
+from typing import Any, Self
 
 from pywebtransport.exceptions import ServerError
 from pywebtransport.session import WebTransportSession

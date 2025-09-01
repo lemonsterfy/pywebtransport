@@ -2,12 +2,14 @@
 
 import asyncio
 import logging
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
+from pywebtransport import ServerError, WebTransportSession
 from pywebtransport.server import (
     MiddlewareManager,
     create_auth_middleware,
@@ -16,7 +18,6 @@ from pywebtransport.server import (
     create_rate_limit_middleware,
 )
 from pywebtransport.server.middleware import RateLimiter
-from pywebtransport.session import WebTransportSession
 
 
 class TestMiddlewareManager:
@@ -207,15 +208,14 @@ class TestRateLimiter:
         assert await rate_limiter(session) is True
 
     @pytest.mark.asyncio
-    async def test_lifecycle_and_cleanup(self, mocker: MockerFixture) -> None:
+    async def test_lifecycle_and_cleanup(self, mocker: MockerFixture, caplog: LogCaptureFixture) -> None:
+        caplog.set_level(logging.DEBUG)
         original_sleep = asyncio.sleep
         proceed_event = asyncio.Event()
 
         async def sleep_mock(delay: float) -> None:
             if delay > 0:
-                await proceed_event.wait()
-                proceed_event.clear()
-                return
+                proceed_event.set()
             await original_sleep(0)
 
         mocker.patch("asyncio.sleep", side_effect=sleep_mock)
@@ -229,9 +229,10 @@ class TestRateLimiter:
                 rl._requests["stale_ip"] = [100.0]
 
             mock_timestamp.return_value = 215.0
-            proceed_event.set()
+            await proceed_event.wait()
             await asyncio.sleep(0)
 
+            assert "Cleaned up 1 stale IP entries" in caplog.text
             assert rl._lock is not None
             async with rl._lock:
                 assert "active_ip" in rl._requests
@@ -290,3 +291,19 @@ class TestRateLimiter:
                 await rate_limiter._periodic_cleanup()
 
             assert "empty_ip" not in rate_limiter._requests
+
+    @pytest.mark.asyncio
+    async def test_periodic_cleanup_no_lock(self, caplog: LogCaptureFixture) -> None:
+        limiter = RateLimiter()
+
+        with caplog.at_level(logging.ERROR):
+            await limiter._periodic_cleanup()
+
+        assert "RateLimiter cleanup task cannot run without a lock" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_call_not_activated(self, mock_session: Any) -> None:
+        limiter = RateLimiter()
+
+        with pytest.raises(ServerError, match="RateLimiter has not been activated"):
+            await limiter(mock_session)

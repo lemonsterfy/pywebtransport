@@ -1,9 +1,11 @@
 """Unit tests for the pywebtransport.session.session module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, cast
+import weakref
+from collections.abc import AsyncGenerator
+from typing import Any, cast
 from unittest import mock
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, PropertyMock
 
 import pytest
 from pytest_mock import MockerFixture
@@ -18,16 +20,19 @@ from pywebtransport import (
     StreamDirection,
     StreamError,
     TimeoutError,
+    WebTransportReceiveStream,
     WebTransportSession,
     WebTransportStream,
 )
 from pywebtransport.connection import WebTransportConnection
 from pywebtransport.protocol import WebTransportProtocolHandler
 from pywebtransport.session import SessionStats
+from pywebtransport.stream import StreamManager
 
 
 class TestSessionStats:
-    def test_properties(self) -> None:
+    def test_properties(self, mocker: MockerFixture) -> None:
+        mocker.patch("pywebtransport.session.session.get_timestamp", return_value=1200.0)
         stats = SessionStats(session_id="session-1", created_at=1000.0)
 
         assert stats.uptime == 0.0
@@ -40,6 +45,12 @@ class TestSessionStats:
 
         assert stats.uptime == 200.0
         assert stats.active_streams == 6
+
+    def test_uptime_not_ready(self) -> None:
+        stats = SessionStats(session_id="session-1", created_at=1000.0)
+
+        assert stats.ready_at is None
+        assert stats.uptime == 0.0
 
     def test_to_dict(self) -> None:
         stats = SessionStats(
@@ -66,8 +77,8 @@ class TestWebTransportSession:
         connection.protocol_handler = mock_protocol_handler
         connection.config = ClientConfig()
         connection.connection_id = "conn-123"
-        connection.state.value = "connected"
-        connection.is_connected = True
+        connection.state = SessionState.CONNECTED
+        type(connection).is_connected = PropertyMock(return_value=True)
         connection.is_closed = False
         connection.info = mocker.MagicMock()
         connection.info.last_activity = 1000.0
@@ -94,6 +105,7 @@ class TestWebTransportSession:
         handler.off = mocker.MagicMock()
         handler.get_session_info.return_value = None
         handler.create_webtransport_stream.return_value = 101
+        handler.close_webtransport_session = mocker.Mock()
         return handler
 
     @pytest.fixture
@@ -104,8 +116,9 @@ class TestWebTransportSession:
         mocker: MockerFixture,
     ) -> AsyncGenerator[WebTransportSession, None]:
         mocker.patch("pywebtransport.session.session.get_timestamp", return_value=1000.0)
-        manager = mocker.MagicMock()
+        manager = mocker.create_autospec(StreamManager, instance=True)
         manager.__aenter__ = mocker.AsyncMock(return_value=manager)
+        manager.__aexit__ = mocker.AsyncMock()
         manager.create_bidirectional_stream = mocker.AsyncMock(
             return_value=mocker.create_autospec(WebTransportStream, instance=True)
         )
@@ -115,16 +128,14 @@ class TestWebTransportSession:
         manager.shutdown = mocker.AsyncMock()
         manager.add_stream = mocker.AsyncMock()
         manager.get_stats = mocker.AsyncMock(return_value={"total_created": 0, "total_closed": 0})
-        manager.get_all_streams = mocker.AsyncMock(return_value=[])
         mocker.patch("pywebtransport.session.session.StreamManager.create", return_value=manager)
-
         session_instance = WebTransportSession(connection=mock_connection, session_id="session-1")
         await session_instance.initialize()
         session_instance._incoming_streams = mocker.create_autospec(asyncio.Queue, instance=True)
 
         yield session_instance
 
-        if not session_instance.is_closed:
+        if not session_instance.is_closed and session_instance.stream_manager:
             await session_instance.close(close_connection=False)
 
     @pytest.mark.asyncio
@@ -151,6 +162,15 @@ class TestWebTransportSession:
         mock_protocol_handler.get_session_info.assert_called_once_with("session-1")
 
     @pytest.mark.asyncio
+    async def test_initialize_idempotent(self, session: WebTransportSession) -> None:
+        assert session._is_initialized
+
+        await session.initialize()
+
+        assert session.stream_manager is not None
+        cast(AsyncMock, session.stream_manager.__aenter__).assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_initialization_on_closed_connection(self, mock_connection: Any, mocker: MockerFixture) -> None:
         mock_connection.is_closed = True
         session = WebTransportSession(connection=mock_connection, session_id="session-1")
@@ -167,13 +187,12 @@ class TestWebTransportSession:
     async def test_initialization_no_protocol_handler(self, mocker: MockerFixture, mock_connection: Any) -> None:
         mock_logger = mocker.patch("pywebtransport.session.session.logger")
         mock_connection.protocol_handler = None
-
         session = WebTransportSession(connection=mock_connection, session_id="session-1")
+
         await session.initialize()
 
         assert session.protocol_handler is None
         mock_logger.warning.assert_called_with("No protocol handler available for session session-1")
-
         await session.close()
 
     @pytest.mark.asyncio
@@ -187,8 +206,8 @@ class TestWebTransportSession:
         mock_session_info.headers = {"x-synced": "true"}
         mock_session_info.stream_id = 42
         mock_protocol_handler.get_session_info.return_value = mock_session_info
-
         session = WebTransportSession(connection=mock_connection, session_id="session-1")
+
         await session.initialize()
 
         assert session.state == SessionState.CONNECTED
@@ -201,11 +220,18 @@ class TestWebTransportSession:
     @pytest.mark.asyncio
     async def test_properties(self, session: WebTransportSession) -> None:
         session._state = SessionState.CONNECTED
-        assert session.is_ready
-        assert not session.is_closed
+        assert (session.is_ready, session.is_closed) == (True, False)
 
         session._state = SessionState.CLOSED
-        assert (not session.is_ready, session.is_closed) == (True, True)
+        assert (session.is_ready, session.is_closed) == (False, True)
+
+    @pytest.mark.asyncio
+    async def test_connection_property_is_none(self, session: WebTransportSession, mocker: MockerFixture) -> None:
+        mock_ref = mocker.MagicMock(spec=weakref.ref)
+        mock_ref.return_value = None
+        session._connection = mock_ref
+
+        assert session.connection is None
 
     @pytest.mark.asyncio
     async def test_str_representation(self, session: WebTransportSession, mocker: MockerFixture) -> None:
@@ -243,6 +269,32 @@ class TestWebTransportSession:
             await session.datagrams
 
     @pytest.mark.asyncio
+    async def test_async_context_manager(self, mock_connection: Any, mocker: MockerFixture) -> None:
+        session = WebTransportSession(connection=mock_connection, session_id="session-1")
+        mocker.patch("pywebtransport.session.session.StreamManager.create", return_value=mocker.AsyncMock())
+        ready_mock = mocker.patch.object(session, "ready", new_callable=mocker.AsyncMock)
+        close_mock = mocker.patch.object(session, "close", new_callable=mocker.AsyncMock)
+
+        async def initialize_side_effect(*args: Any, **kwargs: Any) -> None:
+            session._is_initialized = True
+
+        initialize_mock = mocker.patch.object(
+            session, "initialize", new_callable=mocker.AsyncMock, side_effect=initialize_side_effect
+        )
+
+        async with session:
+            initialize_mock.assert_awaited_once()
+            ready_mock.assert_awaited_once()
+            close_mock.assert_not_awaited()
+        close_mock.assert_awaited_once()
+
+        async with session:
+            assert initialize_mock.call_count == 1
+            assert ready_mock.call_count == 2
+            assert close_mock.call_count == 1
+        assert close_mock.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_ready_already_connected(self, session: WebTransportSession) -> None:
         session._state = SessionState.CONNECTED
 
@@ -252,6 +304,7 @@ class TestWebTransportSession:
     async def test_ready_waits_for_event(self, session: WebTransportSession) -> None:
         session._state = SessionState.CONNECTING
         assert session._ready_event is not None
+
         session._ready_event.set()
 
         await session.ready()
@@ -266,6 +319,7 @@ class TestWebTransportSession:
     @pytest.mark.asyncio
     async def test_wait_closed(self, session: WebTransportSession) -> None:
         assert session._closed_event is not None
+
         session._closed_event.set()
 
         await session.wait_closed()
@@ -298,7 +352,6 @@ class TestWebTransportSession:
         assert session._closed_event.is_set()
         mock_protocol_handler.off.assert_called()
         mock_connection.off.assert_called_once_with(EventType.CONNECTION_CLOSED, session._on_connection_closed)
-
         if close_connection:
             cast(AsyncMock, mock_connection.close).assert_awaited_once()
         else:
@@ -324,6 +377,36 @@ class TestWebTransportSession:
         assert session.state == SessionState.CLOSED
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("resource_error", ["stream_manager", "datagrams", "connection", "multiple"])
+    async def test_close_handles_resource_errors(
+        self, session: WebTransportSession, mocker: MockerFixture, resource_error: str
+    ) -> None:
+        datagrams = await session.datagrams
+        error = ValueError("Resource failed to close")
+        if resource_error == "stream_manager":
+            assert session.stream_manager is not None
+            cast(AsyncMock, session.stream_manager.shutdown).side_effect = error
+        elif resource_error == "datagrams":
+            cast(AsyncMock, datagrams.close).side_effect = error
+        elif resource_error == "connection":
+            assert session.connection is not None
+            cast(AsyncMock, session.connection.close).side_effect = error
+        elif resource_error == "multiple":
+            assert session.stream_manager is not None
+            cast(AsyncMock, session.stream_manager.shutdown).side_effect = ValueError("Streams failed")
+            cast(AsyncMock, datagrams.close).side_effect = ValueError("Datagrams failed")
+            assert session.connection is not None
+            cast(AsyncMock, session.connection.close).side_effect = ValueError("Connection failed")
+        expected_exception = (
+            ExceptionGroup if resource_error in ("stream_manager", "datagrams", "multiple") else ValueError
+        )
+
+        with pytest.raises(expected_exception):
+            await session.close()
+
+        assert session.is_closed
+
+    @pytest.mark.asyncio
     async def test_create_stream_not_ready(self, session: WebTransportSession) -> None:
         session._state = SessionState.CONNECTING
 
@@ -342,15 +425,33 @@ class TestWebTransportSession:
             await getattr(session, method_name)()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("method_name", ["create_bidirectional_stream", "create_unidirectional_stream"])
+    async def test_create_stream_no_stream_manager(self, session: WebTransportSession, method_name: str) -> None:
+        session._state = SessionState.CONNECTED
+        session.stream_manager = None
+
+        with pytest.raises(SessionError, match="StreamManager is not available"):
+            await getattr(session, method_name)()
+
+    @pytest.mark.asyncio
     async def test_create_stream_protocol_failure(self, session: WebTransportSession) -> None:
         session._state = SessionState.CONNECTED
         assert session.stream_manager is not None
-        cast(AsyncMock, session.stream_manager.create_bidirectional_stream).side_effect = StreamError(
-            "Protocol handler failed to create stream: Kaboom"
-        )
+        cast(AsyncMock, session.stream_manager.create_bidirectional_stream).side_effect = StreamError("Kaboom")
 
-        with pytest.raises(StreamError, match="Protocol handler failed to create stream: Kaboom"):
+        with pytest.raises(StreamError, match="Kaboom"):
             await session.create_bidirectional_stream()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method_name", ["create_bidirectional_stream", "create_unidirectional_stream"])
+    async def test_create_stream_with_explicit_timeout(self, session: WebTransportSession, method_name: str) -> None:
+        session._state = SessionState.CONNECTED
+        assert session.stream_manager is not None
+        manager_method = getattr(session.stream_manager, method_name)
+        cast(AsyncMock, manager_method).side_effect = asyncio.TimeoutError()
+
+        with pytest.raises(StreamError, match="Timed out creating .* stream after 0.1s"):
+            await getattr(session, method_name)(timeout=0.1)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("method_name", ["create_bidirectional_stream", "create_unidirectional_stream"])
@@ -375,6 +476,35 @@ class TestWebTransportSession:
 
         with pytest.raises(StreamError, match="Timed out creating .* stream after 0.01s"):
             await getattr(session, method_name)()
+
+    @pytest.mark.asyncio
+    async def test_create_stream_on_protocol_no_handler(self, session: WebTransportSession) -> None:
+        session._protocol_handler = None
+
+        with pytest.raises(SessionError, match="Protocol handler is not available"):
+            await session._create_stream_on_protocol(is_unidirectional=False)
+
+    @pytest.mark.asyncio
+    async def test_create_stream_on_protocol_generic_exception(
+        self, session: WebTransportSession, mock_protocol_handler: Any
+    ) -> None:
+        mock_protocol_handler.create_webtransport_stream.side_effect = ValueError("Generic Error")
+
+        with pytest.raises(StreamError, match="Protocol handler failed to create stream: Generic Error"):
+            await session._create_stream_on_protocol(is_unidirectional=False)
+
+        assert session._stats.stream_errors == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("start_state", [SessionState.CLOSING, SessionState.CLOSED])
+    async def test_incoming_streams_on_closed_session(
+        self, session: WebTransportSession, start_state: SessionState
+    ) -> None:
+        session._state = start_state
+
+        streams = [s async for s in session.incoming_streams()]
+
+        assert streams == []
 
     @pytest.mark.asyncio
     async def test_incoming_streams(self, session: WebTransportSession, mocker: MockerFixture) -> None:
@@ -406,13 +536,15 @@ class TestWebTransportSession:
 
     @pytest.mark.asyncio
     async def test_on_session_ready(self, session: WebTransportSession) -> None:
-        event_data = {
-            "session_id": "session-1",
-            "path": "/ready",
-            "headers": {"content-type": "application/json"},
-            "stream_id": 101,
-        }
-        event = Event(type=EventType.SESSION_READY, data=event_data)
+        event = Event(
+            type=EventType.SESSION_READY,
+            data={
+                "session_id": "session-1",
+                "path": "/ready",
+                "headers": {"content-type": "application/json"},
+                "stream_id": 101,
+            },
+        )
 
         await session._on_session_ready(event)
 
@@ -423,15 +555,36 @@ class TestWebTransportSession:
         assert session._ready_event.is_set()
 
     @pytest.mark.asyncio
+    async def test_on_session_ready_mismatched_id(self, session: WebTransportSession) -> None:
+        event = Event(type=EventType.SESSION_READY, data={"session_id": "session-2"})
+
+        await session._on_session_ready(event)
+
+        assert not session.is_ready
+        assert session._ready_event is not None
+        assert not session._ready_event.is_set()
+
+    @pytest.mark.asyncio
     async def test_on_session_closed_remotely(self, session: WebTransportSession, mocker: MockerFixture) -> None:
         close_mock = mocker.patch.object(session, "close", new_callable=mocker.AsyncMock)
-        event_data = {"session_id": "session-1", "code": 404, "reason": "Not Found"}
-        event = Event(type=EventType.SESSION_CLOSED, data=event_data)
+        event = Event(
+            type=EventType.SESSION_CLOSED, data={"session_id": "session-1", "code": 404, "reason": "Not Found"}
+        )
         session._state = SessionState.CONNECTED
 
         await session._on_session_closed(event)
 
         cast(AsyncMock, close_mock).assert_awaited_once_with(code=404, reason="Not Found")
+
+    @pytest.mark.asyncio
+    async def test_on_session_closed_mismatched_id(self, session: WebTransportSession, mocker: MockerFixture) -> None:
+        close_mock = mocker.patch.object(session, "close", new_callable=mocker.AsyncMock)
+        event = Event(type=EventType.SESSION_CLOSED, data={"session_id": "session-2"})
+        session._state = SessionState.CONNECTED
+
+        await session._on_session_closed(event)
+
+        close_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_on_session_closed_remotely_when_already_closing(
@@ -459,31 +612,48 @@ class TestWebTransportSession:
         )
 
     @pytest.mark.asyncio
-    async def test_on_stream_opened(self, session: WebTransportSession, mocker: MockerFixture) -> None:
-        mock_cls = mocker.patch("pywebtransport.session.session.WebTransportStream", autospec=True)
-        mock_stream_instance = mock_cls.return_value
+    async def test_on_connection_closed_when_session_closing(
+        self, session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        close_mock = mocker.patch.object(session, "close", new_callable=mocker.AsyncMock)
+        event = Event(type=EventType.CONNECTION_CLOSED, data={})
+        session._state = SessionState.CLOSING
+
+        await session._on_connection_closed(event)
+
+        cast(AsyncMock, close_mock).assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("direction", [StreamDirection.BIDIRECTIONAL, StreamDirection.RECEIVE_ONLY])
+    @pytest.mark.parametrize("with_payload", [True, False])
+    async def test_on_stream_opened(
+        self, session: WebTransportSession, mocker: MockerFixture, direction: StreamDirection, with_payload: bool
+    ) -> None:
+        expected_class = WebTransportStream if direction == StreamDirection.BIDIRECTIONAL else WebTransportReceiveStream
+        mock_stream_class = mocker.patch(f"pywebtransport.session.session.{expected_class.__name__}", autospec=True)
+        mock_stream_instance = mock_stream_class.return_value
         mock_stream_instance.initialize = mock.AsyncMock()
         mock_stream_instance._on_data_received = mock.AsyncMock()
-        initial_payload = {"data": b"initial", "end_stream": True}
-
-        event = Event(
-            type=EventType.STREAM_OPENED,
-            data={
-                "session_id": "session-1",
-                "stream_id": 2,
-                "direction": StreamDirection.BIDIRECTIONAL,
-                "initial_payload": initial_payload,
-            },
-        )
+        event_data: dict[str, Any] = {
+            "session_id": "session-1",
+            "stream_id": 2,
+            "direction": direction,
+        }
+        if with_payload:
+            event_data["initial_payload"] = {"data": b"initial", "end_stream": True}
+        event = Event(type=EventType.STREAM_OPENED, data=event_data)
 
         await session._on_stream_opened(event)
 
-        mock_cls.assert_called_once_with(session=session, stream_id=2)
+        mock_stream_class.assert_called_once_with(session=session, stream_id=2)
         mock_stream_instance.initialize.assert_awaited_once()
-        mock_stream_instance._on_data_received.assert_awaited_once()
-        received_event_arg = mock_stream_instance._on_data_received.call_args[0][0]
-        assert isinstance(received_event_arg, Event)
-        assert received_event_arg.data == initial_payload
+        if with_payload:
+            mock_stream_instance._on_data_received.assert_awaited_once()
+            received_event_arg = mock_stream_instance._on_data_received.call_args[0][0]
+            assert isinstance(received_event_arg, Event)
+            assert received_event_arg.data == event_data["initial_payload"]
+        else:
+            mock_stream_instance._on_data_received.assert_not_awaited()
         assert session.stream_manager is not None
         cast(AsyncMock, session.stream_manager.add_stream).assert_awaited_once_with(mock_stream_instance)
         assert session._incoming_streams is not None
@@ -596,30 +766,32 @@ class TestWebTransportSession:
         assert summary["errors"]["stream_errors"] == 0
 
     @pytest.mark.asyncio
-    async def test_debug_state(self, session: WebTransportSession, mocker: MockerFixture) -> None:
-        mock_bidi_stream = mocker.create_autospec(WebTransportStream, instance=True)
-        mock_bidi_stream.stream_id = 2
-        mock_bidi_stream.state.value = "open"
-        mock_bidi_stream.direction = "bidirectional"
-        mock_bidi_stream.bytes_sent = 100
-        mock_bidi_stream.bytes_received = 200
+    async def test_get_session_stats_no_datagrams(self, session: WebTransportSession) -> None:
+        assert session._datagrams is None
+
+        stats = await session.get_session_stats()
+
+        assert stats["datagrams_sent"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_session_stats_no_stream_manager(self, mock_connection: Any) -> None:
+        session = WebTransportSession(connection=mock_connection, session_id="session-1")
+        await session.initialize()
+        session.stream_manager = None
+
+        stats = await session.get_session_stats()
+
+        assert stats["streams_created"] == 0
+
+    @pytest.mark.asyncio
+    async def test_debug_state_no_stream_manager(self, session: WebTransportSession) -> None:
         assert session.stream_manager is not None
-        cast(AsyncMock, session.stream_manager.get_all_streams).return_value = [mock_bidi_stream]
-        cast(AsyncMock, session.stream_manager.get_stats).return_value = {
-            "total_created": 1,
-            "total_closed": 0,
-        }
-        datagrams = await session.datagrams
-        cast(mock.MagicMock, datagrams.get_receive_buffer_size).return_value = 10
+        cast(AsyncMock, session.stream_manager.get_all_streams).return_value = []
+        session.stream_manager = None
 
         debug_info = await session.debug_state()
 
-        assert debug_info["session"]["id"] == "session-1"
-        assert len(debug_info["streams"]) == 1
-        assert debug_info["streams"][0]["stream_id"] == 2
-        assert debug_info["datagrams"]["receive_buffer"] == 10
-        assert "id" in debug_info["connection"]
-        assert debug_info["statistics"]["active_streams"] == 1
+        assert debug_info["streams"] == []
 
     @pytest.mark.asyncio
     async def test_debug_state_no_connection(self, session: WebTransportSession, mocker: MockerFixture) -> None:
@@ -631,43 +803,121 @@ class TestWebTransportSession:
         assert debug_info["connection"]["state"] == "N/A"
 
     @pytest.mark.asyncio
-    async def test_diagnose_issues(self, session: WebTransportSession, mocker: MockerFixture) -> None:
-        session._state = SessionState.CONNECTING
+    async def test_debug_state_no_datagrams(self, session: WebTransportSession, mocker: MockerFixture) -> None:
+        future: asyncio.Future[Any] = asyncio.Future()
+        future.set_result(None)
+        mocker.patch.object(WebTransportSession, "datagrams", new_callable=mocker.PropertyMock, return_value=future)
 
-        issues = await session.diagnose_issues()
-        assert "Session stuck in connecting state" in issues
+        debug_info = await session.debug_state()
 
-        session._state = SessionState.CONNECTED
-        stats = {"streams_created": 100, "stream_errors": 15, "datagrams_sent": 0, "protocol_errors": 0}
-        mocker.patch.object(session, "get_session_stats", return_value=stats)
-
-        issues = await session.diagnose_issues()
-        assert "High error rate: 15/100" in issues
-
-        stats = {
-            "uptime": 4000,
-            "active_streams": 0,
-            "streams_created": 0,
-            "datagrams_sent": 0,
-            "stream_errors": 0,
-            "protocol_errors": 0,
-        }
-        mocker.patch.object(session, "get_session_stats", return_value=stats)
-
-        issues = await session.diagnose_issues()
-        assert "Session appears stale (long uptime with no active streams)" in issues
+        assert debug_info["datagrams"]["available"] is False
 
     @pytest.mark.asyncio
-    async def test_monitor_health(self, session: WebTransportSession, mocker: MockerFixture) -> None:
+    @pytest.mark.parametrize(
+        "state, stats, connection_is_connected, expected_issue",
+        [
+            (SessionState.CONNECTING, {}, True, "Session stuck in connecting state"),
+            (SessionState.CONNECTED, {"streams_created": 100, "stream_errors": 15}, True, "High error rate: 15/100"),
+            (
+                SessionState.CONNECTED,
+                {"uptime": 4000, "active_streams": 0, "streams_created": 0},
+                True,
+                "Session appears stale",
+            ),
+            (SessionState.CONNECTED, {}, False, "Underlying connection not available or not connected"),
+        ],
+    )
+    async def test_diagnose_issues(
+        self,
+        session: WebTransportSession,
+        mocker: MockerFixture,
+        state: SessionState,
+        stats: dict,
+        connection_is_connected: bool,
+        expected_issue: str,
+    ) -> None:
+        session._state = state
+        mocker.patch.object(session, "get_session_stats", return_value=stats)
+        if session.connection:
+            mocker.patch.object(
+                type(session.connection),
+                "is_connected",
+                new_callable=PropertyMock,
+                return_value=connection_is_connected,
+            )
+
+        issues = await session.diagnose_issues()
+
+        assert any(expected_issue in issue for issue in issues)
+
+    @pytest.mark.asyncio
+    async def test_diagnose_issues_no_connection_object(
+        self, session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        session._state = SessionState.CONNECTED
+        mocker.patch.object(session, "get_session_stats", return_value={})
+        mocker.patch.object(WebTransportSession, "connection", new_callable=mock.PropertyMock, return_value=None)
+
+        issues = await session.diagnose_issues()
+
+        assert any("Underlying connection not available" in issue for issue in issues)
+
+    @pytest.mark.asyncio
+    async def test_diagnose_issues_no_datagram_stream(
+        self, session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        session._state = SessionState.CONNECTED
+        future: asyncio.Future[Any] = asyncio.Future()
+        future.set_result(None)
+        mocker.patch.object(WebTransportSession, "datagrams", new_callable=mocker.PropertyMock, return_value=future)
+
+        issues = await session.diagnose_issues()
+
+        assert not any("datagram" in issue for issue in issues)
+
+    @pytest.mark.asyncio
+    async def test_diagnose_issues_large_datagram_buffer(
+        self, session: WebTransportSession, mock_datagram_stream: Any
+    ) -> None:
+        session._state = SessionState.CONNECTED
+
+        datagrams = await session.datagrams
+        cast(mock.MagicMock, datagrams.get_receive_buffer_size).return_value = 200
+        issues = await session.diagnose_issues()
+
+        assert any("Large datagram receive buffer" in issue for issue in issues)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "connection_setup",
+        [
+            "normal",
+            "no_connection",
+            "no_info_attr",
+            "no_last_activity_attr",
+        ],
+    )
+    async def test_monitor_health(
+        self, session: WebTransportSession, mocker: MockerFixture, connection_setup: str
+    ) -> None:
         mock_sleep = mocker.patch("pywebtransport.session.session.asyncio.sleep")
         mock_sleep.side_effect = [None, asyncio.CancelledError]
         mock_logger = mocker.patch("pywebtransport.session.session.logger")
         session._state = SessionState.CONNECTED
+        if connection_setup == "no_connection":
+            mocker.patch.object(WebTransportSession, "connection", new_callable=mock.PropertyMock, return_value=None)
+        elif connection_setup == "no_info_attr":
+            assert session.connection
+            delattr(session.connection, "info")
+        elif connection_setup == "no_last_activity_attr":
+            assert session.connection
+            session.connection.info.last_activity = None
 
         await session.monitor_health(check_interval=10)
 
         assert mock_sleep.call_count == 2
         mock_logger.debug.assert_any_call("Health monitoring cancelled for session session-1")
+        mock_logger.warning.assert_not_called()
         session._state = SessionState.CLOSED
 
     @pytest.mark.asyncio
@@ -693,3 +943,54 @@ class TestWebTransportSession:
 
         session._state = SessionState.CLOSED
         mock_logger.warning.assert_called_once_with("Session session-1 appears inactive (no connection activity)")
+
+    @pytest.mark.asyncio
+    async def test_teardown_no_connection(self, session: WebTransportSession, mocker: MockerFixture) -> None:
+        mocker.patch.object(WebTransportSession, "connection", new_callable=mock.PropertyMock, return_value=None)
+
+        session._teardown_event_handlers()
+
+
+class TestWebTransportSessionUninitialized:
+    @pytest.fixture
+    def mock_connection(self, mocker: MockerFixture) -> Any:
+        return mocker.create_autospec(WebTransportConnection, instance=True)
+
+    @pytest.fixture
+    def uninitialized_session(self, mock_connection: Any) -> WebTransportSession:
+        return WebTransportSession(connection=mock_connection, session_id="session-1")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method_name, args, match_str",
+        [
+            ("ready", (), "WebTransportSession is not initialized"),
+            ("close", (), "WebTransportSession is not initialized"),
+            ("wait_closed", (), "WebTransportSession is not initialized"),
+            ("create_bidirectional_stream", (), r"Session session-1 not ready"),
+            ("create_unidirectional_stream", (), r"Session session-1 not ready"),
+        ],
+    )
+    async def test_methods_raise_before_initialized(
+        self, uninitialized_session: WebTransportSession, method_name: str, args: tuple, match_str: str
+    ) -> None:
+        with pytest.raises(SessionError, match=match_str):
+            await getattr(uninitialized_session, method_name)(*args)
+
+    @pytest.mark.asyncio
+    async def test_incoming_streams_raises_before_initialized(self, uninitialized_session: WebTransportSession) -> None:
+        with pytest.raises(SessionError, match="WebTransportSession is not initialized"):
+            async for _ in uninitialized_session.incoming_streams():
+                pass
+
+    @pytest.mark.asyncio
+    async def test_private_handlers_do_nothing_before_initialized(
+        self, uninitialized_session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
+        mock_logger = mocker.patch("pywebtransport.session.session.logger")
+
+        await uninitialized_session._on_session_ready(Event(type="", data={}))
+        await uninitialized_session._on_stream_opened(Event(type="", data={}))
+        uninitialized_session._sync_protocol_state()
+
+        mock_logger.warning.assert_called_once_with("Cannot sync state for session session-1, session not initialized.")

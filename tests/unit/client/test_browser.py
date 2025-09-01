@@ -1,17 +1,14 @@
 """Unit tests for the pywebtransport.client.browser module."""
 
 import asyncio
-from typing import Any, AsyncGenerator, Coroutine, cast
+from collections.abc import AsyncGenerator, Coroutine
+from typing import Any, cast
 
 import pytest
+from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
-from pywebtransport import (
-    ClientConfig,
-    ConnectionError,
-    WebTransportClient,
-    WebTransportSession,
-)
+from pywebtransport import ClientConfig, ClientError, ConnectionError, WebTransportClient, WebTransportSession
 from pywebtransport.client import WebTransportBrowser
 
 
@@ -58,6 +55,7 @@ class TestWebTransportBrowser:
         assert browser.current_session is None
 
         browser._current_session = mock_session
+
         assert browser.current_session is mock_session
 
     @pytest.mark.asyncio
@@ -132,17 +130,9 @@ class TestWebTransportBrowser:
         assert await browser.get_history() == ["https://a.com", "https://d.com"]
         assert browser._history_index == 1
 
-    @pytest.mark.asyncio
-    async def test_navigate_failure_restores_session(
-        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any
-    ) -> None:
-        mock_underlying_client.connect.side_effect = ConnectionError("Failed")
-        browser._current_session = mock_session
-
-        with pytest.raises(ConnectionError):
-            await browser.navigate("https://b.com")
-
-        assert browser.current_session is mock_session
+        await browser.navigate("https://d.com")
+        assert await browser.get_history() == ["https://a.com", "https://d.com"]
+        assert browser._history_index == 1
 
     @pytest.mark.asyncio
     async def test_navigate_internal_closes_old_session(
@@ -191,15 +181,6 @@ class TestWebTransportBrowser:
         mock_underlying_client.connect.assert_awaited_with("https://b.com")
 
     @pytest.mark.asyncio
-    async def test_back_and_forward_boundaries(self, browser: WebTransportBrowser, mock_underlying_client: Any) -> None:
-        browser._history = ["https://a.com"]
-        browser._history_index = 0
-
-        assert await browser.back() is None
-        assert await browser.forward() is None
-        mock_underlying_client.connect.assert_not_awaited()
-
-    @pytest.mark.asyncio
     async def test_refresh(self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any) -> None:
         mock_underlying_client.connect.return_value = mock_session
         browser._history = ["https://a.com"]
@@ -211,11 +192,6 @@ class TestWebTransportBrowser:
         mock_underlying_client.connect.assert_awaited_once_with("https://a.com")
 
     @pytest.mark.asyncio
-    async def test_refresh_with_no_history(self, browser: WebTransportBrowser, mock_underlying_client: Any) -> None:
-        assert await browser.refresh() is None
-        mock_underlying_client.connect.assert_not_awaited()
-
-    @pytest.mark.asyncio
     async def test_get_history(self, browser: WebTransportBrowser) -> None:
         browser._history = ["a", "b"]
 
@@ -223,3 +199,62 @@ class TestWebTransportBrowser:
 
         assert history_copy == ["a", "b"]
         assert history_copy is not browser._history
+
+    @pytest.mark.asyncio
+    async def test_aexit_handles_exceptions(self, mock_underlying_client: Any) -> None:
+        browser = WebTransportBrowser()
+
+        with pytest.raises(ValueError, match="Test exception"):
+            async with browser:
+                raise ValueError("Test exception")
+
+        mock_underlying_client.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_navigate_failure_restores_session(
+        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any, caplog: LogCaptureFixture
+    ) -> None:
+        mock_underlying_client.connect.side_effect = ConnectionError("Failed")
+        browser._current_session = mock_session
+
+        with pytest.raises(ConnectionError):
+            await browser.navigate("https://b.com")
+
+        assert browser.current_session is mock_session
+        assert "Failed to navigate to https://b.com" in caplog.text
+        assert "Failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_back_and_forward_boundaries(self, browser: WebTransportBrowser, mock_underlying_client: Any) -> None:
+        browser._history = ["https://a.com"]
+        browser._history_index = 0
+
+        assert await browser.back() is None
+        assert await browser.forward() is None
+        mock_underlying_client.connect.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_refresh_with_no_history(self, browser: WebTransportBrowser, mock_underlying_client: Any) -> None:
+        result = await browser.refresh()
+
+        assert result is None
+        mock_underlying_client.connect.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method_name, args",
+        [
+            ("close", ()),
+            ("back", ()),
+            ("forward", ()),
+            ("navigate", ("https://example.com",)),
+            ("refresh", ()),
+            ("get_history", ()),
+        ],
+    )
+    async def test_methods_raise_if_not_activated(self, method_name: str, args: tuple[Any, ...]) -> None:
+        browser = WebTransportBrowser()
+        method_to_test = getattr(browser, method_name)
+
+        with pytest.raises(ClientError, match="WebTransportBrowser has not been activated"):
+            await method_to_test(*args)
