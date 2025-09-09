@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 __all__ = ["DatagramBroadcaster"]
 
-logger = get_logger("datagram.broadcaster")
+logger = get_logger(name="datagram.broadcaster")
 
 
 class DatagramBroadcaster:
@@ -50,7 +50,7 @@ class DatagramBroadcaster:
             async with self._lock:
                 self._streams.clear()
 
-    async def add_stream(self, stream: WebTransportDatagramDuplexStream) -> None:
+    async def add_stream(self, *, stream: WebTransportDatagramDuplexStream) -> None:
         """Add a stream to the broadcast list."""
         if self._lock is None:
             raise DatagramError(
@@ -61,7 +61,7 @@ class DatagramBroadcaster:
             if stream not in self._streams:
                 self._streams.append(stream)
 
-    async def broadcast(self, data: Data, *, priority: int = 0, ttl: float | None = None) -> int:
+    async def broadcast(self, *, data: Data, priority: int = 0, ttl: float | None = None) -> int:
         """Broadcast a datagram to all registered streams concurrently."""
         if self._lock is None:
             raise DatagramError(
@@ -79,7 +79,7 @@ class DatagramBroadcaster:
         tasks = []
         for stream in streams_copy:
             if not stream.is_closed:
-                tasks.append(stream.send(data, priority=priority, ttl=ttl))
+                tasks.append(stream.send(data=data, priority=priority, ttl=ttl))
                 active_streams.append(stream)
             else:
                 failed_streams.append(stream)
@@ -88,7 +88,12 @@ class DatagramBroadcaster:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for stream, result in zip(active_streams, results):
                 if isinstance(result, Exception):
-                    logger.warning(f"Failed to broadcast to stream {stream}: {result}")
+                    logger.warning(
+                        "Failed to broadcast to stream %s: %s",
+                        stream,
+                        result,
+                        exc_info=True,
+                    )
                     failed_streams.append(stream)
                 else:
                     sent_count += 1
@@ -101,7 +106,7 @@ class DatagramBroadcaster:
 
         return sent_count
 
-    async def remove_stream(self, stream: WebTransportDatagramDuplexStream) -> None:
+    async def remove_stream(self, *, stream: WebTransportDatagramDuplexStream) -> None:
         """Remove a stream from the broadcast list."""
         if self._lock is None:
             raise DatagramError(

@@ -18,7 +18,7 @@ from pywebtransport.utils import get_logger, parse_webtransport_url
 
 __all__ = ["PooledClient"]
 
-logger = get_logger("client.pooled")
+logger = get_logger(name="client.pooled")
 
 
 class PooledClient:
@@ -35,7 +35,7 @@ class PooledClient:
         if pool_size <= 0:
             raise ValueError("pool_size must be a positive integer.")
 
-        self._client = WebTransportClient.create(config=config)
+        self._client = WebTransportClient(config=config)
         self._pool_size = pool_size
         self._cleanup_interval = cleanup_interval
         self._pools: dict[str, list[WebTransportSession]] = defaultdict(list)
@@ -101,12 +101,16 @@ class PooledClient:
                     for session in sessions_to_close:
                         tg.create_task(session.close())
             except* Exception as eg:
-                logger.error(f"Errors occurred while closing pooled sessions: {eg.exceptions}")
+                logger.error(
+                    "Errors occurred while closing pooled sessions: %s",
+                    eg.exceptions,
+                    exc_info=eg,
+                )
 
         await self._client.close()
         logger.info("PooledClient has been closed.")
 
-    async def get_session(self, url: URL) -> WebTransportSession:
+    async def get_session(self, *, url: URL) -> WebTransportSession:
         """Get a session from the pool or create a new one."""
         if self._conditions is None:
             raise ClientError(
@@ -114,7 +118,7 @@ class PooledClient:
                 "asynchronous context manager (`async with ...`)."
             )
 
-        pool_key = self._get_pool_key(url)
+        pool_key = self._get_pool_key(url=url)
         condition = self._conditions[pool_key]
 
         async with condition:
@@ -123,22 +127,25 @@ class PooledClient:
                 while pool:
                     session = pool.pop(0)
                     if session.is_ready:
-                        logger.debug(f"Reusing session from pool for {pool_key}")
+                        logger.debug("Reusing session from pool for %s", pool_key)
                         return session
                     else:
-                        logger.debug(f"Discarding stale session for {pool_key}")
+                        logger.debug("Discarding stale session for %s", pool_key)
                         self._total_sessions[pool_key] -= 1
 
                 if self._total_sessions[pool_key] < self._pool_size:
                     self._total_sessions[pool_key] += 1
                     break
 
-                logger.debug(f"Pool for {pool_key} is full. Waiting for a session to be returned.")
+                logger.debug(
+                    "Pool for %s is full. Waiting for a session to be returned.",
+                    pool_key,
+                )
                 await condition.wait()
 
         try:
-            logger.debug(f"Creating new session for {pool_key}")
-            session = await self._client.connect(url)
+            logger.debug("Creating new session for %s", pool_key)
+            session = await self._client.connect(url=url)
             return session
         except Exception:
             async with condition:
@@ -146,7 +153,7 @@ class PooledClient:
                 condition.notify()
             raise
 
-    async def return_session(self, session: WebTransportSession) -> None:
+    async def return_session(self, *, session: WebTransportSession) -> None:
         """Return a session to the pool for potential reuse."""
         if self._conditions is None:
             raise ClientError(
@@ -154,7 +161,7 @@ class PooledClient:
                 "asynchronous context manager (`async with ...`)."
             )
 
-        pool_key = self._get_pool_key_from_session(session)
+        pool_key = self._get_pool_key_from_session(session=session)
         should_close = not session.is_ready or not pool_key
 
         if not should_close and pool_key:
@@ -165,7 +172,7 @@ class PooledClient:
                     should_close = True
                 else:
                     pool.append(session)
-                    logger.debug(f"Returned session to pool for {pool_key}")
+                    logger.debug("Returned session to pool for %s", pool_key)
                     condition.notify()
 
         if should_close:
@@ -176,15 +183,15 @@ class PooledClient:
                     condition.notify()
             await session.close()
 
-    def _get_pool_key(self, url: URL) -> str:
+    def _get_pool_key(self, *, url: URL) -> str:
         """Get a normalized pool key from a URL."""
         try:
-            host, port, path = parse_webtransport_url(url)
+            host, port, path = parse_webtransport_url(url=url)
             return f"{host}:{port}{path}"
         except Exception:
-            return url
+            return str(url)
 
-    def _get_pool_key_from_session(self, session: WebTransportSession) -> str | None:
+    def _get_pool_key_from_session(self, *, session: WebTransportSession) -> str | None:
         """Get a pool key from an active session."""
         if session.connection and session.connection.remote_address:
             host, port = session.connection.remote_address
@@ -213,7 +220,11 @@ class PooledClient:
 
                     if len(ready_sessions) < original_len:
                         pruned_count = original_len - len(ready_sessions)
-                        logger.info(f"Pruned {pruned_count} stale sessions from pool '{pool_key}'")
+                        logger.info(
+                            "Pruned %d stale sessions from pool '%s'",
+                            pruned_count,
+                            pool_key,
+                        )
                         self._pools[pool_key] = ready_sessions
                         self._total_sessions[pool_key] -= pruned_count
                         for _ in range(pruned_count):

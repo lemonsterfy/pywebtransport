@@ -16,12 +16,12 @@ __all__ = [
     "test_client_connectivity",
 ]
 
-logger = get_logger("client.utils")
+logger = get_logger(name="client.utils")
 
 
 async def benchmark_client_performance(
-    url: str,
     *,
+    url: str,
     config: ClientConfig | None = None,
     num_requests: int = 100,
     concurrent_requests: int = 10,
@@ -33,15 +33,15 @@ async def benchmark_client_performance(
         "failed_requests": 0,
         "latencies": [],
     }
-    semaphore = asyncio.Semaphore(concurrent_requests)
+    semaphore = asyncio.Semaphore(value=concurrent_requests)
 
-    async def benchmark_single_request(client: WebTransportClient) -> float:
+    async def benchmark_single_request(*, client: WebTransportClient) -> float:
         async with semaphore:
             start_time = get_timestamp()
-            session = await client.connect(url)
+            session = await client.connect(url=url)
             try:
                 stream = await session.create_bidirectional_stream()
-                await stream.write(b"benchmark_ping")
+                await stream.write(data=b"benchmark_ping")
                 _ = await stream.read(size=1024)
                 latency = get_timestamp() - start_time
                 return latency
@@ -50,13 +50,13 @@ async def benchmark_client_performance(
                     await session.close()
 
     tasks: list[asyncio.Task[float]] = []
-    async with WebTransportClient.create(config=config) as client:
+    async with WebTransportClient(config=config) as client:
         try:
             async with asyncio.TaskGroup() as tg:
                 for _ in range(num_requests):
-                    tasks.append(tg.create_task(benchmark_single_request(client)))
+                    tasks.append(tg.create_task(benchmark_single_request(client=client)))
         except* Exception as eg:
-            logger.warning(f"{len(eg.exceptions)} benchmark requests failed.")
+            logger.warning("%d benchmark requests failed.", len(eg.exceptions), exc_info=eg)
 
     for task in tasks:
         if task.done() and not task.exception():
@@ -75,15 +75,24 @@ async def benchmark_client_performance(
 
 
 async def test_client_connectivity(
-    url: str, *, config: ClientConfig | None = None, timeout: float = 10.0
+    *, url: str, config: ClientConfig | None = None, timeout: float = 10.0
 ) -> dict[str, Any]:
     """Test client connectivity to a given URL."""
-    async with WebTransportClient.create(config=config) as client:
+    async with WebTransportClient(config=config) as client:
         try:
             start_time = get_timestamp()
-            session = await asyncio.wait_for(client.connect(url, timeout=timeout), timeout=timeout)
+            session = await asyncio.wait_for(client.connect(url=url, timeout=timeout), timeout=timeout)
             connect_time = get_timestamp() - start_time
             await session.close()
-            return {"success": True, "connect_time": connect_time, "client_stats": client.stats}
+            return {
+                "success": True,
+                "connect_time": connect_time,
+                "client_stats": client.stats,
+            }
         except Exception as e:
-            return {"success": False, "error": str(e), "connect_time": None, "client_stats": client.stats}
+            return {
+                "success": False,
+                "error": str(e),
+                "connect_time": None,
+                "client_stats": client.stats,
+            }

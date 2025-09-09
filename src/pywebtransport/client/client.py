@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Any, Self, Type
+from typing import TYPE_CHECKING, Any, Self, Type
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection import ConnectionManager, WebTransportConnection
@@ -17,12 +17,16 @@ from pywebtransport.session import WebTransportSession
 from pywebtransport.types import URL, Headers
 from pywebtransport.utils import Timer, format_duration, get_logger, get_timestamp, parse_webtransport_url, validate_url
 
+if TYPE_CHECKING:
+    from pywebtransport.client.reconnecting import ReconnectingClient
+
+
 __all__ = ["ClientStats", "WebTransportClient"]
 
-logger = get_logger("client")
+logger = get_logger(name="client")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ClientStats:
     """Stores client-wide connection statistics."""
 
@@ -88,9 +92,17 @@ class WebTransportClient(EventEmitter):
         logger.info("WebTransport client initialized")
 
     @classmethod
-    def create(cls, *, config: ClientConfig | None = None) -> Self:
-        """Factory method to create a new WebTransport client instance."""
-        return cls(config=config)
+    def create(cls, *, url: URL, config: ClientConfig | None = None) -> Self | ReconnectingClient:
+        """Create a client, returning a ReconnectingClient if auto-reconnect is enabled."""
+        from pywebtransport.client.reconnecting import ReconnectingClient
+
+        final_config = config or ClientConfig.create()
+
+        if final_config.auto_reconnect:
+            logger.info("Auto-reconnect is enabled, creating a ReconnectingClient.")
+            return ReconnectingClient.create(url=url, config=final_config)
+        else:
+            return cls(config=final_config)
 
     @property
     def is_closed(self) -> bool:
@@ -128,28 +140,30 @@ class WebTransportClient(EventEmitter):
 
         logger.info("Closing WebTransport client...")
         self._closed = True
+
         await self._connection_manager.shutdown()
+
         logger.info("WebTransport client closed.")
 
     async def connect(
         self,
-        url: URL,
         *,
+        url: URL,
         timeout: float | None = None,
         headers: Headers | None = None,
     ) -> WebTransportSession:
         """Connect to a WebTransport server and return a session."""
         if self._closed:
-            raise ClientError("Client is closed")
+            raise ClientError(message="Client is closed")
 
-        validate_url(url)
-        host, port, path = parse_webtransport_url(url)
+        validate_url(url=url)
+        host, port, path = parse_webtransport_url(url=url)
         connect_timeout = timeout or self._config.connect_timeout
-        logger.info(f"Connecting to {host}:{port}{path}")
+        logger.info("Connecting to %s:%s%s", host, port, path)
         self._stats.connections_attempted += 1
-
         connection: WebTransportConnection | None = None
         session: WebTransportSession | None = None
+
         try:
             with Timer() as timer:
                 connection_headers = self._default_headers.copy()
@@ -160,15 +174,15 @@ class WebTransportClient(EventEmitter):
                 connection = await WebTransportConnection.create_client(
                     config=conn_config, host=host, port=port, path=path
                 )
-                await self._connection_manager.add_connection(connection)
+                await self._connection_manager.add_connection(connection=connection)
 
                 if not connection.protocol_handler:
-                    raise ConnectionError("Protocol handler not initialized after connection")
+                    raise ConnectionError(message="Protocol handler not initialized after connection")
 
                 try:
                     session_id = await connection.wait_for_ready_session(timeout=connect_timeout)
                 except asyncio.TimeoutError as e:
-                    raise TimeoutError(f"Session ready timeout after {connect_timeout}s") from e
+                    raise TimeoutError(message=f"Session ready timeout after {connect_timeout}s") from e
 
                 session = WebTransportSession(
                     connection=connection,
@@ -185,7 +199,11 @@ class WebTransportClient(EventEmitter):
                 self._stats.min_connect_time = min(self._stats.min_connect_time, connect_time)
                 self._stats.max_connect_time = max(self._stats.max_connect_time, connect_time)
 
-                logger.info(f"Session established to {url} in {format_duration(connect_time)}")
+                logger.info(
+                    "Session established to %s in %s",
+                    url,
+                    format_duration(seconds=connect_time),
+                )
                 return session
         except Exception as e:
             self._stats.connections_failed += 1
@@ -195,13 +213,16 @@ class WebTransportClient(EventEmitter):
                 await connection.close()
 
             if isinstance(e, asyncio.TimeoutError):
-                raise TimeoutError(f"Connection timeout to {url} after {connect_timeout}s") from e
-            raise ClientError(f"Failed to connect to {url}: {e}") from e
+                raise TimeoutError(message=f"Connection timeout to {url} after {connect_timeout}s") from e
+            raise ClientError(message=f"Failed to connect to {url}: {e}") from e
 
     def debug_state(self) -> dict[str, Any]:
         """Get a detailed snapshot of the client's state for debugging."""
         return {
-            "client": {"closed": self.is_closed, "default_headers": self._default_headers},
+            "client": {
+                "closed": self.is_closed,
+                "default_headers": self._default_headers,
+            },
             "config": self.config.to_dict(),
             "statistics": self.stats,
         }
@@ -226,6 +247,6 @@ class WebTransportClient(EventEmitter):
 
         return issues
 
-    def set_default_headers(self, headers: Headers) -> None:
+    def set_default_headers(self, *, headers: Headers) -> None:
         """Set default headers for all subsequent connections."""
         self._default_headers = headers.copy()

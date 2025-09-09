@@ -13,7 +13,7 @@ from pywebtransport.utils import get_timestamp
 __all__ = ["StreamInfo", "WebTransportSessionInfo"]
 
 
-@dataclass
+@dataclass(kw_only=True)
 class StreamInfo:
     """Represents stateful information about a single WebTransport stream."""
 
@@ -30,7 +30,7 @@ class StreamInfo:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the stream information to a dictionary."""
-        return asdict(self)
+        return asdict(obj=self)
 
     def __str__(self) -> str:
         """Format stream information for protocol debugging."""
@@ -46,7 +46,7 @@ class StreamInfo:
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class WebTransportSessionInfo:
     """Represents stateful information about a WebTransport session."""
 
@@ -63,7 +63,7 @@ class WebTransportSessionInfo:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the session information to a dictionary."""
-        return asdict(self)
+        return asdict(obj=self)
 
     def __str__(self) -> str:
         """Format session information for protocol debugging."""

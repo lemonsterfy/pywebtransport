@@ -1,10 +1,10 @@
 """
-A high-performance, async-native WebTransport implementation for Python.
+The canonical, async-native WebTransport stack for Python.
 """
 
 from .client import WebTransportClient
 from .config import ClientConfig, ServerConfig
-from .datagram import DatagramReliabilityLayer, WebTransportDatagramDuplexStream
+from .datagram import DatagramReliabilityLayer, StructuredDatagramStream, WebTransportDatagramDuplexStream
 from .events import Event, EventEmitter
 from .exceptions import (
     AuthenticationError,
@@ -16,6 +16,7 @@ from .exceptions import (
     FlowControlError,
     HandshakeError,
     ProtocolError,
+    SerializationError,
     ServerError,
     SessionError,
     StreamError,
@@ -24,12 +25,13 @@ from .exceptions import (
 )
 from .server import ServerApp, create_development_server
 from .session import WebTransportSession
-from .stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from .stream import StructuredStream, WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
 from .types import (
     Address,
     ConnectionState,
     EventType,
     Headers,
+    Serializer,
     SessionId,
     SessionState,
     StreamDirection,
@@ -57,6 +59,8 @@ __all__ = [
     "HandshakeError",
     "Headers",
     "ProtocolError",
+    "SerializationError",
+    "Serializer",
     "ServerApp",
     "ServerConfig",
     "ServerError",
@@ -67,6 +71,8 @@ __all__ = [
     "StreamError",
     "StreamId",
     "StreamState",
+    "StructuredDatagramStream",
+    "StructuredStream",
     "TimeoutError",
     "URL",
     "WebTransportClient",

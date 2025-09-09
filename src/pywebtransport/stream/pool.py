@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 __all__ = ["StreamPool"]
 
-logger = get_logger("stream.pool")
+logger = get_logger(name="stream.pool")
 
 
 class StreamPool:
@@ -46,12 +46,12 @@ class StreamPool:
     @classmethod
     def create(
         cls,
-        session: WebTransportSession,
         *,
+        session: WebTransportSession,
         pool_size: int = 10,
     ) -> Self:
         """Create a new stream pool instance."""
-        return cls(session, pool_size=pool_size)
+        return cls(session=session, pool_size=pool_size)
 
     async def __aenter__(self) -> Self:
         """Enter the async context and initialize the pool."""
@@ -95,8 +95,12 @@ class StreamPool:
                     for s in streams_to_close:
                         tg.create_task(s.close())
             except* Exception as eg:
-                logger.error(f"Errors occurred while closing pooled streams: {eg.exceptions}")
-            logger.info(f"Closed {len(streams_to_close)} idle streams from the pool.")
+                logger.error(
+                    "Errors occurred while closing pooled streams: %s",
+                    eg.exceptions,
+                    exc_info=eg,
+                )
+            logger.info("Closed %d idle streams from the pool.", len(streams_to_close))
 
     async def get_stream(self, *, timeout: float | None = None) -> WebTransportStream:
         """Get a stream from the pool, creating a new one if necessary."""
@@ -111,10 +115,10 @@ class StreamPool:
                 while self._available:
                     stream = self._available.pop(0)
                     if not stream.is_closed:
-                        logger.debug(f"Reusing stream {stream.stream_id} from pool.")
+                        logger.debug("Reusing stream %d from pool.", stream.stream_id)
                         return stream
                     else:
-                        logger.debug(f"Discarding stale stream {stream.stream_id} from pool.")
+                        logger.debug("Discarding stale stream %d from pool.", stream.stream_id)
                         self._total_managed_streams -= 1
 
                 if self._total_managed_streams < self._pool_size:
@@ -136,7 +140,7 @@ class StreamPool:
                 self._condition.notify()
             raise
 
-    async def return_stream(self, stream: WebTransportStream) -> None:
+    async def return_stream(self, *, stream: WebTransportStream) -> None:
         """Return a stream to the pool for potential reuse."""
         if self._condition is None:
             raise StreamError(
@@ -151,7 +155,7 @@ class StreamPool:
                     should_close = True
                 else:
                     self._available.append(stream)
-                    logger.debug(f"Returned stream {stream.stream_id} to pool.")
+                    logger.debug("Returned stream %d to pool.", stream.stream_id)
                     self._condition.notify()
 
             if should_close:
@@ -183,7 +187,12 @@ class StreamPool:
                 tasks = [tg.create_task(self._session.create_bidirectional_stream()) for _ in range(needed)]
             created_streams = [task.result() for task in tasks if task.done() and not task.exception()]
         except* Exception as eg:
-            logger.error(f"Failed to create {needed} streams for the pool: {eg.exceptions}")
+            logger.error(
+                "Failed to create %d streams for the pool: %s",
+                needed,
+                eg.exceptions,
+                exc_info=eg,
+            )
             async with self._condition:
                 self._total_managed_streams -= needed
                 self._condition.notify_all()
@@ -211,9 +220,12 @@ class StreamPool:
             try:
                 await self._fill_pool()
                 self._start_maintenance_task()
-                logger.info(f"Stream pool initialized with {self._total_managed_streams} streams.")
+                logger.info(
+                    "Stream pool initialized with %d streams.",
+                    self._total_managed_streams,
+                )
             except Exception as e:
-                logger.error(f"Error initializing stream pool: {e}")
+                logger.error("Error initializing stream pool: %s", e, exc_info=True)
                 await self.close_all()
 
     async def _maintain_pool_loop(self) -> None:
@@ -228,8 +240,9 @@ class StreamPool:
                 async with self._condition:
                     if self._total_managed_streams < self._pool_size:
                         logger.debug(
-                            f"Replenishing pool. Size ({self._total_managed_streams}) "
-                            f"is below target ({self._pool_size})."
+                            "Replenishing pool. Size (%d) is below target (%d).",
+                            self._total_managed_streams,
+                            self._pool_size,
                         )
                         needs_fill = True
                 if needs_fill:
@@ -237,7 +250,7 @@ class StreamPool:
         except asyncio.CancelledError:
             logger.info("Stream pool maintenance task cancelled.")
         except Exception as e:
-            logger.error(f"Stream pool maintenance task crashed: {e}", exc_info=e)
+            logger.error("Stream pool maintenance task crashed: %s", e, exc_info=e)
 
     def _start_maintenance_task(self) -> None:
         """Start the periodic pool maintenance task if not already running."""

@@ -11,12 +11,14 @@ from .stream import (
     WebTransportSendStream,
     WebTransportStream,
 )
+from .structured import StructuredStream
 
 __all__ = [
     "StreamBuffer",
     "StreamManager",
     "StreamPool",
     "StreamStats",
+    "StructuredStream",
     "WebTransportReceiveStream",
     "WebTransportSendStream",
     "WebTransportStream",

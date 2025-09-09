@@ -31,10 +31,10 @@ __all__ = [
     "WebTransportServerProtocol",
 ]
 
-logger = get_logger("server.server")
+logger = get_logger(name="server.server")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ServerStats:
     """A data class for storing server statistics."""
 
@@ -46,7 +46,7 @@ class ServerStats:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert statistics to a dictionary."""
-        return asdict(self)
+        return asdict(obj=self)
 
 
 class WebTransportServerProtocol(QuicConnectionProtocol):
@@ -71,7 +71,7 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
         self._event_processor_task = asyncio.create_task(self._process_events_loop())
         if server := self._server_ref():
             server._active_protocols.add(self)
-            asyncio.create_task(server._handle_new_connection(transport, self))
+            asyncio.create_task(server._handle_new_connection(transport=transport, protocol=self))
 
     def connection_lost(self, exc: Exception | None) -> None:
         """Handle a connection being lost."""
@@ -79,7 +79,7 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
         if self._event_processor_task and not self._event_processor_task.done():
             self._event_processor_task.cancel()
         if self._connection_ref and (connection := self._connection_ref()):
-            connection._on_connection_lost(exc)
+            connection._on_connection_lost(exc=exc)
         if server := self._server_ref():
             server._active_protocols.discard(self)
 
@@ -87,7 +87,7 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
         """Handle a QUIC event from the underlying transport."""
         self._event_queue.put_nowait(event)
 
-    def set_connection(self, connection: WebTransportConnection) -> None:
+    def set_connection(self, *, connection: WebTransportConnection) -> None:
         """Set a weak reference to the managing WebTransportConnection."""
         self._connection_ref = weakref.ref(connection)
 
@@ -113,16 +113,25 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
 
                 if conn.protocol_handler:
                     try:
-                        await conn.protocol_handler.handle_quic_event(event)
+                        await conn.protocol_handler.handle_quic_event(event=event)
                     except Exception as e:
-                        logger.error(f"Error handling QUIC event for {conn.connection_id}: {e}", exc_info=True)
+                        logger.error(
+                            "Error handling QUIC event for %s: %s",
+                            conn.connection_id,
+                            e,
+                            exc_info=True,
+                        )
                 else:
-                    logger.warning(f"No handler available to process event for {conn.connection_id}: {event!r}")
+                    logger.warning(
+                        "No handler available to process event for %s: %r",
+                        conn.connection_id,
+                        event,
+                    )
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.critical(f"Fatal error in server event processing loop: {e}", exc_info=True)
+            logger.critical("Fatal error in server event processing loop: %s", e, exc_info=True)
 
 
 class WebTransportServer(EventEmitter):
@@ -205,7 +214,11 @@ class WebTransportServer(EventEmitter):
                 tg.create_task(self._connection_manager.shutdown())
                 tg.create_task(self._session_manager.shutdown())
         except* Exception as eg:
-            logger.error(f"Errors occurred during manager shutdown: {eg.exceptions}")
+            logger.error(
+                "Errors occurred during manager shutdown: %s",
+                eg.exceptions,
+                exc_info=eg,
+            )
 
         if self._server:
             self._server.close()
@@ -220,10 +233,10 @@ class WebTransportServer(EventEmitter):
             raise ServerError("Server is already serving")
 
         bind_host, bind_port = host or self._config.bind_host, port or self._config.bind_port
-        logger.info(f"Starting WebTransport server on {bind_host}:{bind_port}")
+        logger.info("Starting WebTransport server on %s:%s", bind_host, bind_port)
         try:
             quic_config = create_quic_configuration(is_client=False, **self._config.to_dict())
-            quic_config.load_cert_chain(Path(self._config.certfile), Path(self._config.keyfile))
+            quic_config.load_cert_chain(certfile=Path(self._config.certfile), keyfile=Path(self._config.keyfile))
             if self._config.ca_certs:
                 quic_config.load_verify_locations(cafile=self._config.ca_certs)
             quic_config.verify_mode = self._config.verify_mode
@@ -235,9 +248,9 @@ class WebTransportServer(EventEmitter):
             )
             self._serving, self._start_time = True, get_timestamp()
             self._start_background_tasks()
-            logger.info(f"WebTransport server listening on {self.local_address}")
+            logger.info("WebTransport server listening on %s", self.local_address)
         except Exception as e:
-            logger.critical(f"Failed to start server: {e}", exc_info=e)
+            logger.critical("Failed to start server: %s", e, exc_info=True)
             raise ServerError(f"Failed to start server: {e}") from e
 
     async def serve_forever(self) -> None:
@@ -269,7 +282,10 @@ class WebTransportServer(EventEmitter):
         session_stats_list = await asyncio.gather(*session_stats_tasks)
 
         return {
-            "server_info": {"serving": self.is_serving, "local_address": self.local_address},
+            "server_info": {
+                "serving": self.is_serving,
+                "local_address": self.local_address,
+            },
             "aggregated_stats": stats,
             "connections": [conn.info.to_dict() for conn in connections],
             "sessions": session_stats_list,
@@ -322,12 +338,12 @@ class WebTransportServer(EventEmitter):
         return base_stats
 
     async def _handle_new_connection(
-        self, transport: asyncio.BaseTransport, protocol: WebTransportServerProtocol
+        self, *, transport: asyncio.BaseTransport, protocol: WebTransportServerProtocol
     ) -> None:
         """Handle a new incoming connection and set up the event forwarding chain."""
         connection: WebTransportConnection | None = None
         try:
-            connection = WebTransportConnection(self._config)
+            connection = WebTransportConnection(config=self._config)
 
             server_ref = weakref.ref(self)
             conn_ref = weakref.ref(connection)
@@ -340,21 +356,22 @@ class WebTransportServer(EventEmitter):
                     if "connection" not in event_data:
                         event_data["connection"] = conn
                     logger.debug(
-                        f"Forwarding session request for path '{event_data.get('path')}' "
-                        f"from connection {conn.connection_id} to server."
+                        "Forwarding session request for path '%s' from connection %s to server.",
+                        event_data.get("path"),
+                        conn.connection_id,
                     )
-                    await server.emit(EventType.SESSION_REQUEST, data=event_data)
+                    await server.emit(event_type=EventType.SESSION_REQUEST, data=event_data)
 
-            connection.on(EventType.SESSION_REQUEST, forward_session_request)
+            connection.on(event_type=EventType.SESSION_REQUEST, handler=forward_session_request)
             dgram_transport = cast(asyncio.DatagramTransport, transport)
             await connection.accept(transport=dgram_transport, protocol=protocol)
-            await self._connection_manager.add_connection(connection)
+            await self._connection_manager.add_connection(connection=connection)
             self._stats.connections_accepted += 1
-            logger.info(f"New connection accepted: {connection.connection_id}")
+            logger.info("New connection accepted: %s", connection.connection_id)
         except Exception as e:
             self._stats.connections_rejected += 1
             self._stats.connection_errors += 1
-            logger.error(f"Failed to handle new connection: {e}", exc_info=e)
+            logger.error("Failed to handle new connection: %s", e, exc_info=True)
             if connection and not connection.is_closed:
                 await connection.close()
             try:

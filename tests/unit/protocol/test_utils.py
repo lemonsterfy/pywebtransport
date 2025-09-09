@@ -4,28 +4,44 @@ import pytest
 from pytest_mock import MockerFixture
 
 from pywebtransport import ConnectionState, SessionState, StreamDirection
-from pywebtransport.constants import WebTransportConstants
+from pywebtransport.constants import (
+    DEFAULT_ALPN_PROTOCOLS,
+    DEFAULT_CONGESTION_CONTROL_ALGORITHM,
+    DEFAULT_MAX_DATAGRAM_SIZE,
+)
 from pywebtransport.protocol import utils as protocol_utils
 
 
 def test_create_quic_configuration(mocker: MockerFixture) -> None:
     mock_quic_config = mocker.patch("pywebtransport.protocol.utils.QuicConfiguration")
 
-    protocol_utils.create_quic_configuration(is_client=True)
+    protocol_utils.create_quic_configuration(
+        is_client=True,
+        alpn_protocols=DEFAULT_ALPN_PROTOCOLS,
+        congestion_control_algorithm=DEFAULT_CONGESTION_CONTROL_ALGORITHM,
+        max_datagram_size=DEFAULT_MAX_DATAGRAM_SIZE,
+    )
 
     mock_quic_config.assert_called_once_with(
         is_client=True,
-        alpn_protocols=WebTransportConstants.DEFAULT_ALPN_PROTOCOLS,
-        max_datagram_frame_size=WebTransportConstants.MAX_DATAGRAM_SIZE,
+        alpn_protocols=DEFAULT_ALPN_PROTOCOLS,
+        congestion_control_algorithm=DEFAULT_CONGESTION_CONTROL_ALGORITHM,
+        max_datagram_frame_size=DEFAULT_MAX_DATAGRAM_SIZE,
     )
 
     mock_quic_config.reset_mock()
     custom_alpn = ["my-protocol"]
-    protocol_utils.create_quic_configuration(is_client=False, alpn_protocols=custom_alpn, max_datagram_size=1200)
+    protocol_utils.create_quic_configuration(
+        is_client=False,
+        alpn_protocols=custom_alpn,
+        congestion_control_algorithm="cubic",
+        max_datagram_size=1200,
+    )
 
     mock_quic_config.assert_called_once_with(
         is_client=False,
         alpn_protocols=custom_alpn,
+        congestion_control_algorithm="cubic",
         max_datagram_frame_size=1200,
     )
 
@@ -48,10 +64,10 @@ def test_stream_id_properties(
     is_bidi: bool,
     is_uni: bool,
 ) -> None:
-    assert protocol_utils.is_client_initiated_stream(stream_id) == is_client_initiated
-    assert protocol_utils.is_server_initiated_stream(stream_id) == is_server_initiated
-    assert protocol_utils.is_bidirectional_stream(stream_id) == is_bidi
-    assert protocol_utils.is_unidirectional_stream(stream_id) == is_uni
+    assert protocol_utils.is_client_initiated_stream(stream_id=stream_id) == is_client_initiated
+    assert protocol_utils.is_server_initiated_stream(stream_id=stream_id) == is_server_initiated
+    assert protocol_utils.is_bidirectional_stream(stream_id=stream_id) == is_bidi
+    assert protocol_utils.is_unidirectional_stream(stream_id=stream_id) == is_uni
 
 
 @pytest.mark.parametrize(
@@ -64,7 +80,7 @@ def test_stream_id_properties(
     ],
 )
 def test_can_send_data(connection_state: ConnectionState, session_state: SessionState, expected: bool) -> None:
-    assert protocol_utils.can_send_data(connection_state, session_state) == expected
+    assert protocol_utils.can_send_data(connection_state=connection_state, session_state=session_state) == expected
 
 
 @pytest.mark.parametrize(
@@ -78,7 +94,7 @@ def test_can_send_data(connection_state: ConnectionState, session_state: Session
     ],
 )
 def test_can_receive_data(connection_state: ConnectionState, session_state: SessionState, expected: bool) -> None:
-    assert protocol_utils.can_receive_data(connection_state, session_state) == expected
+    assert protocol_utils.can_receive_data(connection_state=connection_state, session_state=session_state) == expected
 
 
 @pytest.mark.parametrize(
@@ -95,7 +111,7 @@ def test_can_receive_data(connection_state: ConnectionState, session_state: Sess
     ],
 )
 def test_can_send_data_on_stream(stream_id: int, is_client: bool, expected: bool) -> None:
-    assert protocol_utils.can_send_data_on_stream(stream_id, is_client=is_client) == expected
+    assert protocol_utils.can_send_data_on_stream(stream_id=stream_id, is_client=is_client) == expected
 
 
 @pytest.mark.parametrize(
@@ -112,7 +128,7 @@ def test_can_send_data_on_stream(stream_id: int, is_client: bool, expected: bool
     ],
 )
 def test_can_receive_data_on_stream(stream_id: int, is_client: bool, expected: bool) -> None:
-    assert protocol_utils.can_receive_data_on_stream(stream_id, is_client=is_client) == expected
+    assert protocol_utils.can_receive_data_on_stream(stream_id=stream_id, is_client=is_client) == expected
 
 
 @pytest.mark.parametrize(
@@ -129,11 +145,14 @@ def test_can_receive_data_on_stream(stream_id: int, is_client: bool, expected: b
     ],
 )
 def test_get_stream_direction_from_id(
-    mocker: MockerFixture, stream_id: int, is_client: bool, expected_direction: StreamDirection
+    mocker: MockerFixture,
+    stream_id: int,
+    is_client: bool,
+    expected_direction: StreamDirection,
 ) -> None:
     mock_validate = mocker.patch("pywebtransport.protocol.utils.validate_stream_id")
 
-    direction = protocol_utils.get_stream_direction_from_id(stream_id, is_client=is_client)
+    direction = protocol_utils.get_stream_direction_from_id(stream_id=stream_id, is_client=is_client)
 
-    mock_validate.assert_called_once_with(stream_id)
+    mock_validate.assert_called_once_with(stream_id=stream_id)
     assert direction == expected_direction

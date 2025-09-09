@@ -30,16 +30,16 @@ class TestMiddlewareManager:
         manager = MiddlewareManager()
         assert manager.get_middleware_count() == 0
 
-        async def middleware1(session: WebTransportSession) -> bool:
+        async def middleware1(*, session: WebTransportSession) -> bool:
             return True
 
-        manager.add_middleware(middleware1)
+        manager.add_middleware(middleware=middleware1)
         assert manager.get_middleware_count() == 1
 
-        manager.remove_middleware(middleware1)
+        manager.remove_middleware(middleware=middleware1)
         assert manager.get_middleware_count() == 0
 
-        manager.remove_middleware(middleware1)
+        manager.remove_middleware(middleware=middleware1)
         assert manager.get_middleware_count() == 0
 
     @pytest.mark.asyncio
@@ -47,14 +47,14 @@ class TestMiddlewareManager:
         manager = MiddlewareManager()
         middleware1 = mocker.AsyncMock(return_value=True)
         middleware2 = mocker.AsyncMock(return_value=True)
-        manager.add_middleware(middleware1)
-        manager.add_middleware(middleware2)
+        manager.add_middleware(middleware=middleware1)
+        manager.add_middleware(middleware=middleware2)
 
-        result = await manager.process_request(mock_session)
+        result = await manager.process_request(session=mock_session)
 
         assert result is True
-        middleware1.assert_awaited_once_with(mock_session)
-        middleware2.assert_awaited_once_with(mock_session)
+        middleware1.assert_awaited_once_with(session=mock_session)
+        middleware2.assert_awaited_once_with(session=mock_session)
 
     @pytest.mark.asyncio
     async def test_process_request_one_fails(self, mock_session: Any, mocker: MockerFixture) -> None:
@@ -62,15 +62,15 @@ class TestMiddlewareManager:
         middleware1 = mocker.AsyncMock(return_value=True)
         middleware2 = mocker.AsyncMock(return_value=False)
         middleware3 = mocker.AsyncMock(return_value=True)
-        manager.add_middleware(middleware1)
-        manager.add_middleware(middleware2)
-        manager.add_middleware(middleware3)
+        manager.add_middleware(middleware=middleware1)
+        manager.add_middleware(middleware=middleware2)
+        manager.add_middleware(middleware=middleware3)
 
-        result = await manager.process_request(mock_session)
+        result = await manager.process_request(session=mock_session)
 
         assert result is False
-        middleware1.assert_awaited_once_with(mock_session)
-        middleware2.assert_awaited_once_with(mock_session)
+        middleware1.assert_awaited_once_with(session=mock_session)
+        middleware2.assert_awaited_once_with(session=mock_session)
         middleware3.assert_not_called()
 
     @pytest.mark.asyncio
@@ -79,9 +79,9 @@ class TestMiddlewareManager:
     ) -> None:
         manager = MiddlewareManager()
         middleware1 = mocker.AsyncMock(side_effect=ValueError("Middleware error"))
-        manager.add_middleware(middleware1)
+        manager.add_middleware(middleware=middleware1)
 
-        result = await manager.process_request(mock_session)
+        result = await manager.process_request(session=mock_session)
 
         assert result is False
         assert "Middleware error: Middleware error" in caplog.text
@@ -108,7 +108,7 @@ class TestMiddlewareFactories:
         caplog.set_level(logging.INFO)
         logging_middleware = create_logging_middleware()
 
-        result = await logging_middleware(mock_session)
+        result = await logging_middleware(session=mock_session)
 
         assert result is True
         assert "Session request: path='/test' from=1.2.3.4:12345" in caplog.text
@@ -123,7 +123,7 @@ class TestMiddlewareFactories:
         session.connection.remote_address = None
         logging_middleware = create_logging_middleware()
 
-        await logging_middleware(session)
+        await logging_middleware(session=session)
 
         assert "from=unknown" in caplog.text
 
@@ -133,17 +133,17 @@ class TestMiddlewareFactories:
         auth_handler = mocker.AsyncMock(return_value=auth_result)
         auth_middleware = create_auth_middleware(auth_handler=auth_handler)
 
-        result = await auth_middleware(mock_session)
+        result = await auth_middleware(session=mock_session)
 
         assert result is auth_result
-        auth_handler.assert_awaited_once_with(mock_session.headers)
+        auth_handler.assert_awaited_once_with(headers=mock_session.headers)
 
     @pytest.mark.asyncio
     async def test_create_auth_middleware_handler_exception(self, mock_session: Any, mocker: MockerFixture) -> None:
         auth_handler = mocker.AsyncMock(side_effect=ValueError("Auth error"))
         auth_middleware = create_auth_middleware(auth_handler=auth_handler)
 
-        result = await auth_middleware(mock_session)
+        result = await auth_middleware(session=mock_session)
 
         assert result is False
 
@@ -163,7 +163,7 @@ class TestMiddlewareFactories:
         mock_session.headers = {"origin": origin} if origin else {}
         cors_middleware = create_cors_middleware(allowed_origins=allowed_origins)
 
-        result = await cors_middleware(mock_session)
+        result = await cors_middleware(session=mock_session)
 
         assert result is expected_result
 
@@ -188,24 +188,24 @@ class TestRateLimiter:
         mock_timestamp = mocker.patch("pywebtransport.server.middleware.get_timestamp")
 
         mock_timestamp.return_value = 100.0
-        assert await rate_limiter(mock_session) is True
+        assert await rate_limiter(session=mock_session) is True
 
         mock_timestamp.return_value = 101.0
-        assert await rate_limiter(mock_session) is True
+        assert await rate_limiter(session=mock_session) is True
 
         mock_timestamp.return_value = 102.0
-        assert await rate_limiter(mock_session) is False
+        assert await rate_limiter(session=mock_session) is False
         assert "Rate limit exceeded for 1.2.3.4" in caplog.text
 
         mock_timestamp.return_value = 110.1
-        assert await rate_limiter(mock_session) is True
+        assert await rate_limiter(session=mock_session) is True
 
     @pytest.mark.asyncio
     async def test_call_no_remote_address(self, mocker: MockerFixture, rate_limiter: RateLimiter) -> None:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.connection.remote_address = None
 
-        assert await rate_limiter(session) is True
+        assert await rate_limiter(session=session) is True
 
     @pytest.mark.asyncio
     async def test_lifecycle_and_cleanup(self, mocker: MockerFixture, caplog: LogCaptureFixture) -> None:
@@ -306,4 +306,4 @@ class TestRateLimiter:
         limiter = RateLimiter()
 
         with pytest.raises(ServerError, match="RateLimiter has not been activated"):
-            await limiter(mock_session)
+            await limiter(session=mock_session)

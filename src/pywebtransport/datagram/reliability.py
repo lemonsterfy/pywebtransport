@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = ["DatagramReliabilityLayer"]
 
-logger = get_logger("datagram.reliability")
+logger = get_logger(name="datagram.reliability")
 
 
 class _ReliableDatagram(DatagramMessage):
@@ -58,20 +58,24 @@ class DatagramReliabilityLayer:
     @classmethod
     def create(
         cls,
-        datagram_stream: WebTransportDatagramDuplexStream,
         *,
+        datagram_stream: WebTransportDatagramDuplexStream,
         ack_timeout: float = 1.0,
         max_retries: int = 3,
     ) -> Self:
         """Factory method to create a new datagram reliability layer for a stream."""
-        return cls(datagram_stream, ack_timeout=ack_timeout, max_retries=max_retries)
+        return cls(
+            datagram_stream=datagram_stream,
+            ack_timeout=ack_timeout,
+            max_retries=max_retries,
+        )
 
     async def __aenter__(self) -> Self:
         """Enter the async context and start background tasks."""
         self._lock = asyncio.Lock()
         self._incoming_queue = asyncio.Queue()
         if stream := self._stream():
-            stream.on(EventType.DATAGRAM_RECEIVED, self._on_datagram_received)
+            stream.on(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
         self._start_background_tasks()
         return self
 
@@ -91,7 +95,7 @@ class DatagramReliabilityLayer:
         self._closed = True
 
         if stream := self._stream():
-            stream.off(EventType.DATAGRAM_RECEIVED, self._on_datagram_received)
+            stream.off(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
 
         if self._retry_task:
             self._retry_task.cancel()
@@ -117,17 +121,17 @@ class DatagramReliabilityLayer:
         if self._closed:
             raise DatagramError("Reliability layer is closed.")
         try:
-            return await asyncio.wait_for(self._incoming_queue.get(), timeout)
+            return await asyncio.wait_for(self._incoming_queue.get(), timeout=timeout)
         except asyncio.TimeoutError:
             raise TimeoutError(f"Receive timeout after {timeout}s") from None
 
-    async def send(self, data: Data) -> None:
+    async def send(self, *, data: Data) -> None:
         """Send a datagram with guaranteed delivery."""
         if self._lock is None:
             raise DatagramError("Reliability layer has not been activated.")
 
         stream = self._get_stream()
-        data_bytes = ensure_bytes(data)
+        data_bytes = ensure_bytes(data=data)
 
         async with self._lock:
             seq = self._send_sequence
@@ -136,8 +140,8 @@ class DatagramReliabilityLayer:
             datagram = _ReliableDatagram(data=data_payload, sequence=seq)
             self._pending_acks[seq] = datagram
 
-        await stream.send_structured("DATA", data_payload)
-        logger.debug(f"Sent reliable datagram with sequence {seq}")
+        await stream._send_framed_data(message_type="DATA", payload=data_payload)
+        logger.debug("Sent reliable datagram with sequence %d", seq)
 
     def _get_stream(self) -> WebTransportDatagramDuplexStream:
         """Get the underlying stream or raise an error if it is gone or closed."""
@@ -146,7 +150,7 @@ class DatagramReliabilityLayer:
             raise DatagramError("Reliability layer or underlying stream is closed.")
         return stream
 
-    async def _handle_ack_message(self, payload: bytes) -> None:
+    async def _handle_ack_message(self, *, payload: bytes) -> None:
         """Handle an incoming ACK message."""
         if self._lock is None:
             return
@@ -155,11 +159,11 @@ class DatagramReliabilityLayer:
             async with self._lock:
                 if seq in self._pending_acks:
                     del self._pending_acks[seq]
-                    logger.debug(f"Received ACK for sequence {seq}")
+                    logger.debug("Received ACK for sequence %d", seq)
         except (ValueError, UnicodeDecodeError):
-            logger.warning(f"Received malformed ACK: {payload!r}")
+            logger.warning("Received malformed ACK: %r", payload)
 
-    async def _handle_data_message(self, payload: bytes) -> None:
+    async def _handle_data_message(self, *, payload: bytes) -> None:
         """Handle an incoming DATA message."""
         if self._incoming_queue is None:
             return
@@ -171,13 +175,13 @@ class DatagramReliabilityLayer:
 
         try:
             stream = self._get_stream()
-            await stream.send_structured("ACK", str(seq).encode("utf-8"))
+            await stream._send_framed_data(message_type="ACK", payload=str(seq).encode("utf-8"))
         except DatagramError as e:
-            logger.warning(f"Failed to send ACK for sequence {seq}: {e}")
+            logger.warning("Failed to send ACK for sequence %d: %s", seq, e, exc_info=True)
             return
 
         if seq in self._received_sequences:
-            logger.debug(f"Ignoring duplicate reliable datagram with sequence {seq}")
+            logger.debug("Ignoring duplicate reliable datagram with sequence %d", seq)
             return
 
         self._received_sequences.append(seq)
@@ -203,13 +207,17 @@ class DatagramReliabilityLayer:
 
             match message_type:
                 case "ACK":
-                    await self._handle_ack_message(payload)
+                    await self._handle_ack_message(payload=payload)
                 case "DATA":
-                    await self._handle_data_message(payload)
+                    await self._handle_data_message(payload=payload)
         except (IndexError, UnicodeDecodeError):
             pass
         except Exception as e:
-            logger.error(f"Error processing received datagram for reliability: {e}", exc_info=e)
+            logger.error(
+                "Error processing received datagram for reliability: %s",
+                e,
+                exc_info=e,
+            )
 
     async def _retry_loop(self) -> None:
         """Periodically check for and retry unacknowledged datagrams."""
@@ -228,7 +236,9 @@ class DatagramReliabilityLayer:
                                 if datagram.sequence is not None and datagram.sequence in self._pending_acks:
                                     del self._pending_acks[datagram.sequence]
                                 logger.warning(
-                                    f"Gave up on sequence {datagram.sequence} after {datagram.retry_count} retries."
+                                    "Gave up on sequence %s after %d retries.",
+                                    datagram.sequence,
+                                    datagram.retry_count,
                                 )
                             else:
                                 to_retry.append(datagram)
@@ -249,15 +259,23 @@ class DatagramReliabilityLayer:
                             async with self._lock:
                                 datagram.retry_count += 1
                                 datagram.timestamp = get_timestamp()
-                            tg.create_task(stream.send_structured("DATA", datagram.data))
-                            logger.debug(f"Retrying sequence {datagram.sequence}, attempt {datagram.retry_count}")
+                            tg.create_task(stream._send_framed_data(message_type="DATA", payload=datagram.data))
+                            logger.debug(
+                                "Retrying sequence %s, attempt %d",
+                                datagram.sequence,
+                                datagram.retry_count,
+                            )
                 except* Exception as eg:
-                    logger.warning(f"Errors occurred during datagram retry: {eg.exceptions}")
+                    logger.warning(
+                        "Errors occurred during datagram retry: %s",
+                        eg.exceptions,
+                        exc_info=eg,
+                    )
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Reliability retry loop crashed: {e}", exc_info=e)
+            logger.error("Reliability retry loop crashed: %s", e, exc_info=e)
 
     def _start_background_tasks(self) -> None:
         """Start the background retry task if it is not already running."""

@@ -6,6 +6,10 @@ Thank you for your interest in contributing to PyWebTransport! This document pro
 
 This project adheres to a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
 
+## Our Philosophy
+
+Before contributing, we highly recommend reading our **[Implementation Philosophy](PHILOSOPHY.md)**. It outlines the core principles that guide the project's design and development, ensuring that all contributions align with our long-term goals for standards compliance, a clean architecture, and maintainability.
+
 ## Getting Started
 
 ### Prerequisites
@@ -114,7 +118,9 @@ We use the following tools to maintain code quality, with configurations located
 ### Type Hints
 
 - All public functions and methods must include type hints.
-- Use modern Python 3.11+ typing syntax (e.g., `X | Y` for unions).
+- Use modern Python 3.11+ typing syntax. For example:
+  - Use `list` instead of `typing.List`
+  - Use `X | Y` instead of `typing.Union[X, Y]`
 - Use built-in generics (`list`, `dict`) instead of imports from `typing`.
 
 ### Documentation
@@ -134,13 +140,6 @@ async def create_bidirectional_stream(self) -> WebTransportStream:
 - Use specific exception types from `pywebtransport.exceptions`.
 - Include descriptive error messages.
 - Properly handle async context managers and resource cleanup.
-
-### WebTransport Protocol Compliance
-
-Ensure contributions maintain compliance with the WebTransport protocol suite and its underlying dependencies. Key documents include:
-
-- WebTransport over HTTP/3 (draft-ietf-webtrans-http3-13)
-- HTTP/3 (RFC 9114)
 
 ## Testing
 
@@ -236,41 +235,13 @@ When updating documentation:
 
 ### Submitting a Pull Request
 
-Once your changes are ready, push your branch to your fork and open a pull request against the `main` branch of the original repository.
+Once your changes are ready, push your branch to your fork and open a pull request against the `main` branch of the original repository. GitHub will automatically use our [PR template](/.github/pull_request_template.md).
 
 - **Title**: Use a clear, descriptive title following Conventional Commits.
 - **Description**: Explain what the PR does and why.
 - **Testing**: Describe how the changes were tested.
 - **Breaking Changes**: Clearly mark any breaking changes.
 - **Links**: Reference related issues.
-
-### PR Template
-
-```markdown
-## Description
-
-Brief description of changes
-
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-
-- [ ] All existing tests pass via `tox`
-- [ ] New tests added for new functionality
-- [ ] Manual testing completed
-
-## Checklist
-
-- [ ] Code follows style guidelines
-- [ ] Self-review completed
-- [ ] Documentation updated
-- [ ] CHANGELOG.md updated
-```
 
 ## Release Process
 

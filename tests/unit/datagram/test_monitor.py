@@ -15,7 +15,7 @@ from pywebtransport.datagram import DatagramMonitor
 class TestDatagramMonitor:
     @pytest.fixture
     def monitor(self, mock_stream: Any) -> DatagramMonitor:
-        return DatagramMonitor(mock_stream)
+        return DatagramMonitor(datagram_stream=mock_stream)
 
     @pytest.fixture
     def mock_stream(self, mocker: MockerFixture) -> Any:
@@ -33,7 +33,7 @@ class TestDatagramMonitor:
         return stream
 
     def test_initialization(self, mock_stream: Any) -> None:
-        mon = DatagramMonitor(mock_stream)
+        mon = DatagramMonitor(datagram_stream=mock_stream)
 
         assert mon._stream is mock_stream
         assert mon._interval == 5.0
@@ -41,7 +41,7 @@ class TestDatagramMonitor:
         assert mon._alerts.maxlen == 50
 
     def test_create_factory(self, mock_stream: Any) -> None:
-        mon = DatagramMonitor.create(mock_stream, monitoring_interval=10.0)
+        mon = DatagramMonitor.create(datagram_stream=mock_stream, monitoring_interval=10.0)
 
         assert isinstance(mon, DatagramMonitor)
         assert mon._interval == 10.0
@@ -126,7 +126,8 @@ class TestDatagramMonitor:
     async def test_monitor_loop_handles_exception(
         self, monitor: DatagramMonitor, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
-        mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock, side_effect=ValueError("Test Exception"))
+        error = ValueError("Test Exception")
+        mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock, side_effect=error)
 
         await monitor._monitor_loop()
 
@@ -142,7 +143,7 @@ class TestDatagramMonitor:
             "avg_send_time": 0.01,
         }
 
-        await monitor._check_alerts(sample)
+        await monitor._check_alerts(current_sample=sample)
 
         assert len(monitor.get_alerts()) == 1
         alert = monitor.get_alerts()[0]
@@ -158,7 +159,7 @@ class TestDatagramMonitor:
             "avg_send_time": 0.01,
         }
 
-        await monitor._check_alerts(sample)
+        await monitor._check_alerts(current_sample=sample)
 
         assert len(monitor.get_alerts()) == 1
         alert = monitor.get_alerts()[0]
@@ -177,7 +178,7 @@ class TestDatagramMonitor:
             "timestamp": 123,
         }
 
-        await monitor._check_alerts(sample)
+        await monitor._check_alerts(current_sample=sample)
 
         assert len(monitor.get_alerts()) == 1
         alert = monitor.get_alerts()[0]
@@ -193,7 +194,7 @@ class TestDatagramMonitor:
             "avg_send_time": 0.01,
         }
 
-        await monitor._check_alerts(sample)
+        await monitor._check_alerts(current_sample=sample)
 
         assert len(monitor.get_alerts()) == 0
 
@@ -211,13 +212,13 @@ class TestDatagramMonitor:
     def test_analyze_trend(self, monitor: DatagramMonitor, values: list[float], expected_trend: str) -> None:
         monitor._trend_analysis_window = len(values)
 
-        trend = monitor._analyze_trend(values)
+        trend = monitor._analyze_trend(values=values)
 
         assert trend == expected_trend
 
     def test_analyze_trend_insufficient_data(self, monitor: DatagramMonitor) -> None:
         monitor._trend_analysis_window = 10
 
-        trend = monitor._analyze_trend([1.0] * 9)
+        trend = monitor._analyze_trend(values=[1.0] * 9)
 
         assert trend == "stable"

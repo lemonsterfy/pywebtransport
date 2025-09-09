@@ -65,7 +65,7 @@ class TestSessionManager:
         assert manager._cleanup_task is not None
         assert not manager._cleanup_task.done()
         the_task = manager._cleanup_task
-        await manager.add_session(mock_session)
+        await manager.add_session(session=mock_session)
 
         await manager.shutdown()
 
@@ -84,7 +84,7 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_session_success(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
-        session_id = await manager.add_session(mock_session)
+        session_id = await manager.add_session(session=mock_session)
 
         assert session_id == "session-1"
         assert manager.get_session_count() == 1
@@ -92,35 +92,37 @@ class TestSessionManager:
         assert stats["total_created"] == 1
         assert stats["current_count"] == 1
         assert stats["max_concurrent"] == 1
-        assert await manager.get_session("session-1") is mock_session
-        cast(mock.MagicMock, mock_session.once).assert_called_once_with(EventType.SESSION_CLOSED, mock.ANY)
+        assert await manager.get_session(session_id="session-1") is mock_session
+        cast(mock.MagicMock, mock_session.once).assert_called_once_with(
+            event_type=EventType.SESSION_CLOSED, handler=mock.ANY
+        )
 
     @pytest.mark.asyncio
     async def test_add_session_limit_exceeded(self, mock_session: WebTransportSession, mocker: MockerFixture) -> None:
         async with SessionManager(max_sessions=1) as manager:
-            await manager.add_session(mock_session)
+            await manager.add_session(session=mock_session)
             another_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="session-2")
             another_session.once = mocker.MagicMock()
 
             with pytest.raises(SessionError, match=r"Maximum sessions \(1\) exceeded"):
-                await manager.add_session(another_session)
+                await manager.add_session(session=another_session)
 
     @pytest.mark.asyncio
     async def test_get_session(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
-        await manager.add_session(mock_session)
+        await manager.add_session(session=mock_session)
 
-        retrieved = await manager.get_session("session-1")
-        not_found = await manager.get_session("non-existent-id")
+        retrieved = await manager.get_session(session_id="session-1")
+        not_found = await manager.get_session(session_id="non-existent-id")
 
         assert retrieved is mock_session
         assert not_found is None
 
     @pytest.mark.asyncio
     async def test_remove_session(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
-        await manager.add_session(mock_session)
+        await manager.add_session(session=mock_session)
         assert manager.get_session_count() == 1
 
-        removed_session = await manager.remove_session("session-1")
+        removed_session = await manager.remove_session(session_id="session-1")
 
         assert removed_session is mock_session
         assert manager.get_session_count() == 0
@@ -131,7 +133,7 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_remove_non_existent_session(self, manager: SessionManager) -> None:
-        removed = await manager.remove_session("non-existent-id")
+        removed = await manager.remove_session(session_id="non-existent-id")
 
         assert removed is None
         stats = await manager.get_stats()
@@ -149,7 +151,7 @@ class TestSessionManager:
                 close_handler = handler
 
         cast(mock.MagicMock, mock_session.once).side_effect = capture_handler
-        await manager.add_session(mock_session)
+        await manager.add_session(session=mock_session)
         assert manager.get_session_count() == 1
         assert close_handler is not None
         close_event = mocker.MagicMock()
@@ -173,7 +175,7 @@ class TestSessionManager:
                 close_handler = handler
 
         cast(mock.MagicMock, mock_session.once).side_effect = capture_handler
-        await manager.add_session(mock_session)
+        await manager.add_session(session=mock_session)
         assert close_handler is not None
         mocker.patch("weakref.ref", return_value=lambda: None)
         close_event = mocker.MagicMock()
@@ -190,11 +192,11 @@ class TestSessionManager:
             session.state = state
             session.once = mocker.MagicMock()
             sessions.append(session)
-            await manager.add_session(session)
+            await manager.add_session(session=session)
 
         all_sessions = await manager.get_all_sessions()
-        connected_sessions = await manager.get_sessions_by_state(SessionState.CONNECTED)
-        closed_sessions = await manager.get_sessions_by_state(SessionState.CLOSED)
+        connected_sessions = await manager.get_sessions_by_state(state=SessionState.CONNECTED)
+        closed_sessions = await manager.get_sessions_by_state(state=SessionState.CLOSED)
 
         assert len(all_sessions) == 3
         assert set(all_sessions) == set(sessions)
@@ -206,7 +208,7 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_get_stats(self, manager: SessionManager, mock_session: WebTransportSession) -> None:
-        await manager.add_session(mock_session)
+        await manager.add_session(session=mock_session)
 
         stats = await manager.get_stats()
 
@@ -230,7 +232,7 @@ class TestSessionManager:
         self, manager: SessionManager, mock_session: WebTransportSession, mocker: MockerFixture
     ) -> None:
         cast(AsyncMock, mock_session.close).side_effect = ValueError("Close failed")
-        await manager.add_session(mock_session)
+        await manager.add_session(session=mock_session)
 
         with pytest.raises(ExceptionGroup) as excinfo:
             await manager.close_all_sessions()
@@ -246,16 +248,16 @@ class TestSessionManager:
         closed_session = mocker.create_autospec(WebTransportSession, instance=True, session_id="closed-1")
         type(closed_session).is_closed = mocker.PropertyMock(return_value=True)
         closed_session.once = mocker.MagicMock()
-        await manager.add_session(open_session)
-        await manager.add_session(closed_session)
+        await manager.add_session(session=open_session)
+        await manager.add_session(session=closed_session)
         assert manager.get_session_count() == 2
 
         cleaned_count = await manager.cleanup_closed_sessions()
 
         assert cleaned_count == 1
         assert manager.get_session_count() == 1
-        assert await manager.get_session("open-1") is not None
-        assert await manager.get_session("closed-1") is None
+        assert await manager.get_session(session_id="open-1") is not None
+        assert await manager.get_session(session_id="closed-1") is None
         stats = await manager.get_stats()
         assert stats["total_closed"] == 1
 
@@ -287,13 +289,14 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_periodic_cleanup_handles_exception(self, mocker: MockerFixture) -> None:
         mock_logger = mocker.patch("pywebtransport.session.manager.logger")
+        error = ValueError("Cleanup failed")
         mock_cleanup = mocker.patch.object(SessionManager, "cleanup_closed_sessions", new_callable=mocker.AsyncMock)
-        mock_cleanup.side_effect = ValueError("Cleanup failed")
+        mock_cleanup.side_effect = error
 
         async with SessionManager(session_cleanup_interval=0.001):
             await asyncio.sleep(0.01)
 
-        mock_logger.error.assert_called_with("Session cleanup cycle failed: Cleanup failed", exc_info=mock.ANY)
+        mock_logger.error.assert_called_with("Session cleanup cycle failed: %s", error, exc_info=error)
         mock_cleanup.assert_awaited()
 
 
@@ -304,20 +307,20 @@ class TestSessionManagerUninitialized:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "method_name, args",
+        "method_name, kwargs",
         [
-            ("add_session", (mock.Mock(),)),
-            ("close_all_sessions", ()),
-            ("get_session", ("id-1",)),
-            ("remove_session", ("id-1",)),
-            ("cleanup_closed_sessions", ()),
-            ("get_all_sessions", ()),
-            ("get_sessions_by_state", (SessionState.CONNECTED,)),
-            ("get_stats", ()),
+            ("add_session", {"session": mock.Mock()}),
+            ("close_all_sessions", {}),
+            ("get_session", {"session_id": "id-1"}),
+            ("remove_session", {"session_id": "id-1"}),
+            ("cleanup_closed_sessions", {}),
+            ("get_all_sessions", {}),
+            ("get_sessions_by_state", {"state": SessionState.CONNECTED}),
+            ("get_stats", {}),
         ],
     )
     async def test_methods_raise_before_activated(
-        self, uninitialized_manager: SessionManager, method_name: str, args: tuple
+        self, uninitialized_manager: SessionManager, method_name: str, kwargs: dict
     ) -> None:
         with pytest.raises(SessionError, match="SessionManager has not been activated"):
-            await getattr(uninitialized_manager, method_name)(*args)
+            await getattr(uninitialized_manager, method_name)(**kwargs)

@@ -1,250 +1,221 @@
-# API Reference: Exceptions
+# API Reference: exceptions
 
-This document provides a comprehensive reference for the exception system in `pywebtransport`. It covers the exception hierarchy, details of each exception class, and the utility functions provided for robust error handling.
-
----
-
-## Exception Hierarchy
-
-All exceptions in the library inherit from the base `WebTransportError` class. This hierarchical structure allows for precise and flexible error handling.
-
-```python
-Exception
-└── WebTransportError
-    ├── AuthenticationError
-    ├── CertificateError
-    ├── ClientError
-    ├── ConfigurationError
-    ├── ConnectionError
-    ├── DatagramError
-    ├── FlowControlError
-    ├── HandshakeError
-    ├── ProtocolError
-    ├── ServerError
-    ├── SessionError
-    ├── StreamError
-    └── TimeoutError
-```
+This module defines the custom exception hierarchy and error-handling utilities.
 
 ---
 
-## Base Exception
+## WebTransportError Class
 
-### WebTransportError Exception
+The base exception for all WebTransport errors.
 
-The base class for all library-specific exceptions.
+### Constructor
 
-#### Constructor
+- **`def __init__(self, message: str, *, error_code: int | None = None, details: dict[str, Any] | None = None)`**: Initializes the base WebTransport error.
 
-- **`WebTransportError(message: str, *, error_code: int | None = None, details: dict[str, Any] | None = None)`**: Initializes the base error.
+### Instance Methods
 
-#### Attributes
+- **`def to_dict(self) -> dict[str, Any]`**: Converts the exception to a dictionary for serialization.
+
+### Attributes
 
 - `message` (`str`): A human-readable description of the error.
-- `error_code` (`int`): A numeric error code, defaulting to `ErrorCodes.INTERNAL_ERROR`.
-- `details` (`dict[str, Any]`): A dictionary for additional context.
+- `error_code` (`int`): A numeric error code. `Default: ErrorCodes.INTERNAL_ERROR`.
+- `details` (`dict[str, Any]`): A dictionary for additional context. `Default: {}`.
 
-#### Methods
+## AuthenticationError Class
 
-- **`to_dict() -> dict[str, Any]`**: Serializes the exception's data to a dictionary.
+An exception for authentication-related errors. Inherits from `WebTransportError`.
 
----
+### Constructor
 
-## Exception Classes
+- **`def __init__(self, message: str, *, error_code: int | None = None, auth_method: str | None = None, details: dict[str, Any] | None = None)`**: Initializes the authentication error.
 
-### AuthenticationError Exception
-
-Raised for errors during the authentication process. Inherits from `WebTransportError`.
-
-#### Constructor
-
-- **`AuthenticationError(message: str, *, error_code: int | None = None, auth_method: str | None = None, details: dict[str, Any] | None = None)`**
-
-#### Additional Attributes
+### Attributes
 
 - `auth_method` (`str | None`): The authentication method that failed.
 
-### CertificateError Exception
+## CertificateError Class
 
-Raised for errors related to TLS certificate loading or validation. Inherits from `WebTransportError`.
+An exception for certificate-related errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`CertificateError(message: str, *, error_code: int | None = None, certificate_path: str | None = None, certificate_error: str | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, certificate_path: str | None = None, certificate_error: str | None = None, details: dict[str, Any] | None = None)`**: Initializes the certificate error.
 
-#### Additional Attributes
+### Attributes
 
 - `certificate_path` (`str | None`): The file path of the problematic certificate.
-- `certificate_error` (`str | None`): A string identifying the specific certificate issue (e.g., "file_not_found").
+- `certificate_error` (`str | None`): A string identifying the specific certificate issue.
 
-### ClientError Exception
+## ClientError Class
 
-Raised for errors specific to client-side operations. Inherits from `WebTransportError`.
+An exception for client-specific errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`ClientError(message: str, *, error_code: int | None = None, target_url: str | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, target_url: str | None = None, details: dict[str, Any] | None = None)`**: Initializes the client error.
 
-#### Additional Attributes
+### Attributes
 
 - `target_url` (`str | None`): The URL the client was attempting to connect to.
 
-### ConfigurationError Exception
+## ConfigurationError Class
 
-Raised when invalid configuration parameters are provided. Inherits from `WebTransportError`.
+An exception for configuration-related errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`ConfigurationError(message: str, *, error_code: int | None = None, config_key: str | None = None, config_value: Any | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, config_key: str | None = None, config_value: Any | None = None, details: dict[str, Any] | None = None)`**: Initializes the configuration error.
 
-#### Additional Attributes
+### Attributes
 
 - `config_key` (`str | None`): The configuration key that caused the error.
 - `config_value` (`Any | None`): The invalid value provided for the key.
 
-### ConnectionError Exception
+## ConnectionError Class
 
-Raised for errors during connection establishment or management. Inherits from `WebTransportError`.
+An exception for connection-related errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`ConnectionError(message: str, *, error_code: int | None = None, remote_address: tuple[str, int] | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, remote_address: tuple[str, int] | None = None, details: dict[str, Any] | None = None)`**: Initializes the connection error.
 
-#### Additional Attributes
+### Attributes
 
 - `remote_address` (`tuple[str, int] | None`): The `(host, port)` tuple of the remote peer.
 
-### DatagramError Exception
+## DatagramError Class
 
-Raised for errors related to sending or receiving datagrams. Inherits from `WebTransportError`.
+An exception for datagram-related errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`DatagramError(message: str, *, error_code: int | None = None, datagram_size: int | None = None, max_size: int | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, datagram_size: int | None = None, max_size: int | None = None, details: dict[str, Any] | None = None)`**: Initializes the datagram error.
 
-#### Additional Attributes
+### Attributes
 
 - `datagram_size` (`int | None`): The size of the datagram that caused the error.
 - `max_size` (`int | None`): The maximum permissible datagram size.
 
-### FlowControlError Exception
+## FlowControlError Class
 
-Raised when a flow control limit is violated. Inherits from `WebTransportError`.
+An exception for flow control errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`FlowControlError(message: str, *, error_code: int | None = None, stream_id: int | None = None, limit_exceeded: int | None = None, current_value: int | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, stream_id: int | None = None, limit_exceeded: int | None = None, current_value: int | None = None, details: dict[str, Any] | None = None)`**: Initializes the flow control error.
 
-#### Additional Attributes
+### Attributes
 
 - `stream_id` (`int | None`): The ID of the stream where the error occurred.
 - `limit_exceeded` (`int | None`): The flow control limit that was surpassed.
 - `current_value` (`int | None`): The value that exceeded the limit.
 
-### HandshakeError Exception
+## HandshakeError Class
 
-Raised for errors during the WebTransport handshake process. Inherits from `WebTransportError`.
+An exception for handshake-related errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`HandshakeError(message: str, *, error_code: int | None = None, handshake_stage: str | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, handshake_stage: str | None = None, details: dict[str, Any] | None = None)`**: Initializes the handshake error.
 
-#### Additional Attributes
+### Attributes
 
 - `handshake_stage` (`str | None`): The stage of the handshake where the failure occurred.
 
-### ProtocolError Exception
+## ProtocolError Class
 
-Raised for violations of the WebTransport or underlying QUIC protocols. Inherits from `WebTransportError`.
+An exception for protocol violation errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`ProtocolError(message: str, *, error_code: int | None = None, frame_type: int | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, frame_type: int | None = None, details: dict[str, Any] | None = None)`**: Initializes the protocol error.
 
-#### Additional Attributes
+### Attributes
 
 - `frame_type` (`int | None`): The QUIC frame type that caused the error, if applicable.
 
-### ServerError Exception
+## ServerError Class
 
-Raised for errors specific to server-side operations. Inherits from `WebTransportError`.
+An exception for server-specific errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`ServerError(message: str, *, error_code: int | None = None, bind_address: tuple[str, int] | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, bind_address: tuple[str, int] | None = None, details: dict[str, Any] | None = None)`**: Initializes the server error.
 
-#### Additional Attributes
+### Attributes
 
 - `bind_address` (`tuple[str, int] | None`): The address the server failed to bind to.
 
-### SessionError Exception
+## SessionError Class
 
-Raised for errors related to WebTransport session state or management. Inherits from `WebTransportError`.
+An exception for WebTransport session errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`SessionError(message: str, *, session_id: str | None = None, error_code: int | None = None, session_state: SessionState | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, session_id: str | None = None, error_code: int | None = None, session_state: SessionState | None = None, details: dict[str, Any] | None = None)`**: Initializes the session error.
 
-#### Additional Attributes
+### Attributes
 
 - `session_id` (`str | None`): The ID of the affected session.
 - `session_state` (`SessionState | None`): The state of the session when the error occurred.
 
-### StreamError Exception
+## StreamError Class
 
-Raised for errors related to stream operations or state. Inherits from `WebTransportError`.
+An exception for stream-related errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`StreamError(message: str, *, stream_id: int | None = None, error_code: int | None = None, stream_state: StreamState | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, stream_id: int | None = None, error_code: int | None = None, stream_state: StreamState | None = None, details: dict[str, Any] | None = None)`**: Initializes the stream error.
 
-#### Additional Attributes
+### Attributes
 
 - `stream_id` (`int | None`): The ID of the affected stream.
 - `stream_state` (`StreamState | None`): The state of the stream when the error occurred.
 
-### TimeoutError Exception
+## SerializationError Class
 
-Raised when an operation exceeds its specified timeout. Inherits from `WebTransportError`.
+An exception for serialization or deserialization errors. Inherits from `WebTransportError`.
 
-#### Constructor
+### Constructor
 
-- **`TimeoutError(message: str, *, error_code: int | None = None, timeout_duration: float | None = None, operation: str | None = None, details: dict[str, Any] | None = None)`**
+- **`def __init__(self, message: str, *, error_code: int | None = None, details: dict[str, Any] | None = None, original_exception: Exception | None = None)`**: Initializes the serialization error.
 
-#### Additional Attributes
+### Attributes
+
+- `original_exception` (`Exception | None`): The original exception that was caught during the process.
+
+## TimeoutError Class
+
+An exception for timeout-related errors. Inherits from `WebTransportError`.
+
+### Constructor
+
+- **`def __init__(self, message: str, *, error_code: int | None = None, timeout_duration: float | None = None, operation: str | None = None, details: dict[str, Any] | None = None)`**: Initializes the timeout error.
+
+### Attributes
 
 - `timeout_duration` (`float | None`): The timeout value in seconds.
 - `operation` (`str | None`): A description of the operation that timed out.
 
----
-
 ## Utility Functions
 
-### Exception Factory Functions
+Helper functions for creating and classifying exceptions.
 
-These helper functions create specific, pre-configured exception instances.
-
-- **`certificate_not_found(path: str) -> CertificateError`**: Creates a `CertificateError` for a missing certificate file.
-- **`connection_timeout(timeout_duration: float, operation: str = "connect") -> TimeoutError`**: Creates a `TimeoutError` for a connection timeout.
-- **`datagram_too_large(size: int, max_size: int) -> DatagramError`**: Creates a `DatagramError` for an oversized datagram.
-- **`invalid_config(key: str, value: Any, reason: str) -> ConfigurationError`**: Creates a `ConfigurationError` for an invalid configuration parameter.
-- **`protocol_violation(message: str, frame_type: int | None = None) -> ProtocolError`**: Creates a `ProtocolError` for a protocol violation.
-- **`session_not_ready(session_id: str, current_state: SessionState) -> SessionError`**: Creates a `SessionError` for operations on a session that is not yet in the `CONNECTED` state.
-- **`stream_closed(stream_id: int, reason: str = "Stream was closed") -> StreamError`**: Creates a `StreamError` for operations on a closed stream.
-
-### Error Handling Utilities
-
-These functions assist in classifying and handling exceptions.
-
-- **`is_fatal_error(exception: Exception) -> bool`**: Returns `True` if the error is considered fatal and should terminate the connection.
-- **`is_retriable_error(exception: Exception) -> bool`**: Returns `True` if the error is transient and the operation may succeed if retried.
-- **`get_error_category(exception: Exception) -> str`**: Returns a simple string category for the exception (e.g., `"connection"`, `"stream"`, `"timeout"`).
-
----
+- **`def certificate_not_found(*, path: str) -> CertificateError`**: Creates a `CertificateError` for a missing certificate file.
+- **`def connection_timeout(*, timeout_duration: float, operation: str = "connect") -> TimeoutError`**: Creates a `TimeoutError` for a connection timeout.
+- **`def datagram_too_large(*, size: int, max_size: int) -> DatagramError`**: Creates a `DatagramError` for an oversized datagram.
+- **`def get_error_category(*, exception: Exception) -> str`**: Returns a simple string category for the exception (e.g., "connection", "stream").
+- **`def invalid_config(*, key: str, value: Any, reason: str) -> ConfigurationError`**: Creates a `ConfigurationError` for an invalid configuration parameter.
+- **`def is_fatal_error(*, exception: Exception) -> bool`**: Returns `True` if the error is considered fatal and should terminate the connection.
+- **`def is_retriable_error(*, exception: Exception) -> bool`**: Returns `True` if the error is transient and the operation may succeed if retried.
+- **`def protocol_violation(*, message: str, frame_type: int | None = None) -> ProtocolError`**: Creates a `ProtocolError` for a protocol violation.
+- **`def session_not_ready(*, session_id: str, current_state: SessionState) -> SessionError`**: Creates a `SessionError` for operations on a session that is not yet connected.
+- **`def stream_closed(*, stream_id: int, reason: str = "Stream was closed") -> StreamError`**: Creates a `StreamError` for operations on a closed stream.
 
 ## See Also
 
 - **[Configuration API](config.md)**: Understand how to configure clients and servers.
+- **[Constants API](constants.md)**: Review default values and protocol-level constants.
 - **[Events API](events.md)**: Learn about the event system and how to use handlers.
 - **[Types API](types.md)**: Review type definitions and enumerations.
-- **[Constants API](constants.md)**: Review default values and protocol-level constants.

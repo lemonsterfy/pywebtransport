@@ -121,7 +121,9 @@ class TestConnectionUtils:
     async def test_ensure_connection_already_connected(
         self, mock_client_config: ClientConfig, mock_connection: Any
     ) -> None:
-        conn = await connection_utils.ensure_connection(mock_connection, mock_client_config, host="h", port=1)
+        conn = await connection_utils.ensure_connection(
+            connection=mock_connection, config=mock_client_config, host="h", port=1
+        )
 
         assert conn is mock_connection
         mock_connection.close.assert_not_awaited()
@@ -134,7 +136,9 @@ class TestConnectionUtils:
         new_mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_create = mocker.patch.object(WebTransportConnection, "create_client", return_value=new_mock_connection)
 
-        conn = await connection_utils.ensure_connection(mock_connection, mock_client_config, host="h", port=1)
+        conn = await connection_utils.ensure_connection(
+            connection=mock_connection, config=mock_client_config, host="h", port=1
+        )
 
         assert conn is new_mock_connection
         mock_connection.close.assert_awaited_once()
@@ -148,7 +152,7 @@ class TestConnectionUtils:
 
         with pytest.raises(ConnectionError, match="Connection not active and reconnect disabled"):
             await connection_utils.ensure_connection(
-                mock_connection, mock_client_config, host="h", port=1, reconnect=False
+                connection=mock_connection, config=mock_client_config, host="h", port=1, reconnect=False
             )
 
     @pytest.mark.asyncio
@@ -207,7 +211,7 @@ class TestConnectionUtils:
         result = await connection_utils.test_tcp_connection(host="h", port=1)
 
         assert result is True
-        mock_open.assert_awaited_once_with("h", 1)
+        mock_open.assert_awaited_once_with(host="h", port=1)
         mock_writer.close.assert_called_once()
         mock_writer.wait_closed.assert_awaited_once()
 

@@ -11,6 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.5.0] - 2025-09-10
+
+This is a major feature release that significantly enhances the library's usability, performance, and resilience. It introduces three major new capabilities: a pluggable structured message layer for transmitting typed Python objects, a configurable client-side auto-reconnect strategy with exponential backoff, and selectable congestion control algorithms for performance tuning. This release also includes a comprehensive API standardization to enforce keyword-only arguments across the entire library, improving robustness and developer experience.
+
+### BREAKING CHANGE
+
+- **The entire public API of the library has been refactored to enforce keyword-only arguments.** Positional arguments in constructors and method calls are no longer supported and will raise a `TypeError`. All user code must be updated to use keyword arguments.
+- **The `MiddlewareProtocol` has been changed from a session processor that returns a session to a boolean validator.** Existing middleware implementations must be updated to conform to this new, simpler interface.
+- **The `WebTransportConstants` class in the `constants.py` module has been removed.** All constants are now defined at the module level and must be imported directly (e.g., `from pywebtransport.constants import SOME_CONSTANT`).
+
+### Added
+
+- **Implemented a Structured Message Layer** for transmitting typed Python objects, which includes:
+  - A pluggable `Serializer` abstraction with out-of-the-box support for **JSON**, **MsgPack**, and **Protobuf**.
+  - `StructuredStream` and `StructuredDatagramStream` wrappers that add object-level `send()` and `receive()` capabilities.
+  - New `WebTransportSession.create_structured_stream()` and `create_structured_datagram_stream()` factory methods for easy access.
+- **Implemented a configurable client-side auto-reconnect strategy.** The client can now automatically recover from transient network failures using an exponential backoff policy, controlled via new `ClientConfig` parameters.
+- **Implemented congestion control algorithm selection.** Users can now choose the desired algorithm (e.g., 'cubic', 'reno') in `ClientConfig` and `ServerConfig` for performance tuning.
+
+### Changed
+
+- **Standardized the entire public API to enforce keyword-only arguments**, improving clarity and preventing common errors from incorrect argument order.
+- **Refactored `WebTransportClient.create` into a factory method** that transparently returns a specialized `ReconnectingClient` when auto-reconnect is enabled, simplifying the user experience.
+- **Refactored the `ReconnectingClient`** to be fully driven by `ClientConfig`, improving its lifecycle management and robustness.
+- **Simplified the server-side `MiddlewareProtocol`** to be a boolean validator, making middleware implementation more straightforward.
+- **Refactored the `constants` module** to use a flattened, module-level namespace for simpler and more direct imports.
+
 ## [0.4.1] - 2025-09-01
 
 This is a critical stability and quality release focused on hardening the library for production use. It addresses deep-seated concurrency flaws in all pooling mechanisms, improves the robustness of the core protocol engine, enhances error handling and diagnostics, and continues the systematic modernization of the codebase.
@@ -18,7 +45,7 @@ This is a critical stability and quality release focused on hardening the librar
 ### Added
 
 - **Enhanced Error Diagnostics**: Added several specific H3 and QPACK error codes to the `ErrorCodes` enum, allowing for more granular and precise protocol-level error reporting.
-- **Improved Test Coverage**: Significantly increased unit test coverage from 91% to 96%, enhancing the reliability and correctness of the entire library.
+- **Improved Test Coverage**: Significantly increased overall test coverage from 91% to 96%, enhancing the reliability and correctness of the entire library.
 
 ### Changed
 
@@ -232,7 +259,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.0...v0.3.1

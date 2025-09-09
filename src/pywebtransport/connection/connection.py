@@ -25,10 +25,10 @@ from pywebtransport.utils import Timer, format_duration, get_logger, get_timesta
 
 __all__ = ["ConnectionInfo", "WebTransportConnection"]
 
-logger = get_logger("connection")
+logger = get_logger(name="connection")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ConnectionInfo:
     """Holds comprehensive information and statistics about a connection."""
 
@@ -60,7 +60,7 @@ class ConnectionInfo:
 class WebTransportConnection(EventEmitter):
     """Manages the lifecycle of a WebTransport connection over QUIC."""
 
-    def __init__(self, config: ClientConfig | ServerConfig):
+    def __init__(self, *, config: ClientConfig | ServerConfig):
         """Initialize the WebTransport connection."""
         super().__init__()
         self._config = config
@@ -85,14 +85,14 @@ class WebTransportConnection(EventEmitter):
     @classmethod
     async def create_client(cls, *, config: ClientConfig, host: str, port: int, path: str = "/") -> Self:
         """Create a WebTransportConnection instance for client use."""
-        connection = cls(config)
+        connection = cls(config=config)
         await connection.connect(host=host, port=port, path=path)
         return connection
 
     @classmethod
     async def create_server(cls, *, config: ServerConfig, transport: Any, protocol: Any) -> Self:
         """Create a WebTransportConnection instance for server use."""
-        connection = cls(config)
+        connection = cls(config=config)
         await connection.accept(transport=transport, protocol=protocol)
         return connection
 
@@ -124,7 +124,10 @@ class WebTransportConnection(EventEmitter):
     @property
     def info(self) -> ConnectionInfo:
         """Get an up-to-date object with connection information and stats."""
-        self._info.local_address, self._info.remote_address = self.local_address, self.remote_address
+        self._info.local_address, self._info.remote_address = (
+            self.local_address,
+            self.remote_address,
+        )
         if self._protocol_handler:
             stats = self._protocol_handler.stats
             self._info.bytes_sent = stats.get("bytes_sent", 0)
@@ -175,7 +178,7 @@ class WebTransportConnection(EventEmitter):
         """Exit the asynchronous context, closing the connection."""
         await self.close()
 
-    async def accept(self, transport: asyncio.DatagramTransport, protocol: QuicConnectionProtocol) -> None:
+    async def accept(self, *, transport: asyncio.DatagramTransport, protocol: QuicConnectionProtocol) -> None:
         """Accept an incoming server connection."""
         if self._closed_future is None:
             self._closed_future = asyncio.Future()
@@ -185,21 +188,28 @@ class WebTransportConnection(EventEmitter):
             raise ConfigurationError("Server connection requires ServerConfig")
 
         logger.info("Accepting incoming connection")
-        self._set_state(ConnectionState.CONNECTING)
+        self._set_state(new_state=ConnectionState.CONNECTING)
         try:
-            self._transport, self._protocol, self._quic_connection = transport, protocol, protocol._quic
+            self._transport, self._protocol, self._quic_connection = (
+                transport,
+                protocol,
+                protocol._quic,
+            )
             await self._initialize_protocol_handler(is_client=False)
             if hasattr(self._protocol, "set_connection"):
-                self._protocol.set_connection(self)
+                self._protocol.set_connection(connection=self)
             self._start_background_tasks()
             self._transmit()
-            self._set_state(ConnectionState.CONNECTED)
+            self._set_state(new_state=ConnectionState.CONNECTED)
             self._info.established_at = get_timestamp()
             self.record_activity()
-            await self.emit(EventType.CONNECTION_ESTABLISHED, data={"connection_id": self._connection_id})
+            await self.emit(
+                event_type=EventType.CONNECTION_ESTABLISHED,
+                data={"connection_id": self._connection_id},
+            )
         except Exception as e:
             await self.close(reason=f"Accept failed: {e}")
-            logger.error(f"Failed to accept connection: {e}", exc_info=e)
+            logger.error("Failed to accept connection: %s", e, exc_info=True)
             raise ConnectionError(f"Failed to accept connection: {e}") from e
 
     async def close(self, *, code: int = 0, reason: str = "") -> None:
@@ -209,8 +219,8 @@ class WebTransportConnection(EventEmitter):
         if self._closed_future is None:
             self._closed_future = asyncio.Future()
 
-        logger.info(f"Closing connection {self._connection_id}...")
-        self._set_state(ConnectionState.CLOSING)
+        logger.info("Closing connection %s...", self._connection_id)
+        self._set_state(new_state=ConnectionState.CLOSING)
         self._info.closed_at = get_timestamp()
 
         tasks_to_cancel = [self._heartbeat_task]
@@ -229,16 +239,19 @@ class WebTransportConnection(EventEmitter):
             if self._quic_connection:
                 self._quic_connection.close(error_code=code, reason_phrase=reason or "")
         except Exception as e:
-            logger.error(f"Error during connection teardown: {e}")
+            logger.error("Error during connection teardown: %s", e, exc_info=True)
         finally:
-            self._set_state(ConnectionState.CLOSED)
+            self._set_state(new_state=ConnectionState.CLOSED)
             if self._closed_future and not self._closed_future.done():
                 self._closed_future.set_result(None)
             await super().close()
-            await self.emit(EventType.CONNECTION_CLOSED, data={"connection_id": self._connection_id})
-            logger.info(f"Connection {self._connection_id} closed.")
+            await self.emit(
+                event_type=EventType.CONNECTION_CLOSED,
+                data={"connection_id": self._connection_id},
+            )
+            logger.info("Connection %s closed.", self._connection_id)
 
-    async def connect(self, host: str, port: int, path: str = "/") -> None:
+    async def connect(self, *, host: str, port: int, path: str = "/") -> None:
         """Establish a client connection to a WebTransport endpoint."""
         if self._closed_future is None:
             self._closed_future = asyncio.Future()
@@ -247,22 +260,30 @@ class WebTransportConnection(EventEmitter):
         if not isinstance(self._config, ClientConfig):
             raise ConfigurationError("Client connection requires ClientConfig")
 
-        logger.info(f"Connecting to {host}:{port}{path}...")
-        self._set_state(ConnectionState.CONNECTING)
+        logger.info("Connecting to %s:%s%s...", host, port, path)
+        self._set_state(new_state=ConnectionState.CONNECTING)
         try:
-            with Timer("connection") as timer:
-                await self._establish_quic_connection(host, port)
+            with Timer(name="connection") as timer:
+                await self._establish_quic_connection(host=host, port=port)
                 await self._initialize_protocol_handler(is_client=True)
                 self._start_background_tasks()
                 self._transmit()
-                await self._initiate_webtransport_handshake(path)
-                self._set_state(ConnectionState.CONNECTED)
+                await self._initiate_webtransport_handshake(path=path)
+                self._set_state(new_state=ConnectionState.CONNECTED)
                 self._info.established_at = get_timestamp()
-                logger.info(f"Connected to {host}:{port} in {format_duration(timer.elapsed)}")
-            await self.emit(EventType.CONNECTION_ESTABLISHED, data={"connection_id": self._connection_id})
+                logger.info(
+                    "Connected to %s:%s in %s",
+                    host,
+                    port,
+                    format_duration(seconds=timer.elapsed),
+                )
+            await self.emit(
+                event_type=EventType.CONNECTION_ESTABLISHED,
+                data={"connection_id": self._connection_id},
+            )
         except Exception as e:
             await self.close(reason=f"Connection failed: {e}")
-            logger.error(f"Connection failed: {e}", exc_info=e)
+            logger.error("Connection failed: %s", e, exc_info=True)
             raise ConnectionError(f"Failed to connect to {host}:{port}: {e}") from e
 
     async def wait_closed(self) -> None:
@@ -277,7 +298,7 @@ class WebTransportConnection(EventEmitter):
         """Wait for a connection to be established and ready."""
         if self.is_connected:
             return
-        await self.wait_for(EventType.CONNECTION_ESTABLISHED, timeout=timeout)
+        await self.wait_for(event_type=EventType.CONNECTION_ESTABLISHED, timeout=timeout)
 
     async def diagnose_issues(self) -> dict[str, Any]:
         """Diagnose and report a list of potential issues with a connection."""
@@ -349,12 +370,21 @@ class WebTransportConnection(EventEmitter):
             while self.is_connected:
                 try:
                     rtt = await asyncio.wait_for(self._get_rtt(), timeout=rtt_timeout)
-                    logger.debug(f"Connection {self.connection_id} health check: RTT={rtt * 1000:.1f}ms")
+                    logger.debug(
+                        "Connection %s health check: RTT=%.1fms",
+                        self.connection_id,
+                        rtt * 1000,
+                    )
                 except asyncio.TimeoutError:
-                    logger.warning(f"Connection {self.connection_id} RTT check timeout")
+                    logger.warning("Connection %s RTT check timeout", self.connection_id)
                     break
                 except Exception as e:
-                    logger.error(f"Connection {self.connection_id} health check failed: {e}")
+                    logger.error(
+                        "Connection %s health check failed: %s",
+                        self.connection_id,
+                        e,
+                        exc_info=True,
+                    )
                     break
                 await asyncio.sleep(check_interval)
         except asyncio.CancelledError:
@@ -368,7 +398,7 @@ class WebTransportConnection(EventEmitter):
         """Wait for a session to become ready on this connection."""
         logger.debug("Waiting for a ready session...")
         if ready_session_id := self.get_ready_session_id():
-            logger.debug(f"Found existing ready session (fast path): {ready_session_id}")
+            logger.debug("Found existing ready session (fast path): %s", ready_session_id)
             return ready_session_id
         if not self.protocol_handler:
             raise ConnectionError("Protocol handler is not initialized.")
@@ -377,17 +407,21 @@ class WebTransportConnection(EventEmitter):
             return isinstance(event.data, dict) and event.data.get("session_id") is not None
 
         try:
-            event = await self.protocol_handler.wait_for(EventType.SESSION_READY, timeout=timeout, condition=condition)
+            event = await self.protocol_handler.wait_for(
+                event_type=EventType.SESSION_READY,
+                timeout=timeout,
+                condition=condition,
+            )
             assert isinstance(event.data, dict)
             session_id = event.data["session_id"]
-            logger.debug(f"SESSION_READY event received, session_id: {session_id}")
+            logger.debug("SESSION_READY event received, session_id: %s", session_id)
             return cast(SessionId, session_id)
         except asyncio.TimeoutError:
             raise ConnectionError(f"Session ready timeout after {timeout}s.") from None
         except Exception as e:
             raise ConnectionError(f"Failed to get a ready session: {e}") from e
 
-    async def _establish_quic_connection(self, host: str, port: int) -> None:
+    async def _establish_quic_connection(self, *, host: str, port: int) -> None:
         """Internal helper to establish the underlying QUIC transport."""
         loop = asyncio.get_running_loop()
         config = self._config
@@ -395,7 +429,6 @@ class WebTransportConnection(EventEmitter):
             raise TypeError("ClientConfig needed")
 
         quic_config = create_quic_configuration(is_client=True, **config.to_dict())
-        quic_config.max_datagram_frame_size = 65536
         if config.certfile and config.keyfile:
             quic_config.load_cert_chain(Path(config.certfile), Path(config.keyfile))
         if config.ca_certs:
@@ -434,31 +467,43 @@ class WebTransportConnection(EventEmitter):
                         event = await self._event_queue.get()
                         if self._owner._protocol_handler:
                             try:
-                                await self._owner._protocol_handler.handle_quic_event(event)
+                                await self._owner._protocol_handler.handle_quic_event(event=event)
                             except Exception as e:
                                 logger.error(
-                                    f"Error handling QUIC event for {self._owner.connection_id}: {e}", exc_info=True
+                                    "Error handling QUIC event for %s: %s",
+                                    self._owner.connection_id,
+                                    e,
+                                    exc_info=True,
                                 )
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    logger.critical(f"Fatal error in client event processing loop: {e}", exc_info=True)
+                    logger.critical(
+                        "Fatal error in client event processing loop: %s",
+                        e,
+                        exc_info=True,
+                    )
 
         protocol = _ClientProtocol(self, self._quic_connection)
         self._protocol = protocol
         remote_addr = (host, port)
         try:
-            self._transport, _ = await loop.create_datagram_endpoint(lambda: protocol, remote_addr=remote_addr)
+            self._transport, _ = await loop.create_datagram_endpoint(
+                protocol_factory=lambda: protocol, remote_addr=remote_addr
+            )
         except Exception as e:
             raise ConnectionError(f"QUIC create_datagram_endpoint failed: {e}") from e
 
         if self._quic_connection:
-            self._quic_connection.connect(remote_addr, now=loop.time())
+            self._quic_connection.connect(addr=remote_addr, now=loop.time())
 
     async def _forward_session_request_from_handler(self, event: Event) -> None:
         """Forward a session request event from the handler to this connection."""
-        logger.debug(f"Forwarding SESSION_REQUEST from handler to connection {self.connection_id}")
-        await self.emit(EventType.SESSION_REQUEST, data=event.data)
+        logger.debug(
+            "Forwarding SESSION_REQUEST from handler to connection %s",
+            self.connection_id,
+        )
+        await self.emit(event_type=EventType.SESSION_REQUEST, data=event.data)
 
     async def _get_rtt(self) -> float:
         """Helper to get the latest RTT from the underlying QUIC connection."""
@@ -481,19 +526,24 @@ class WebTransportConnection(EventEmitter):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Heartbeat loop error: {e}", exc_info=e)
+            logger.error("Heartbeat loop error: %s", e, exc_info=True)
 
-    async def _initialize_protocol_handler(self, is_client: bool) -> None:
+    async def _initialize_protocol_handler(self, *, is_client: bool) -> None:
         """Create and configure the protocol handler."""
         if not self._quic_connection:
             raise ConnectionError("QUIC not established")
         self._protocol_handler = WebTransportProtocolHandler(
-            self._quic_connection, is_client=is_client, connection=self
+            quic_connection=self._quic_connection,
+            is_client=is_client,
+            connection=self,
         )
         if not is_client:
-            self._protocol_handler.on(EventType.SESSION_REQUEST, self._forward_session_request_from_handler)
+            self._protocol_handler.on(
+                event_type=EventType.SESSION_REQUEST,
+                handler=self._forward_session_request_from_handler,
+            )
 
-    async def _initiate_webtransport_handshake(self, path: str) -> None:
+    async def _initiate_webtransport_handshake(self, *, path: str) -> None:
         """Internal helper to start the WebTransport CONNECT handshake."""
         if not self._protocol_handler or not isinstance(self._config, ClientConfig):
             raise HandshakeError("Protocol handler or config not ready for handshake.")
@@ -501,7 +551,7 @@ class WebTransportConnection(EventEmitter):
             session_id, _ = await self._protocol_handler.create_webtransport_session(
                 path=path, headers=self._config.headers
             )
-            logger.debug(f"Initiated WebTransport handshake, session_id: {session_id}")
+            logger.debug("Initiated WebTransport handshake, session_id: %s", session_id)
         except Exception as e:
             raise HandshakeError(f"WebTransport handshake failed: {e}") from e
 
@@ -509,7 +559,7 @@ class WebTransportConnection(EventEmitter):
         """Handle an unexpected connection loss."""
         if self._state in [ConnectionState.CLOSING, ConnectionState.CLOSED]:
             return
-        logger.warning(f"Connection lost: {exc}")
+        logger.warning("Connection lost: %s", exc)
         asyncio.create_task(self.close(reason=f"Connection lost: {exc}"))
 
     def _schedule_transmit(self) -> None:
@@ -518,16 +568,16 @@ class WebTransportConnection(EventEmitter):
             self._timer_handle.cancel()
         if self._state != ConnectionState.CLOSED and self._quic_connection:
             if timer_at := self._quic_connection.get_timer():
-                self._timer_handle = asyncio.get_event_loop().call_at(timer_at, self._transmit)
+                self._timer_handle = asyncio.get_event_loop().call_at(when=timer_at, callback=self._transmit)
 
-    def _set_state(self, new_state: ConnectionState) -> None:
+    def _set_state(self, *, new_state: ConnectionState) -> None:
         """Set a new state for the connection and log the change."""
         if self._state == new_state:
             return
         old_state = self._state
         self._state = new_state
         self._info.state = new_state
-        logger.debug(f"Connection {self._connection_id} state: {old_state} -> {new_state}")
+        logger.debug("Connection %s state: %s -> %s", self._connection_id, old_state, new_state)
 
     def _start_background_tasks(self) -> None:
         """Start any background tasks like keep-alives."""
@@ -539,7 +589,7 @@ class WebTransportConnection(EventEmitter):
         if self._quic_connection and self._transport and not self._transport.is_closing():
             for data, addr in self._quic_connection.datagrams_to_send(now=asyncio.get_event_loop().time()):
                 try:
-                    self._transport.sendto(data, addr)
+                    self._transport.sendto(data=data, addr=addr)
                 except Exception:
                     pass
         self._schedule_transmit()
@@ -548,7 +598,7 @@ class WebTransportConnection(EventEmitter):
         """Format a concise, human-readable summary of a connection for logging."""
         info = self.info
         addr_str = f"{info.remote_address[0]}:{info.remote_address[1]}" if info.remote_address else "unknown"
-        uptime_str = format_duration(info.uptime) if info.uptime > 0 else "0s"
+        uptime_str = format_duration(seconds=info.uptime) if info.uptime > 0 else "0s"
         return (
             f"Connection({self.connection_id[:8]}..., state={info.state}, " f"remote={addr_str}, uptime={uptime_str})"
         )

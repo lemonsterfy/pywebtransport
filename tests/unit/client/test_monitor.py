@@ -30,12 +30,12 @@ class TestClientMonitor:
     def test_create_factory(self, mocker: MockerFixture, mock_client: Any) -> None:
         mock_init = mocker.patch("pywebtransport.client.monitor.ClientMonitor.__init__", return_value=None)
 
-        ClientMonitor.create(mock_client, monitoring_interval=15.0)
+        ClientMonitor.create(client=mock_client, monitoring_interval=15.0)
 
-        mock_init.assert_called_once_with(mock_client, monitoring_interval=15.0)
+        mock_init.assert_called_once_with(client=mock_client, monitoring_interval=15.0)
 
     def test_collect_metrics(self, mock_client: Any) -> None:
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         monitor._collect_metrics()
 
@@ -46,19 +46,20 @@ class TestClientMonitor:
 
     def test_collect_metrics_handles_exception(self, mocker: MockerFixture, mock_client: Any) -> None:
         mock_logger = mocker.patch("pywebtransport.client.monitor.logger")
-        type(mock_client).stats = mocker.PropertyMock(side_effect=ValueError("Stat collection failed"))
-        monitor = ClientMonitor(mock_client)
+        error = ValueError("Stat collection failed")
+        type(mock_client).stats = mocker.PropertyMock(side_effect=error)
+        monitor = ClientMonitor(client=mock_client)
 
         monitor._collect_metrics()
 
         assert not monitor._metrics_history
-        mock_logger.error.assert_called_once()
+        mock_logger.error.assert_called_once_with("Metrics collection failed: %s", error, exc_info=True)
 
     def test_check_alerts_low_success_rate(self, mock_client: Any, mocker: MockerFixture) -> None:
         type(mock_client).stats = mocker.PropertyMock(
             return_value={"connections": {"attempted": 20, "success_rate": 0.8}, "performance": {}}
         )
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         monitor._collect_metrics()
         monitor._check_alerts()
@@ -71,7 +72,7 @@ class TestClientMonitor:
         type(mock_client).stats = mocker.PropertyMock(
             return_value={"connections": {}, "performance": {"avg_connect_time": 6.5}}
         )
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         monitor._collect_metrics()
         monitor._check_alerts()
@@ -84,7 +85,7 @@ class TestClientMonitor:
         type(mock_client).stats = mocker.PropertyMock(
             return_value={"connections": {"attempted": 5, "success_rate": 0.5}, "performance": {}}
         )
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         monitor._collect_metrics()
         monitor._check_alerts()
@@ -92,26 +93,26 @@ class TestClientMonitor:
         assert not monitor._alerts
 
     def test_check_alerts_no_metrics(self, mock_client: Any) -> None:
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         monitor._check_alerts()
 
         assert not monitor._alerts
 
     def test_create_alert_avoids_duplicates(self, mock_client: Any) -> None:
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
-        monitor._create_alert("test_alert", "This is a test.")
-        monitor._create_alert("test_alert", "This is a test.")
+        monitor._create_alert(alert_type="test_alert", message="This is a test.")
+        monitor._create_alert(alert_type="test_alert", message="This is a test.")
         assert len(monitor._alerts) == 1
 
-        monitor._create_alert("test_alert", "This is a new test.")
+        monitor._create_alert(alert_type="test_alert", message="This is a new test.")
         assert len(monitor._alerts) == 2
 
     def test_get_metrics_summary(self, mock_client: Any) -> None:
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
         monitor._collect_metrics()
-        monitor._create_alert("test_alert", "Test")
+        monitor._create_alert(alert_type="test_alert", message="Test")
 
         summary = monitor.get_metrics_summary()
 
@@ -125,7 +126,7 @@ class TestClientMonitor:
         mocker.patch("pywebtransport.client.monitor.ClientMonitor._monitor_loop", new_callable=mocker.MagicMock)
         mock_task: asyncio.Future[Any] = asyncio.Future()
         mock_create_task = mocker.patch("asyncio.create_task", return_value=mock_task)
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         async with monitor as returned_monitor:
             assert returned_monitor is monitor
@@ -140,19 +141,21 @@ class TestClientMonitor:
         mocker.patch("pywebtransport.client.monitor.ClientMonitor._monitor_loop", new_callable=mocker.MagicMock)
         mocker.patch("asyncio.create_task", side_effect=RuntimeError("No loop"))
         mock_logger = mocker.patch("pywebtransport.client.monitor.logger")
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         async with monitor:
             pass
 
-        mock_logger.error.assert_called_once()
+        mock_logger.error.assert_called_once_with(
+            "Failed to start client monitor: No running event loop.", exc_info=True
+        )
 
     @pytest.mark.asyncio
     async def test_aexit_handles_cancelled_error(self, mocker: MockerFixture, mock_client: Any) -> None:
         mocker.patch("pywebtransport.client.monitor.ClientMonitor._monitor_loop", new_callable=mocker.MagicMock)
         mock_task: asyncio.Future[Any] = asyncio.Future()
         mocker.patch("asyncio.create_task", return_value=mock_task)
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         async with monitor:
             pass
@@ -167,7 +170,7 @@ class TestClientMonitor:
         mock_sleep.side_effect = [None, asyncio.CancelledError]
         mock_collect = mocker.patch.object(ClientMonitor, "_collect_metrics")
         mock_check = mocker.patch.object(ClientMonitor, "_check_alerts")
-        monitor = ClientMonitor(mock_client, monitoring_interval=10.0)
+        monitor = ClientMonitor(client=mock_client, monitoring_interval=10.0)
 
         await monitor._monitor_loop()
 
@@ -181,8 +184,17 @@ class TestClientMonitor:
         mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_collect = mocker.patch.object(ClientMonitor, "_collect_metrics")
         mock_client.is_closed = True
-        monitor = ClientMonitor(mock_client)
+        monitor = ClientMonitor(client=mock_client)
 
         await monitor._monitor_loop()
 
         mock_collect.assert_not_called()
+
+    def test_init_raises_error_for_incompatible_client_type(self) -> None:
+        class IncompatibleClient:
+            pass
+
+        incompatible_client = IncompatibleClient()
+
+        with pytest.raises(TypeError, match="ClientMonitor only supports WebTransportClient instances"):
+            ClientMonitor(client=incompatible_client)  # type: ignore[arg-type]

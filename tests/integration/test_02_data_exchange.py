@@ -24,24 +24,24 @@ async def test_bidirectional_stream_echo(
     host, port = server
     server_handler_finished = asyncio.Event()
 
-    @server_app.route("/echo")
+    @server_app.route(path="/echo")
     async def echo_handler(session: WebTransportSession) -> None:
         """Echo data on any incoming bidirectional stream."""
         try:
             async for stream in session.incoming_streams():
                 if isinstance(stream, WebTransportStream):
                     data = await stream.read_all()
-                    await stream.write_all(data)
+                    await stream.write_all(data=data)
         except asyncio.CancelledError:
             pass
         finally:
             server_handler_finished.set()
 
-    session = await client.connect(f"https://{host}:{port}/echo")
+    session = await client.connect(url=f"https://{host}:{port}/echo")
     async with session:
         stream = await session.create_bidirectional_stream()
         test_message = b"Hello, bidirectional world!"
-        await stream.write_all(test_message)
+        await stream.write_all(data=test_message)
         response = await stream.read_all()
         assert response == test_message
 
@@ -55,7 +55,7 @@ async def test_unidirectional_stream_to_server(
     host, port = server
     data_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-    @server_app.route("/uni")
+    @server_app.route(path="/uni")
     async def uni_handler(session: WebTransportSession) -> None:
         """Read from the first incoming unidirectional stream and put data in a queue."""
         try:
@@ -66,11 +66,11 @@ async def test_unidirectional_stream_to_server(
         except (asyncio.CancelledError, StopAsyncIteration):
             pass
 
-    session = await client.connect(f"https://{host}:{port}/uni")
+    session = await client.connect(url=f"https://{host}:{port}/uni")
     async with session:
         stream = await session.create_unidirectional_stream()
         test_message = b"Hello, unidirectional world!"
-        await stream.write_all(test_message)
+        await stream.write_all(data=test_message)
 
     received_data = await asyncio.wait_for(data_queue.get(), timeout=2.0)
     assert received_data == test_message
@@ -81,23 +81,23 @@ async def test_datagram_echo(server: tuple[str, int], client: WebTransportClient
     host, port = server
     server_handler_finished = asyncio.Event()
 
-    @server_app.route("/datagram")
+    @server_app.route(path="/datagram")
     async def datagram_echo_handler(session: WebTransportSession) -> None:
         """Echo any received datagram."""
         datagrams = await session.datagrams
         try:
             data = await datagrams.receive(timeout=2.0)
-            await datagrams.send(data)
+            await datagrams.send(data=data)
         except asyncio.CancelledError:
             pass
         finally:
             server_handler_finished.set()
 
-    session = await client.connect(f"https://{host}:{port}/datagram")
+    session = await client.connect(url=f"https://{host}:{port}/datagram")
     async with session:
         datagrams = await session.datagrams
         test_message = b"Hello, datagram world!"
-        await datagrams.send(test_message)
+        await datagrams.send(data=test_message)
         response = await datagrams.receive(timeout=2.0)
         assert response == test_message
 
@@ -111,7 +111,7 @@ async def test_concurrent_streams_and_datagrams(
     host, port = server
     num_concurrent_ops = 5
 
-    @server_app.route("/concurrent")
+    @server_app.route(path="/concurrent")
     async def concurrent_handler(session: WebTransportSession) -> None:
         """Handle both stream and datagram echoes concurrently."""
 
@@ -120,7 +120,7 @@ async def test_concurrent_streams_and_datagrams(
                 async for stream in session.incoming_streams():
                     if isinstance(stream, WebTransportStream):
                         data = await stream.read_all()
-                        await stream.write_all(data)
+                        await stream.write_all(data=data)
             except asyncio.CancelledError:
                 pass
 
@@ -129,7 +129,7 @@ async def test_concurrent_streams_and_datagrams(
             while not session.is_closed:
                 try:
                     data = await datagrams.receive(timeout=0.1)
-                    await datagrams.send(data)
+                    await datagrams.send(data=data)
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:
@@ -143,24 +143,24 @@ async def test_concurrent_streams_and_datagrams(
             stream_task.cancel()
             datagram_task.cancel()
 
-    async def _stream_worker(session: WebTransportSession, i: int) -> bool:
+    async def _stream_worker(*, session: WebTransportSession, i: int) -> bool:
         stream = await session.create_bidirectional_stream()
         msg = f"Stream worker {i}".encode()
-        await stream.write_all(msg)
+        await stream.write_all(data=msg)
         response = await stream.read_all()
         return response == msg
 
-    async def _datagram_worker(session: WebTransportSession, i: int) -> bool:
+    async def _datagram_worker(*, session: WebTransportSession, i: int) -> bool:
         datagrams = await session.datagrams
         msg = f"Datagram worker {i}".encode()
-        await datagrams.send(msg)
+        await datagrams.send(data=msg)
         response = await datagrams.receive(timeout=2.0)
         return response == msg
 
-    session = await client.connect(f"https://{host}:{port}/concurrent")
+    session = await client.connect(url=f"https://{host}:{port}/concurrent")
     async with session:
-        stream_tasks = [_stream_worker(session, i) for i in range(num_concurrent_ops)]
-        datagram_tasks = [_datagram_worker(session, i) for i in range(num_concurrent_ops)]
+        stream_tasks = [_stream_worker(session=session, i=i) for i in range(num_concurrent_ops)]
+        datagram_tasks = [_datagram_worker(session=session, i=i) for i in range(num_concurrent_ops)]
         all_tasks = stream_tasks + datagram_tasks
         results = await asyncio.gather(*all_tasks, return_exceptions=True)
 

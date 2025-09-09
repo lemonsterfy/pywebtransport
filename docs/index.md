@@ -1,18 +1,20 @@
 # PyWebTransport Documentation
 
-Welcome to PyWebTransport, a high-performance, async-native WebTransport implementation for Python.
+Welcome to PyWebTransport, the canonical, async-native WebTransport stack for Python.
 
 ## What is PyWebTransport?
 
-PyWebTransport is a production-grade WebTransport protocol stack for Python, enabling low-latency, bidirectional communication over QUIC and HTTP/3. Built for fully async applications, it supports streams and datagrams with a focus on performance, reliability, and extensibility.
+PyWebTransport is the canonical, async-native WebTransport stack for Python, enabling low-latency, bidirectional communication over QUIC and HTTP/3. It provides a complete, robust implementation of streams and datagrams alongside a high-level application framework, with a focus on standards compliance, performance, and reliability
 
 **Key Features:**
 
-- **Full WebTransport Support** - Bidirectional streams, unidirectional streams, and datagrams.
-- **High-Performance Async API** - Async/await throughout with optimized connection management using `asyncio`.
-- **Production Ready** - Features like connection pooling, load balancing, and comprehensive monitoring.
-- **Type Safe** - Complete type annotations for excellent IDE support and robust code.
-- **Easy to Use** - A simple, high-level API with sensible defaults and extensive documentation.
+- **Full Async Support**: Built from the ground up on `asyncio` for high-performance, non-blocking I/O.
+- **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for pooling, auto-reconnection, and proxying.
+- **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
+- **Structured Messaging**: Pluggable `JSON`, `MsgPack`, and `Protobuf` serializers for sending and receiving structured data objects over streams and datagrams.
+- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and monitoring.
+- **Event-Driven Architecture**: A powerful `EventEmitter` and `EventBus` system for decoupled, asynchronous communication between components.
+- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
 
 ## Core Concepts
 
@@ -30,13 +32,11 @@ Streams provide reliable, ordered communication with automatic flow control. Use
 
 ### Datagrams
 
-Datagrams offer low-latency, unreliable messaging, ideal for real-time applications where speed is more important than guaranteed delivery.
+Datagrams offer low-latency, unreliable, and out-of-order messaging, ideal for real-time applications where speed is more important than guaranteed delivery.
 
 ## Use Cases
 
-### Real-time Interactive Systems
-
-_For scenarios requiring instant, bidirectional communication._
+### Real-time Interactivity
 
 - **Live Collaboration:** Real-time document editing, whiteboarding, and design tools.
 - **Instant Messaging:** Live chat, notifications, and signaling services.
@@ -45,23 +45,17 @@ _For scenarios requiring instant, bidirectional communication._
 
 ### High-Performance Data Streaming
 
-_For high-throughput, low-overhead data transport._
-
 - **Media Streaming:** Live video, audio feeds, and webcam broadcasting.
 - **Large-Scale Data Transfer:** Bulk file uploads/downloads and data synchronization.
 - **IoT & Telemetry:** Efficiently aggregating sensor data from a multitude of devices.
 
 ### AI & Machine Learning
 
-_For accelerating data-intensive AI workflows._
-
 - **Real-time Inference:** Stream live audio, video, or sensor data to models for analysis.
 - **Distributed Training:** Efficiently exchange model gradients and parameters between nodes.
 - **Data Augmentation:** Feed large datasets to augmentation pipelines with low latency.
 
 ### Modern Backend Architecture
-
-_For optimizing server-to-server and client-server communication._
 
 - **Microservice Communication:** A low-latency, high-throughput message bus between services.
 - **API Acceleration:** Reduce repetitive HTTP overhead with persistent connections.
@@ -71,12 +65,12 @@ _For optimizing server-to-server and client-server communication._
 
 ### Getting Started
 
-- **[Installation](installation.md)** - Setup and installation guide
-- **[Quick Start](quickstart.md)** - 5-minute tutorial to get running
+- **[Installation](installation.md)** - Setup and installation guide.
+- **[Quick Start](quickstart.md)** - 5-minute tutorial to get running.
 
 ### API Reference
 
-- **[Complete API Reference](api-reference/index.md)** - All available APIs, including client, server, session, stream, datagrams, and configuration.
+- **[Complete API Reference](api-reference/index.md)** - All available APIs, including client, server, session, stream, datagrams, and configuration. The API is organized into layers (Application, Core, and Foundational) to help you find the right abstraction for your needs.
 
 ## Community
 

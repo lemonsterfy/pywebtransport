@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pywebtransport"
 dynamic = ["version"]
-description = "A high-performance, async-native WebTransport implementation for Python."
+description = "The canonical, async-native WebTransport stack for Python."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -32,20 +32,21 @@ classifiers = [
 dependencies = ["aioquic>=1.2.0,<2.0.0", "cryptography>=45.0.4,<46.0.0"]
 
 [project.optional-dependencies]
+all = ["msgpack>=1.1.1,<2.0.0", "protobuf>=6.32.0,<7.0.0"]
 dev = [
     "black>=25.1.0,<26.0.0",
     "flake8>=7.2.0,<8.0.0",
-    "mypy>=1.16.1,<2.0.0",
     "isort>=6.0.1,<7.0.0",
-    "psutil>=7.0.0,<8.0.0",
-    "pytest>=8.4.1,<9.0.0",
-    "pytest-asyncio>=1.0.0,<2.0.0",
-    "pytest-benchmark>=5.1.0,<6.0.0",
-    "pytest-cov>=6.2.1,<7.0.0",
-    "pytest-mock>=3.14.1,<4.0.0",
-    "pytest-repeat>=0.9.4,<1.0.0",
-    "types-psutil==7.0.0.20250801",
+    "mypy>=1.16.1,<2.0.0",
+    "pywebtransport[test]",
 ]
+docs = [
+    "mkdocs>=1.6.1,<2.0.0",
+    "mkdocs-material>=9.6.14,<10.0.0",
+    "mkdocstrings[python]>=0.29.1,<1.0.0",
+]
+msgpack = ["msgpack>=1.1.1,<2.0.0"]
+protobuf = ["protobuf>=6.32.0,<7.0.0"]
 test = [
     "psutil>=7.0.0,<8.0.0",
     "pytest>=8.4.1,<9.0.0",
@@ -55,11 +56,6 @@ test = [
     "pytest-mock>=3.14.1,<4.0.0",
     "pytest-repeat>=0.9.4,<1.0.0",
     "types-psutil==7.0.0.20250801",
-]
-docs = [
-    "mkdocs>=1.6.1,<2.0.0",
-    "mkdocs-material>=9.6.14,<10.0.0",
-    "mkdocstrings[python]>=0.29.1,<1.0.0",
 ]
 
 [project.urls]
@@ -119,7 +115,7 @@ strict_equality = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["aioquic.*", "pytest_benchmark.*"]
+module = ["aioquic.*", "google.protobuf.*", "msgpack.*", "pytest_benchmark.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

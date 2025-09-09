@@ -27,9 +27,11 @@ from cryptography.x509.oid import NameOID
 from pywebtransport.constants import (
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
+    DEFAULT_PORT,
+    DEFAULT_SECURE_PORT,
+    MAX_STREAM_ID,
     SECURE_SCHEMES,
     WEBTRANSPORT_SCHEMES,
-    WebTransportConstants,
 )
 from pywebtransport.exceptions import CertificateError, ConfigurationError, TimeoutError, certificate_not_found
 from pywebtransport.types import URL, Address, Buffer, Timeout, URLParts
@@ -75,7 +77,7 @@ T = TypeVar("T")
 class Timer:
     """A simple context manager for performance measurement."""
 
-    def __init__(self, name: str = "timer"):
+    def __init__(self, *, name: str = "timer"):
         """Initialize the timer."""
         self.name = name
         self.start_time: float | None = None
@@ -102,8 +104,8 @@ class Timer:
     ) -> None:
         """Stop the timer and log the duration upon exiting the context."""
         elapsed = self.stop()
-        logger = get_logger("timer")
-        logger.debug(f"{self.name} took {format_duration(elapsed)}")
+        logger = get_logger(name="timer")
+        logger.debug("%s took %s", self.name, format_duration(seconds=elapsed))
 
     def start(self) -> None:
         """Start the timer."""
@@ -119,7 +121,12 @@ class Timer:
 
 
 def build_webtransport_url(
-    host: str, port: int, *, path: str = "/", secure: bool = True, query_params: dict[str, str] | None = None
+    *,
+    host: str,
+    port: int,
+    path: str = "/",
+    secure: bool = True,
+    query_params: dict[str, str] | None = None,
 ) -> URL:
     """Build a WebTransport URL from its components."""
     scheme = "https" if secure else "http"
@@ -128,14 +135,12 @@ def build_webtransport_url(
     query = ""
     if query_params:
         query = "?" + urllib.parse.urlencode(query_params)
-    if (secure and port == WebTransportConstants.DEFAULT_SECURE_PORT) or (
-        not secure and port == WebTransportConstants.DEFAULT_PORT
-    ):
+    if (secure and port == DEFAULT_SECURE_PORT) or (not secure and port == DEFAULT_PORT):
         return f"{scheme}://{host}{path}{query}"
     return f"{scheme}://{host}:{port}{path}{query}"
 
 
-def calculate_checksum(data: bytes, *, algorithm: str = "sha256") -> str:
+def calculate_checksum(*, data: bytes, algorithm: str = "sha256") -> str:
     """Calculate the checksum of data using a specified secure hash algorithm."""
     if algorithm not in hashlib.algorithms_guaranteed:
         raise ValueError(f"Unsupported or insecure hash algorithm: {algorithm}")
@@ -144,7 +149,7 @@ def calculate_checksum(data: bytes, *, algorithm: str = "sha256") -> str:
     return hash_obj.hexdigest()
 
 
-def chunked_read(data: bytes, *, chunk_size: int = 8192) -> list[bytes]:
+def chunked_read(*, data: bytes, chunk_size: int = 8192) -> list[bytes]:
     """Split data into a list of chunks of a specified size."""
     if chunk_size <= 0:
         raise ValueError("Chunk size must be positive")
@@ -152,19 +157,19 @@ def chunked_read(data: bytes, *, chunk_size: int = 8192) -> list[bytes]:
 
 
 async def create_task_with_timeout(
-    coro: Coroutine[Any, Any, T], *, timeout: Timeout | None = None, name: str | None = None
+    *, coro: Coroutine[Any, Any, T], timeout: Timeout | None = None, name: str | None = None
 ) -> asyncio.Task[T]:
     """Create an asyncio task with an optional timeout wrapper."""
     if timeout is None:
-        return asyncio.create_task(coro, name=name)
+        return asyncio.create_task(coro=coro, name=name)
 
     async def _wrapper() -> T:
         return await asyncio.wait_for(coro, timeout=timeout)
 
-    return asyncio.create_task(_wrapper(), name=name)
+    return asyncio.create_task(coro=_wrapper(), name=name)
 
 
-def ensure_bytes(data: Buffer | str, *, encoding: str = "utf-8") -> bytes:
+def ensure_bytes(*, data: Buffer | str, encoding: str = "utf-8") -> bytes:
     """Ensure that the given data is in bytes format."""
     match data:
         case str():
@@ -177,7 +182,7 @@ def ensure_bytes(data: Buffer | str, *, encoding: str = "utf-8") -> bytes:
             raise TypeError(f"Expected str, bytes, bytearray, or memoryview, got {type(data).__name__}")
 
 
-def ensure_str(data: Buffer | str, *, encoding: str = "utf-8") -> str:
+def ensure_str(*, data: Buffer | str, encoding: str = "utf-8") -> str:
     """Ensure that the given data is in string format."""
     match data:
         case str():
@@ -188,14 +193,14 @@ def ensure_str(data: Buffer | str, *, encoding: str = "utf-8") -> str:
             raise TypeError(f"Expected str, bytes, bytearray, or memoryview, got {type(data).__name__}")
 
 
-def format_bytes(data: bytes, *, max_length: int = 100) -> str:
+def format_bytes(*, data: bytes, max_length: int = 100) -> str:
     """Format bytes for readable debugging output."""
     if len(data) <= max_length:
         return repr(data)
     return f"{repr(data[:max_length])}... ({len(data)} bytes total)"
 
 
-def format_duration(seconds: float) -> str:
+def format_duration(*, seconds: float) -> str:
     """Format a duration in seconds into a human-readable string."""
     if seconds < 1:
         return f"{seconds * 1000:.1f}ms"
@@ -211,7 +216,7 @@ def format_duration(seconds: float) -> str:
     return f"{hours}h{minutes}m{secs:.1f}s"
 
 
-def format_timestamp(timestamp: float) -> str:
+def format_timestamp(*, timestamp: float) -> str:
     """Format a Unix timestamp into an ISO 8601 string."""
     return datetime.fromtimestamp(timestamp).isoformat()
 
@@ -227,7 +232,7 @@ def generate_request_id() -> str:
 
 
 def generate_self_signed_cert(
-    hostname: str, *, output_dir: str = ".", key_size: int = 2048, days_valid: int = 365
+    *, hostname: str, output_dir: str = ".", key_size: int = 2048, days_valid: int = 365
 ) -> tuple[str, str]:
     """Generate a self-signed certificate and key for testing purposes."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
@@ -273,7 +278,7 @@ def generate_session_id() -> str:
     return secrets.token_urlsafe(16)
 
 
-def get_logger(name: str) -> logging.Logger:
+def get_logger(*, name: str) -> logging.Logger:
     """Get a logger instance with a specific name."""
     return logging.getLogger(f"pywebtransport.{name}")
 
@@ -284,7 +289,7 @@ def get_timestamp() -> float:
 
 
 @functools.cache
-def is_ipv4_address(host: str) -> bool:
+def is_ipv4_address(*, host: str) -> bool:
     """Check if a host string is a valid IPv4 address."""
     try:
         socket.inet_aton(host)
@@ -294,7 +299,7 @@ def is_ipv4_address(host: str) -> bool:
 
 
 @functools.cache
-def is_ipv6_address(host: str) -> bool:
+def is_ipv6_address(*, host: str) -> bool:
     """Check if a host string is a valid IPv6 address."""
     try:
         socket.inet_pton(socket.AF_INET6, host)
@@ -303,57 +308,58 @@ def is_ipv6_address(host: str) -> bool:
         return False
 
 
-def load_certificate(certfile: str, keyfile: str) -> ssl.SSLContext:
+def load_certificate(*, certfile: str, keyfile: str) -> ssl.SSLContext:
     """Load an SSL certificate and private key into an SSL context."""
     if not Path(certfile).exists():
-        raise certificate_not_found(certfile)
+        raise certificate_not_found(path=certfile)
     if not Path(keyfile).exists():
-        raise certificate_not_found(keyfile)
+        raise certificate_not_found(path=keyfile)
 
     try:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_3
-        context.load_cert_chain(certfile, keyfile)
+        context.load_cert_chain(certfile=certfile, keyfile=keyfile)
         return context
     except Exception as e:
         raise CertificateError(f"Failed to load certificate: {e}")
 
 
-def merge_configs(base_config: dict[str, Any], override_config: dict[str, Any]) -> dict[str, Any]:
+def merge_configs(*, base_config: dict[str, Any], override_config: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge two configuration dictionaries."""
     result = base_config.copy()
     for key, value in override_config.items():
         match (result.get(key), value):
             case (dict() as base_dict, dict() as override_dict):
-                result[key] = merge_configs(base_dict, override_dict)
+                result[key] = merge_configs(base_config=base_dict, override_config=override_dict)
             case _:
                 result[key] = value
     return result
 
 
-def normalize_headers(headers: dict[str, Any]) -> dict[str, str]:
+def normalize_headers(*, headers: dict[str, Any]) -> dict[str, str]:
     """Normalize header keys to lowercase and values to strings."""
     return {str(key).lower(): str(value) for key, value in headers.items()}
 
 
 @functools.cache
-def parse_webtransport_url(url: URL) -> URLParts:
+def parse_webtransport_url(*, url: URL) -> URLParts:
     """Parse a WebTransport URL into its host, port, and path components."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in WEBTRANSPORT_SCHEMES:
         raise ConfigurationError(
-            f"Unsupported scheme '{parsed.scheme}'. Must be one of: {WEBTRANSPORT_SCHEMES}", config_key="url"
+            message=f"Unsupported scheme '{parsed.scheme}'. Must be one of: {WEBTRANSPORT_SCHEMES}",
+            config_key="url",
         )
     if not parsed.hostname:
-        raise ConfigurationError("Missing hostname in URL", config_key="url")
+        raise ConfigurationError(message="Missing hostname in URL", config_key="url")
 
     match parsed:
         case urllib.parse.ParseResult(port=p) if p:
             port = p
         case urllib.parse.ParseResult(scheme=s) if s in SECURE_SCHEMES:
-            port = WebTransportConstants.DEFAULT_SECURE_PORT
+            port = DEFAULT_SECURE_PORT
         case _:
-            port = WebTransportConstants.DEFAULT_PORT
+            port = DEFAULT_PORT
 
     path = parsed.path or "/"
     if parsed.query:
@@ -363,11 +369,11 @@ def parse_webtransport_url(url: URL) -> URLParts:
     return (parsed.hostname, port, path)
 
 
-async def resolve_address(host: str, port: int, *, family: int = socket.AF_UNSPEC) -> Address:
+async def resolve_address(*, host: str, port: int, family: int = socket.AF_UNSPEC) -> Address:
     """Resolve a hostname to an IP address asynchronously."""
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.getaddrinfo(host, port, family=family, type=socket.SOCK_DGRAM)
+        result = await loop.getaddrinfo(host=host, port=port, family=family, type=socket.SOCK_DGRAM)
         if not result:
             raise OSError(f"No address found for {host}:{port}")
         family, type_, proto, canonname, sockaddr = result[0]
@@ -376,7 +382,7 @@ async def resolve_address(host: str, port: int, *, family: int = socket.AF_UNSPE
         raise ConfigurationError(f"Failed to resolve address {host}:{port}: {e}")
 
 
-async def run_with_timeout(coro: Coroutine[Any, Any, T], *, timeout: float, default_value: T | None = None) -> T | None:
+async def run_with_timeout(*, coro: Coroutine[Any, Any, T], timeout: float, default_value: T | None = None) -> T | None:
     """Run a coroutine with a timeout, returning a default value on timeout."""
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
@@ -385,7 +391,10 @@ async def run_with_timeout(coro: Coroutine[Any, Any, T], *, timeout: float, defa
 
 
 def setup_logging(
-    *, level: str = DEFAULT_LOG_LEVEL, format_string: str | None = None, logger_name: str = "pywebtransport"
+    *,
+    level: str = DEFAULT_LOG_LEVEL,
+    format_string: str | None = None,
+    logger_name: str = "pywebtransport",
 ) -> logging.Logger:
     """Set up and configure the main logger."""
     logger = logging.getLogger(logger_name)
@@ -403,7 +412,7 @@ def setup_logging(
     return logger
 
 
-def validate_address(address: Any) -> None:
+def validate_address(*, address: Any) -> None:
     """Validate a (host, port) address tuple."""
     if not isinstance(address, tuple) or len(address) != 2:
         raise TypeError("Address must be a (host, port) tuple")
@@ -413,7 +422,7 @@ def validate_address(address: Any) -> None:
         raise ValueError(f"Port must be an integer between 1 and 65535, got {address[1]}")
 
 
-def validate_error_code(error_code: Any) -> None:
+def validate_error_code(*, error_code: Any) -> None:
     """Validate a protocol error code."""
     if not isinstance(error_code, int):
         raise TypeError("Error code must be an integer")
@@ -421,13 +430,13 @@ def validate_error_code(error_code: Any) -> None:
         raise ValueError(f"Error code {error_code} out of valid range")
 
 
-def validate_port(port: Any) -> None:
+def validate_port(*, port: Any) -> None:
     """Validate that a value is a valid network port."""
     if not isinstance(port, int) or not (1 <= port <= 65535):
         raise ValueError(f"Port must be an integer between 1 and 65535, got {port}")
 
 
-def validate_session_id(session_id: Any) -> None:
+def validate_session_id(*, session_id: Any) -> None:
     """Validate a WebTransport session ID."""
     if not isinstance(session_id, str):
         raise TypeError("Session ID must be a string")
@@ -435,31 +444,31 @@ def validate_session_id(session_id: Any) -> None:
         raise ValueError("Session ID cannot be empty")
 
 
-def validate_stream_id(stream_id: Any) -> None:
+def validate_stream_id(*, stream_id: Any) -> None:
     """Validate a WebTransport stream ID."""
     if not isinstance(stream_id, int):
         raise TypeError("Stream ID must be an integer")
-    if not (0 <= stream_id <= WebTransportConstants.MAX_STREAM_ID):
+    if not (0 <= stream_id <= MAX_STREAM_ID):
         raise ValueError(f"Stream ID {stream_id} out of valid range")
 
 
-def validate_url(url: URL) -> bool:
+def validate_url(*, url: URL) -> bool:
     """Validate the format of a WebTransport URL."""
     try:
-        parse_webtransport_url(url)
+        parse_webtransport_url(url=url)
         return True
     except Exception:
         return False
 
 
 async def wait_for_condition(
-    condition: Callable[[], bool], *, timeout: Timeout | None = None, interval: float = 0.1
+    *, condition: Callable[[], bool], timeout: Timeout | None = None, interval: float = 0.1
 ) -> None:
     """Wait for a condition to become true, with an optional timeout."""
 
     async def _waiter() -> None:
         while not condition():
-            await asyncio.sleep(interval)
+            await asyncio.sleep(delay=interval)
 
     if timeout is None:
         await _waiter()

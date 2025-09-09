@@ -14,7 +14,7 @@ from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = ["ServerMonitor"]
 
-logger = get_logger("server.monitor")
+logger = get_logger(name="server.monitor")
 
 
 class ServerMonitor:
@@ -29,9 +29,9 @@ class ServerMonitor:
         self._alerts: deque[dict[str, Any]] = deque(maxlen=100)
 
     @classmethod
-    def create(cls, server: WebTransportServer, *, monitoring_interval: float = 30.0) -> Self:
+    def create(cls, *, server: WebTransportServer, monitoring_interval: float = 30.0) -> Self:
         """Factory method to create a new server monitor instance."""
-        return cls(server, monitoring_interval=monitoring_interval)
+        return cls(server=server, monitoring_interval=monitoring_interval)
 
     @property
     def is_monitoring(self) -> bool:
@@ -46,7 +46,10 @@ class ServerMonitor:
             self._monitor_task = asyncio.create_task(self._monitor_loop())
             logger.info("Server monitoring started.")
         except RuntimeError:
-            logger.error("Failed to start server monitor: No running event loop.")
+            logger.error(
+                "Failed to start server monitor: No running event loop.",
+                exc_info=True,
+            )
         return self
 
     async def __aexit__(
@@ -82,14 +85,17 @@ class ServerMonitor:
         if total_attempts > 10:
             success_rate = accepted / total_attempts if total_attempts > 0 else 1.0
             if success_rate < 0.9:
-                return {"status": "degraded", "reason": f"Low connection success rate: {success_rate:.2%}"}
+                return {
+                    "status": "degraded",
+                    "reason": f"Low connection success rate: {success_rate:.2%}",
+                }
 
         if connections and connections.get("active", 0) > 0:
             return {"status": "healthy", "reason": "Server is operating normally."}
 
         return {"status": "idle", "reason": "Server is running but has no active connections."}
 
-    def get_alerts(self, limit: int = 25) -> list[dict[str, Any]]:
+    def get_alerts(self, *, limit: int = 25) -> list[dict[str, Any]]:
         """Get a list of recently generated alerts."""
         return list(self._alerts)[-limit:]
 
@@ -97,7 +103,7 @@ class ServerMonitor:
         """Get the latest collected metrics."""
         return self._metrics_history[-1] if self._metrics_history else None
 
-    def get_metrics_history(self, limit: int = 100) -> list[dict[str, Any]]:
+    def get_metrics_history(self, *, limit: int = 100) -> list[dict[str, Any]]:
         """Get a list of recent metrics history."""
         return list(self._metrics_history)[-limit:]
 
@@ -117,7 +123,7 @@ class ServerMonitor:
         except asyncio.CancelledError:
             logger.info("Server monitor loop has been cancelled.")
         except Exception as e:
-            logger.error(f"Server monitor loop encountered a critical error: {e}", exc_info=e)
+            logger.error("Server monitor loop encountered a critical error: %s", e, exc_info=True)
 
     async def _collect_metrics(self) -> None:
         """Collect a snapshot of the server's current statistics."""
@@ -127,7 +133,7 @@ class ServerMonitor:
             metrics = {"timestamp": timestamp, "stats": stats}
             self._metrics_history.append(metrics)
         except Exception as e:
-            logger.error(f"Metrics collection failed: {e}")
+            logger.error("Metrics collection failed: %s", e, exc_info=True)
 
     async def _check_for_alerts(self) -> None:
         """Analyze the latest metrics and generate alerts if thresholds are breached."""
@@ -135,8 +141,12 @@ class ServerMonitor:
             health = self.get_health_status()
             if health["status"] in ("unhealthy", "degraded"):
                 if not self._alerts or self._alerts[-1].get("reason") != health["reason"]:
-                    alert = {"timestamp": get_timestamp(), "status": health["status"], "reason": health["reason"]}
+                    alert = {
+                        "timestamp": get_timestamp(),
+                        "status": health["status"],
+                        "reason": health["reason"],
+                    }
                     self._alerts.append(alert)
-                    logger.warning(f"Health Alert: {health['status']} - {health['reason']}")
+                    logger.warning("Health Alert: %s - %s", health["status"], health["reason"])
         except Exception as e:
-            logger.error(f"Alert check failed: {e}")
+            logger.error("Alert check failed: %s", e, exc_info=True)

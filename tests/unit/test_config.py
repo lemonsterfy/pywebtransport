@@ -9,6 +9,7 @@ from pytest_mock import MockerFixture
 from pywebtransport import CertificateError, ClientConfig, ConfigurationError, ServerConfig
 from pywebtransport import __version__ as real_version
 from pywebtransport.config import ConfigBuilder, _validate_port, _validate_timeout
+from pywebtransport.constants import DEFAULT_CONNECT_TIMEOUT, DEFAULT_SERVER_MAX_CONNECTIONS
 
 
 @pytest.fixture
@@ -16,39 +17,16 @@ def mock_path_exists(mocker: MockerFixture) -> Any:
     return mocker.patch("pywebtransport.config.Path.exists", return_value=True)
 
 
-class TestConfigHelpers:
-    @pytest.mark.parametrize("value", [5, 10.5, None])
-    def test_validate_timeout_valid(self, value: Any) -> None:
-        _validate_timeout(value)
-
-    @pytest.mark.parametrize("value", [1, 80, 4433, 65535])
-    def test_validate_port_valid(self, value: int) -> None:
-        _validate_port(value)
-
-    @pytest.mark.parametrize("value", [0, -1, -10.5])
-    def test_validate_timeout_invalid_value(self, value: Any) -> None:
-        with pytest.raises(ValueError, match="must be positive"):
-            _validate_timeout(value)
-
-    def test_validate_timeout_invalid_type(self) -> None:
-        with pytest.raises(TypeError, match="must be a number or None"):
-            invalid_value: Any = "abc"
-            _validate_timeout(invalid_value)
-
-    @pytest.mark.parametrize("value", [0, 65536, -1, "80", 80.5])
-    def test_validate_port_invalid(self, value: Any) -> None:
-        with pytest.raises(ValueError, match="Port must be an integer between 1 and 65535"):
-            _validate_port(value)
-
-
 class TestClientConfig:
     def test_default_initialization(self) -> None:
         config = ClientConfig()
 
-        assert config.connect_timeout == 30.0
+        assert config.connect_timeout == DEFAULT_CONNECT_TIMEOUT
         assert config.verify_mode == ssl.CERT_REQUIRED
         assert config.user_agent == f"pywebtransport/{real_version}"
         assert config.headers["user-agent"] == f"pywebtransport/{real_version}"
+        assert config.congestion_control_algorithm == "cubic"
+        assert config.auto_reconnect is False
 
     def test_post_init_preserves_user_agent(self) -> None:
         config = ClientConfig(headers={"user-agent": "custom-agent/1.0"})
@@ -61,10 +39,13 @@ class TestClientConfig:
 
         ClientConfig(headers={"X-Custom": "Value"})
 
-        mock_normalize.assert_called_once_with({"X-Custom": "Value"})
+        mock_normalize.assert_called_once_with(headers={"X-Custom": "Value"})
 
     def test_create_factory_method(self, mocker: MockerFixture) -> None:
-        mocker.patch("pywebtransport.config.Defaults.get_client_config", return_value={"max_retries": 1})
+        mocker.patch(
+            "pywebtransport.config.Defaults.get_client_config",
+            return_value={"max_retries": 1},
+        )
 
         config = ClientConfig.create(max_retries=5, debug=True)
 
@@ -90,18 +71,20 @@ class TestClientConfig:
         config1 = ClientConfig()
 
         config2 = config1.copy()
+        config2.max_retries = 99
 
         assert config1 is not config2
-        config2.max_retries = 99
         assert config1.max_retries != 99
 
     def test_update_method(self) -> None:
         config = ClientConfig()
 
-        new_config = config.update(connect_timeout=15.0)
+        new_config = config.update(connect_timeout=15.0, auto_reconnect=True)
 
         assert new_config.connect_timeout == 15.0
-        assert config.connect_timeout == 30.0
+        assert new_config.auto_reconnect is True
+        assert config.connect_timeout == DEFAULT_CONNECT_TIMEOUT
+        assert config.auto_reconnect is False
         assert new_config is not config
         with pytest.raises(ConfigurationError, match="unknown configuration key"):
             config.update(unknown_key="value")
@@ -113,8 +96,8 @@ class TestClientConfig:
         config2 = ClientConfig(read_timeout=20, write_timeout=25, max_retries=invalid_max_retries)
         mocker.stopall()
 
-        merged_config = config1.merge(config2)
-        merged_from_dict = config1.merge({"write_timeout": 35})
+        merged_config = config1.merge(other=config2)
+        merged_from_dict = config1.merge(other={"write_timeout": 35})
 
         assert merged_config.read_timeout == 20
         assert merged_config.write_timeout == 25
@@ -123,50 +106,57 @@ class TestClientConfig:
         assert merged_from_dict.write_timeout == 35
         with pytest.raises(TypeError):
             invalid_value: Any = 123
-            config1.merge(invalid_value)
+            config1.merge(other=invalid_value)
 
     def test_to_dict_method(self) -> None:
-        config = ClientConfig(verify_mode=ssl.CERT_OPTIONAL, debug=True)
+        config = ClientConfig(verify_mode=ssl.CERT_OPTIONAL, debug=True, auto_reconnect=True)
 
         data = config.to_dict()
 
         assert data["verify_mode"] == "CERT_OPTIONAL"
         assert data["debug"] is True
+        assert data["auto_reconnect"] is True
 
     @pytest.mark.parametrize(
         "invalid_attrs, error_match",
         [
+            ({"alpn_protocols": []}, "cannot be empty"),
+            ({"certfile": "a.pem", "keyfile": None}, "both must be provided together"),
+            ({"congestion_control_algorithm": "invalid_algo"}, "must be one of"),
             ({"connect_timeout": -1}, "invalid timeout value"),
             ({"connection_idle_timeout": 0}, "invalid timeout value"),
             ({"max_connections": 0}, "must be positive"),
-            ({"max_streams": 0}, "must be positive"),
-            ({"max_incoming_streams": -1}, "must be positive"),
-            ({"stream_buffer_size": -10}, "must be positive"),
-            ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
-            ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
-            ({"certfile": "a.pem", "keyfile": None}, "both must be provided together"),
-            ({"http_version": "1.1"}, "must be '2' or '3'"),
-            ({"alpn_protocols": []}, "cannot be empty"),
             ({"max_datagram_size": 0}, "must be 1-65535"),
             ({"max_datagram_size": 65536}, "must be 1-65535"),
+            ({"max_incoming_streams": -1}, "must be positive"),
+            ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
+            ({"max_streams": 0}, "must be positive"),
+            ({"stream_buffer_size": -10}, "must be positive"),
+            ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
         ],
     )
     def test_validation_failures(self, invalid_attrs: dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
+        base_config = ClientConfig.create().to_dict()
+        test_config = {**base_config, **invalid_attrs}
+
         with pytest.raises(ConfigurationError, match=error_match):
-            ClientConfig(**invalid_attrs)
+            ClientConfig(**test_config)
 
     @pytest.mark.parametrize(
         "invalid_attrs, error_match",
         [
             ({"max_retries": -1}, "must be non-negative"),
-            ({"retry_delay": 0}, "must be positive"),
-            ({"retry_backoff": 0.9}, "must be >= 1.0"),
             ({"max_retry_delay": -10.0}, "must be positive"),
+            ({"retry_backoff": 0.9}, "must be >= 1.0"),
+            ({"retry_delay": 0}, "must be positive"),
         ],
     )
     def test_validation_failures_retry_logic(self, invalid_attrs: dict[str, Any], error_match: str) -> None:
+        base_config = ClientConfig.create().to_dict()
+        test_config = {**base_config, **invalid_attrs}
+
         with pytest.raises(ConfigurationError, match=error_match):
-            ClientConfig(**invalid_attrs)
+            ClientConfig(**test_config)
 
     def test_validation_certfile_not_found(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.config.Path.exists", return_value=False)
@@ -192,14 +182,18 @@ class TestServerConfig:
         config = ServerConfig()
 
         assert config.bind_host == "localhost"
-        assert config.max_connections == 3000
+        assert config.max_connections == DEFAULT_SERVER_MAX_CONNECTIONS
+        assert config.congestion_control_algorithm == "cubic"
 
     def test_create_factory_method(self, mocker: MockerFixture) -> None:
-        mocker.patch("pywebtransport.config.Defaults.get_server_config", return_value={"backlog": 1})
+        mocker.patch(
+            "pywebtransport.config.Defaults.get_server_config",
+            return_value={"max_sessions": 1},
+        )
 
-        config = ServerConfig.create(backlog=100, debug=True)
+        config = ServerConfig.create(max_sessions=100, debug=True)
 
-        assert config.backlog == 100
+        assert config.max_sessions == 100
         assert config.debug is True
 
     def test_create_for_development_factory(self, mock_path_exists: Any) -> None:
@@ -223,7 +217,11 @@ class TestServerConfig:
 
     def test_create_for_production_factory(self, mock_path_exists: Any) -> None:
         config = ServerConfig.create_for_production(
-            host="prodhost", port=443, certfile="c.pem", keyfile="k.pem", ca_certs="ca.pem"
+            host="prodhost",
+            port=443,
+            certfile="c.pem",
+            keyfile="k.pem",
+            ca_certs="ca.pem",
         )
 
         assert config.debug is False
@@ -241,15 +239,23 @@ class TestServerConfig:
 
     def test_merge_method(self) -> None:
         config1 = ServerConfig(max_connections=100)
-        config2 = ServerConfig(max_connections=200, backlog=256)
+        config2 = ServerConfig(max_connections=200, max_sessions=256)
 
-        merged = config1.merge(config2)
+        merged = config1.merge(other=config2)
 
         assert merged.max_connections == 200
-        assert merged.backlog == 256
+        assert merged.max_sessions == 256
         with pytest.raises(TypeError):
             invalid_value: Any = 123
-            config1.merge(invalid_value)
+            config1.merge(other=invalid_value)
+
+    def test_to_dict_method(self) -> None:
+        config = ServerConfig(verify_mode=ssl.CERT_REQUIRED, debug=False)
+
+        data = config.to_dict()
+
+        assert data["verify_mode"] == "CERT_REQUIRED"
+        assert data["debug"] is False
 
     def test_update_method(self) -> None:
         config = ServerConfig()
@@ -257,38 +263,33 @@ class TestServerConfig:
         with pytest.raises(ConfigurationError, match="unknown configuration key"):
             config.update(unknown_key="value")
 
-    def test_to_dict_method(self) -> None:
-        config = ServerConfig(verify_mode=ssl.CERT_REQUIRED, reuse_port=False)
-
-        data = config.to_dict()
-
-        assert data["verify_mode"] == "CERT_REQUIRED"
-        assert data["reuse_port"] is False
-
     @pytest.mark.parametrize(
         "invalid_attrs, error_match",
         [
+            ({"alpn_protocols": []}, "cannot be empty"),
             ({"bind_host": ""}, "cannot be empty"),
             ({"bind_port": 0}, "Port must be an integer"),
-            ({"max_connections": 0}, "must be positive"),
-            ({"max_sessions": 0}, "must be positive"),
-            ({"max_streams_per_connection": 0}, "must be positive"),
-            ({"max_incoming_streams": 0}, "must be positive"),
-            ({"connection_keepalive_timeout": 0}, "invalid timeout value"),
             ({"certfile": "a.pem", "keyfile": ""}, "certfile and keyfile must be provided together"),
-            ({"backlog": 0}, "must be positive"),
-            ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
-            ({"http_version": "1.1"}, "must be '2' or '3'"),
-            ({"alpn_protocols": []}, "cannot be empty"),
-            ({"stream_buffer_size": 0}, "must be positive"),
-            ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
+            ({"congestion_control_algorithm": "invalid_algo"}, "must be one of"),
+            ({"connection_keepalive_timeout": 0}, "invalid timeout value"),
+            ({"max_connections": 0}, "must be positive"),
             ({"max_datagram_size": 0}, "must be 1-65535"),
             ({"max_datagram_size": 65536}, "must be 1-65535"),
+            ({"max_incoming_streams": 0}, "must be positive"),
+            ({"max_sessions": 0}, "must be positive"),
+            ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
+            ({"max_streams_per_connection": 0}, "must be positive"),
+            ({"stream_buffer_size": 0}, "must be positive"),
+            ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
         ],
     )
     def test_validation_failures(self, invalid_attrs: dict[str, Any], error_match: str, mock_path_exists: Any) -> None:
+        base_config = ServerConfig.create().to_dict()
+        base_config.pop("backlog", None)
+        test_config = {**base_config, **invalid_attrs}
+
         with pytest.raises(ConfigurationError, match=error_match):
-            ServerConfig(**invalid_attrs)
+            ServerConfig(**test_config)
 
     def test_validation_certfile_not_found(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.config.Path.exists", return_value=False)
@@ -314,7 +315,7 @@ class TestConfigBuilder:
         builder = ConfigBuilder(config_type="client")
 
         config = (
-            builder.debug(log_level="INFO")
+            builder.debug(enabled=True, log_level="INFO")
             .timeout(connect=15, read=45, write=30)
             .security(
                 certfile="c.pem",
@@ -339,7 +340,7 @@ class TestConfigBuilder:
         builder = ConfigBuilder(config_type="server")
 
         config = (
-            builder.bind("0.0.0.0", 8000)
+            builder.bind(host="0.0.0.0", port=8000)
             .performance(max_connections=500, max_streams=25)
             .security(certfile="s.pem", keyfile="s.key")
             .build()
@@ -353,7 +354,7 @@ class TestConfigBuilder:
         builder = ConfigBuilder(config_type="client")
 
         with pytest.raises(ConfigurationError, match="bind\\(\\) can only be used with server config"):
-            builder.bind("localhost", 8080)
+            builder.bind(host="localhost", port=8080)
 
     def test_client_builder_ignores_server_options(self) -> None:
         builder = ConfigBuilder(config_type="client")
@@ -367,3 +368,29 @@ class TestConfigBuilder:
 
         with pytest.raises(ConfigurationError, match="Unknown config type: unknown"):
             builder.build()
+
+
+class TestConfigHelpers:
+    @pytest.mark.parametrize("value", [5, 10.5, None])
+    def test_validate_timeout_valid(self, value: Any) -> None:
+        _validate_timeout(timeout=value)
+
+    @pytest.mark.parametrize("value", [0, -1, -10.5])
+    def test_validate_timeout_invalid_value(self, value: Any) -> None:
+        with pytest.raises(ValueError, match="must be positive"):
+            _validate_timeout(timeout=value)
+
+    def test_validate_timeout_invalid_type(self) -> None:
+        invalid_value: Any = "abc"
+
+        with pytest.raises(TypeError, match="must be a number or None"):
+            _validate_timeout(timeout=invalid_value)
+
+    @pytest.mark.parametrize("value", [1, 80, 4433, 65535])
+    def test_validate_port_valid(self, value: int) -> None:
+        _validate_port(port=value)
+
+    @pytest.mark.parametrize("value", [0, 65536, -1, "80", 80.5])
+    def test_validate_port_invalid(self, value: Any) -> None:
+        with pytest.raises(ValueError, match="Port must be an integer between 1 and 65535"):
+            _validate_port(port=value)

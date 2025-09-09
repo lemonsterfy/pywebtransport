@@ -5,8 +5,7 @@ Performance benchmark for request-response latency.
 import asyncio
 import logging
 import ssl
-from collections.abc import Callable
-from typing import Final
+from typing import Final, Protocol
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
@@ -22,6 +21,12 @@ _test_data_cache: dict[int, bytes] = {}
 logger = logging.getLogger("test_05_request_response_latency")
 
 
+class DataFactoryProtocol(Protocol):
+    """A protocol for the test data factory function."""
+
+    def __call__(self, *, size: int) -> bytes: ...
+
+
 @pytest.fixture(scope="module")
 def client_config() -> ClientConfig:
     """Provide a client configuration suitable for latency tests."""
@@ -34,10 +39,10 @@ def client_config() -> ClientConfig:
 
 
 @pytest.fixture(scope="module")
-def get_test_data() -> Callable[[int], bytes]:
+def get_test_data() -> DataFactoryProtocol:
     """Provide a factory function to get cached, pre-generated test data."""
 
-    def _data_factory(size: int) -> bytes:
+    def _data_factory(*, size: int) -> bytes:
         if size not in _test_data_cache:
             _test_data_cache[size] = b"r" * size
         return _test_data_cache[size]
@@ -53,18 +58,18 @@ class TestRequestResponseLatency:
         self,
         benchmark: BenchmarkFixture,
         client_config: ClientConfig,
-        get_test_data: Callable[[int], bytes],
+        get_test_data: DataFactoryProtocol,
         payload_size: int,
     ) -> None:
         """Benchmark the end-to-end latency of a full request-response cycle."""
-        request_data = get_test_data(payload_size)
+        request_data = get_test_data(size=payload_size)
         expected_response_len = len(request_data)
 
         async def run_full_cycle() -> bytes:
-            async with WebTransportClient.create(config=client_config) as client:
-                session = await client.connect(f"{SERVER_URL}{REQUEST_RESPONSE_ENDPOINT}")
+            async with WebTransportClient(config=client_config) as client:
+                session = await client.connect(url=f"{SERVER_URL}{REQUEST_RESPONSE_ENDPOINT}")
                 stream = await session.create_bidirectional_stream()
-                await stream.write_all(request_data)
+                await stream.write_all(data=request_data)
                 response = await stream.read_all()
                 return response
 

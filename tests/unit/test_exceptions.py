@@ -14,6 +14,7 @@ from pywebtransport import (
     FlowControlError,
     HandshakeError,
     ProtocolError,
+    SerializationError,
     ServerError,
     SessionError,
     SessionState,
@@ -39,7 +40,9 @@ from pywebtransport.exceptions import (
 
 class TestExceptionClasses:
     def test_webtransport_error_base(self) -> None:
-        exc = WebTransportError("Base error", error_code=100, details={"info": "abc"})
+        details = {"info": "abc"}
+
+        exc = WebTransportError(message="Base error", error_code=100, details=details)
 
         assert exc.message == "Base error"
         assert exc.error_code == 100
@@ -54,10 +57,17 @@ class TestExceptionClasses:
         }
 
     def test_webtransport_error_defaults(self) -> None:
-        exc = WebTransportError("Default error")
+        exc = WebTransportError(message="Default error")
 
         assert exc.error_code == ErrorCodes.INTERNAL_ERROR
         assert exc.details == {}
+
+    def test_stream_error_custom_str(self) -> None:
+        exc_no_id = StreamError(message="No ID")
+        exc_with_id = StreamError(message="With ID", stream_id=5)
+
+        assert str(exc_no_id) == f"[{hex(exc_no_id.error_code)}] No ID"
+        assert str(exc_with_id) == f"[{hex(exc_with_id.error_code)}] With ID (stream_id=5)"
 
     @pytest.mark.parametrize(
         "exc_class, args, expected_attrs, default_code",
@@ -107,6 +117,12 @@ class TestExceptionClasses:
             (HandshakeError, {"handshake_stage": "alpn"}, {"handshake_stage": "alpn"}, ErrorCodes.INTERNAL_ERROR),
             (ProtocolError, {"frame_type": 0x41}, {"frame_type": 0x41}, ErrorCodes.PROTOCOL_VIOLATION),
             (
+                SerializationError,
+                {"original_exception": ValueError("bad data")},
+                {"original_exception": ValueError("bad data")},
+                ErrorCodes.INTERNAL_ERROR,
+            ),
+            (
                 ServerError,
                 {"bind_address": ("0.0.0.0", 4433)},
                 {"bind_address": ("0.0.0.0", 4433)},
@@ -139,31 +155,35 @@ class TestExceptionClasses:
         expected_attrs: dict[str, Any],
         default_code: ErrorCodes,
     ) -> None:
-        exc = exc_class("Test message", **args)
+        exc = exc_class(message="Test message", **args)
+        exc_default = exc_class(message="Default code")
+
         assert isinstance(exc, WebTransportError)
-        for key, value in expected_attrs.items():
-            assert getattr(exc, key) == value
+        for key, expected_value in expected_attrs.items():
+            actual_value = getattr(exc, key)
+            if isinstance(expected_value, Exception):
+                assert isinstance(actual_value, type(expected_value))
+                assert str(actual_value) == str(expected_value)
+            else:
+                assert actual_value == expected_value
 
         data = exc.to_dict()
         assert data["type"] == exc_class.__name__
         for key, value in expected_attrs.items():
-            serialized_value = value.value if hasattr(value, "value") else value
+            if isinstance(value, Exception):
+                serialized_value = str(value)
+            elif hasattr(value, "value"):
+                serialized_value = value.value
+            else:
+                serialized_value = value
             assert data[key] == serialized_value
 
-        exc_default = exc_class("Default code")
         assert exc_default.error_code == default_code
-
-    def test_stream_error_custom_str(self) -> None:
-        exc_no_id = StreamError("No ID")
-        assert str(exc_no_id) == f"[{hex(exc_no_id.error_code)}] No ID"
-
-        exc_with_id = StreamError("With ID", stream_id=5)
-        assert str(exc_with_id) == f"[{hex(exc_with_id.error_code)}] With ID (stream_id=5)"
 
 
 class TestExceptionFactories:
     def test_certificate_not_found(self) -> None:
-        exc = certificate_not_found("/path/to/cert.pem")
+        exc = certificate_not_found(path="/path/to/cert.pem")
 
         assert isinstance(exc, CertificateError)
         assert exc.certificate_path == "/path/to/cert.pem"
@@ -171,7 +191,7 @@ class TestExceptionFactories:
         assert "/path/to/cert.pem" in exc.message
 
     def test_connection_timeout(self) -> None:
-        exc = connection_timeout(15.5, operation="handshake")
+        exc = connection_timeout(timeout_duration=15.5, operation="handshake")
 
         assert isinstance(exc, TimeoutError)
         assert exc.timeout_duration == 15.5
@@ -179,7 +199,7 @@ class TestExceptionFactories:
         assert "15.5s" in exc.message
 
     def test_datagram_too_large(self) -> None:
-        exc = datagram_too_large(9000, 1500)
+        exc = datagram_too_large(size=9000, max_size=1500)
 
         assert isinstance(exc, DatagramError)
         assert exc.datagram_size == 9000
@@ -187,7 +207,7 @@ class TestExceptionFactories:
         assert "9000" in exc.message and "1500" in exc.message
 
     def test_invalid_config(self) -> None:
-        exc = invalid_config("retries", -1, "must be non-negative")
+        exc = invalid_config(key="retries", value=-1, reason="must be non-negative")
 
         assert isinstance(exc, ConfigurationError)
         assert exc.config_key == "retries"
@@ -195,7 +215,7 @@ class TestExceptionFactories:
         assert "retries" in exc.message and "must be non-negative" in exc.message
 
     def test_protocol_violation(self) -> None:
-        exc = protocol_violation("Invalid frame", frame_type=0xFF)
+        exc = protocol_violation(message="Invalid frame", frame_type=0xFF)
 
         assert isinstance(exc, ProtocolError)
         assert exc.frame_type == 0xFF
@@ -203,7 +223,7 @@ class TestExceptionFactories:
         assert exc.message == "Invalid frame"
 
     def test_session_not_ready(self) -> None:
-        exc = session_not_ready("sess_123", SessionState.CONNECTING)
+        exc = session_not_ready(session_id="sess_123", current_state=SessionState.CONNECTING)
 
         assert isinstance(exc, SessionError)
         assert exc.session_id == "sess_123"
@@ -211,7 +231,7 @@ class TestExceptionFactories:
         assert "sess_123" in exc.message and "connecting" in exc.message
 
     def test_stream_closed(self) -> None:
-        exc = stream_closed(5, reason="shutdown")
+        exc = stream_closed(stream_id=5, reason="shutdown")
 
         assert isinstance(exc, StreamError)
         assert exc.stream_id == 5
@@ -220,28 +240,41 @@ class TestExceptionFactories:
 
 
 class TestHelperFunctions:
+    def test_is_fatal_error_with_standard_exception(self) -> None:
+        exc = ValueError("Standard error")
+
+        assert is_fatal_error(exception=exc) is True
+
+    def test_is_retriable_error_with_standard_exception(self) -> None:
+        exc = ValueError("Standard error")
+
+        assert is_retriable_error(exception=exc) is False
+
     @pytest.mark.parametrize(
         "exception_instance, expected_category",
         [
-            (AuthenticationError(""), "authentication"),
-            (CertificateError(""), "certificate"),
-            (ClientError(""), "client"),
-            (ConfigurationError(""), "configuration"),
-            (ConnectionError(""), "connection"),
-            (DatagramError(""), "datagram"),
-            (FlowControlError(""), "flow_control"),
-            (HandshakeError(""), "handshake"),
-            (ProtocolError(""), "protocol"),
-            (ServerError(""), "server"),
-            (SessionError(""), "session"),
-            (StreamError(""), "stream"),
-            (TimeoutError(""), "timeout"),
-            (WebTransportError(""), "unknown"),
+            (AuthenticationError(message=""), "authentication"),
+            (CertificateError(message=""), "certificate"),
+            (ClientError(message=""), "client"),
+            (ConfigurationError(message=""), "configuration"),
+            (ConnectionError(message=""), "connection"),
+            (DatagramError(message=""), "datagram"),
+            (FlowControlError(message=""), "flow_control"),
+            (HandshakeError(message=""), "handshake"),
+            (ProtocolError(message=""), "protocol"),
+            (SerializationError(message=""), "serialization"),
+            (ServerError(message=""), "server"),
+            (SessionError(message=""), "session"),
+            (StreamError(message=""), "stream"),
+            (TimeoutError(message=""), "timeout"),
+            (WebTransportError(message=""), "unknown"),
             (ValueError(""), "unknown"),
         ],
     )
     def test_get_error_category(self, exception_instance: Exception, expected_category: str) -> None:
-        assert get_error_category(exception_instance) == expected_category
+        category = get_error_category(exception=exception_instance)
+
+        assert category == expected_category
 
     @pytest.mark.parametrize(
         "error_code, is_fatal",
@@ -253,12 +286,9 @@ class TestHelperFunctions:
         ],
     )
     def test_is_fatal_error(self, error_code: ErrorCodes, is_fatal: bool) -> None:
-        exc = WebTransportError("Test", error_code=error_code)
+        exc = WebTransportError(message="Test", error_code=error_code)
 
-        assert is_fatal_error(exc) is is_fatal
-
-    def test_is_fatal_error_with_standard_exception(self) -> None:
-        assert is_fatal_error(ValueError("Standard error")) is True
+        assert is_fatal_error(exception=exc) is is_fatal
 
     @pytest.mark.parametrize(
         "error_code, is_retriable",
@@ -271,9 +301,6 @@ class TestHelperFunctions:
         ],
     )
     def test_is_retriable_error(self, error_code: ErrorCodes, is_retriable: bool) -> None:
-        exc = WebTransportError("Test", error_code=error_code)
+        exc = WebTransportError(message="Test", error_code=error_code)
 
-        assert is_retriable_error(exc) is is_retriable
-
-    def test_is_retriable_error_with_standard_exception(self) -> None:
-        assert is_retriable_error(ValueError("Standard error")) is False
+        assert is_retriable_error(exception=exc) is is_retriable

@@ -10,7 +10,7 @@ from collections import defaultdict
 from types import TracebackType
 from typing import Any, Self, Type
 
-from pywebtransport.constants import WebTransportConstants
+from pywebtransport.constants import DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_CLEANUP_INTERVAL
 from pywebtransport.exceptions import SessionError
 from pywebtransport.session.session import WebTransportSession
 from pywebtransport.types import EventType, SessionId, SessionState
@@ -18,7 +18,7 @@ from pywebtransport.utils import get_logger
 
 __all__ = ["SessionManager"]
 
-logger = get_logger("session.manager")
+logger = get_logger(name="session.manager")
 
 
 class SessionManager:
@@ -27,8 +27,8 @@ class SessionManager:
     def __init__(
         self,
         *,
-        max_sessions: int = WebTransportConstants.DEFAULT_MAX_SESSIONS,
-        session_cleanup_interval: float = WebTransportConstants.DEFAULT_SESSION_CLEANUP_INTERVAL,
+        max_sessions: int = DEFAULT_MAX_SESSIONS,
+        session_cleanup_interval: float = DEFAULT_SESSION_CLEANUP_INTERVAL,
     ):
         """Initialize the session manager."""
         self._max_sessions = max_sessions
@@ -47,8 +47,8 @@ class SessionManager:
     def create(
         cls,
         *,
-        max_sessions: int = WebTransportConstants.DEFAULT_MAX_SESSIONS,
-        session_cleanup_interval: float = WebTransportConstants.DEFAULT_SESSION_CLEANUP_INTERVAL,
+        max_sessions: int = DEFAULT_MAX_SESSIONS,
+        session_cleanup_interval: float = DEFAULT_SESSION_CLEANUP_INTERVAL,
     ) -> Self:
         """Factory method to create a new session manager instance."""
         return cls(max_sessions=max_sessions, session_cleanup_interval=session_cleanup_interval)
@@ -80,7 +80,7 @@ class SessionManager:
         await self.close_all_sessions()
         logger.info("Session manager shutdown complete")
 
-    async def add_session(self, session: WebTransportSession) -> SessionId:
+    async def add_session(self, *, session: WebTransportSession) -> SessionId:
         """Add a new session to the manager."""
         if self._lock is None:
             raise SessionError(
@@ -98,13 +98,13 @@ class SessionManager:
             async def on_close(event: Any) -> None:
                 manager = manager_ref()
                 if manager and isinstance(event.data, dict):
-                    await manager.remove_session(event.data["session_id"])
+                    await manager.remove_session(session_id=event.data["session_id"])
 
-            session.once(EventType.SESSION_CLOSED, on_close)
+            session.once(event_type=EventType.SESSION_CLOSED, handler=on_close)
 
             self._stats["total_created"] += 1
             self._update_stats_unsafe()
-            logger.debug(f"Added session {session_id} (total: {len(self._sessions)})")
+            logger.debug("Added session %s (total: %d)", session_id, len(self._sessions))
             return session_id
 
     async def close_all_sessions(self) -> None:
@@ -121,7 +121,7 @@ class SessionManager:
                 return
 
             sessions_to_close = list(self._sessions.values())
-            logger.info(f"Initiating shutdown for {len(sessions_to_close)} managed sessions.")
+            logger.info("Initiating shutdown for %d managed sessions.", len(sessions_to_close))
             self._stats["total_closed"] += len(sessions_to_close)
             self._sessions.clear()
             self._update_stats_unsafe()
@@ -132,10 +132,14 @@ class SessionManager:
                     if not session.is_closed:
                         tg.create_task(session.close(close_connection=False))
         except* Exception as eg:
-            logger.error(f"Errors occurred while closing managed sessions: {eg.exceptions}")
+            logger.error(
+                "Errors occurred while closing managed sessions: %s",
+                eg.exceptions,
+                exc_info=eg,
+            )
             raise
 
-    async def get_session(self, session_id: SessionId) -> WebTransportSession | None:
+    async def get_session(self, *, session_id: SessionId) -> WebTransportSession | None:
         """Retrieve a session by its ID."""
         if self._lock is None:
             raise SessionError(
@@ -145,7 +149,7 @@ class SessionManager:
         async with self._lock:
             return self._sessions.get(session_id)
 
-    async def remove_session(self, session_id: SessionId) -> WebTransportSession | None:
+    async def remove_session(self, *, session_id: SessionId) -> WebTransportSession | None:
         """Remove a session from the manager by its ID."""
         if self._lock is None:
             raise SessionError(
@@ -157,7 +161,11 @@ class SessionManager:
             if session:
                 self._stats["total_closed"] += 1
                 self._update_stats_unsafe()
-                logger.debug(f"Removed session {session_id} (total: {len(self._sessions)})")
+                logger.debug(
+                    "Removed session %s (total: %d)",
+                    session_id,
+                    len(self._sessions),
+                )
             return session
 
     async def cleanup_closed_sessions(self) -> int:
@@ -177,7 +185,7 @@ class SessionManager:
             if closed_session_ids:
                 self._stats["total_closed"] += len(closed_session_ids)
                 self._update_stats_unsafe()
-                logger.debug(f"Cleaned up {len(closed_session_ids)} closed sessions.")
+                logger.debug("Cleaned up %d closed sessions.", len(closed_session_ids))
 
         return len(closed_session_ids)
 
@@ -195,7 +203,7 @@ class SessionManager:
         """Get the current number of active sessions (non-locking)."""
         return len(self._sessions)
 
-    async def get_sessions_by_state(self, state: SessionState) -> list[WebTransportSession]:
+    async def get_sessions_by_state(self, *, state: SessionState) -> list[WebTransportSession]:
         """Retrieve sessions that are in a specific state."""
         if self._lock is None:
             raise SessionError(
@@ -230,7 +238,7 @@ class SessionManager:
                 try:
                     await self.cleanup_closed_sessions()
                 except Exception as e:
-                    logger.error(f"Session cleanup cycle failed: {e}", exc_info=e)
+                    logger.error("Session cleanup cycle failed: %s", e, exc_info=e)
 
                 await asyncio.sleep(self._cleanup_interval)
         except asyncio.CancelledError:

@@ -34,7 +34,7 @@ class TestPooledClient:
     @pytest.fixture(autouse=True)
     def setup_common_mocks(self, mocker: MockerFixture, mock_underlying_client: Any) -> None:
         mocker.patch(
-            "pywebtransport.client.pooled.WebTransportClient.create",
+            "pywebtransport.client.pooled.WebTransportClient",
             return_value=mock_underlying_client,
         )
         mocker.patch(
@@ -92,7 +92,7 @@ class TestPooledClient:
         async with PooledClient() as pool:
             pool._pools["example.com:443/"] = [mock_session]
 
-            session = await pool.get_session("https://example.com")
+            session = await pool.get_session(url="https://example.com")
 
             assert session is mock_session
             assert not pool._pools["example.com:443/"]
@@ -101,7 +101,7 @@ class TestPooledClient:
     @pytest.mark.asyncio
     async def test_return_session(self, mock_session: Any) -> None:
         async with PooledClient() as pool:
-            await pool.return_session(mock_session)
+            await pool.return_session(session=mock_session)
 
             assert pool._pools["example.com:443/"] == [mock_session]
             cast(AsyncMock, mock_session.close).assert_not_awaited()
@@ -116,7 +116,7 @@ class TestPooledClient:
             pool._pools["example.com:443/"] = [stale_session]
             pool._total_sessions["example.com:443/"] = 1
 
-            session = await pool.get_session("https://example.com")
+            session = await pool.get_session(url="https://example.com")
 
             assert session is mock_session
             assert not pool._pools["example.com:443/"]
@@ -131,7 +131,7 @@ class TestPooledClient:
             pool_key = "example.com:443/"
 
             with pytest.raises(ConnectionError):
-                await pool.get_session("https://example.com")
+                await pool.get_session(url="https://example.com")
 
             assert pool._total_sessions[pool_key] == 0
 
@@ -146,7 +146,7 @@ class TestPooledClient:
             another_session.path = "/"
             another_session.close = mocker.AsyncMock()
 
-            await pool.return_session(another_session)
+            await pool.return_session(session=another_session)
 
             assert len(pool._pools["example.com:443/"]) == 1
             another_session.close.assert_awaited_once()
@@ -158,7 +158,7 @@ class TestPooledClient:
             pool._total_sessions[pool_key] = 1
             mock_session.is_ready = False
 
-            await pool.return_session(mock_session)
+            await pool.return_session(session=mock_session)
 
             assert not pool._pools.get(pool_key)
             assert pool._total_sessions[pool_key] == 0
@@ -170,7 +170,7 @@ class TestPooledClient:
             mock_session.connection = None
             pool._total_sessions["unknown"] = 1
 
-            await pool.return_session(mock_session)
+            await pool.return_session(session=mock_session)
 
             cast(AsyncMock, mock_session.close).assert_awaited_once()
             assert not pool._pools
@@ -181,16 +181,16 @@ class TestPooledClient:
     ) -> None:
         async with PooledClient(pool_size=1) as pool:
             mock_underlying_client.connect.return_value = mock_session
-            task_a = asyncio.create_task(pool.get_session("https://example.com"))
+            task_a = asyncio.create_task(pool.get_session(url="https://example.com"))
             await asyncio.sleep(0.01)
-            task_b = asyncio.create_task(pool.get_session("https://example.com"))
+            task_b = asyncio.create_task(pool.get_session(url="https://example.com"))
             await asyncio.sleep(0.01)
 
             cast(AsyncMock, mock_underlying_client.connect).assert_awaited_once()
             assert not task_b.done()
 
             session_a = await task_a
-            await pool.return_session(session_a)
+            await pool.return_session(session=session_a)
             session_b = await asyncio.wait_for(task_b, timeout=1.0)
 
             assert session_b is mock_session
@@ -227,7 +227,7 @@ class TestPooledClient:
         pool = PooledClient()
         url = "invalid-url"
 
-        key = pool._get_pool_key(url)
+        key = pool._get_pool_key(url=url)
 
         assert key == url
 
@@ -236,12 +236,11 @@ class TestPooledClient:
     async def test_methods_raise_if_not_activated(self, method_name: str, mock_session: Any) -> None:
         pool = PooledClient()
         method = getattr(pool, method_name)
+        kwargs: dict[str, Any] = {}
         if method_name == "return_session":
-            args: tuple[Any, ...] = (mock_session,)
-        elif method_name == "close":
-            args = ()
-        else:
-            args = ("https://url",)
+            kwargs["session"] = mock_session
+        elif method_name == "get_session":
+            kwargs["url"] = "https://url"
 
         with pytest.raises(ClientError, match="PooledClient has not been activated"):
-            await method(*args)
+            await method(**kwargs)

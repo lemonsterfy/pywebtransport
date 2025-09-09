@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 __all__ = ["WebTransportProtocolHandler"]
 
-logger = get_logger("protocol.handler")
+logger = get_logger(name="protocol.handler")
 
 
 class WebTransportProtocolHandler(EventEmitter):
@@ -59,8 +59,8 @@ class WebTransportProtocolHandler(EventEmitter):
 
     def __init__(
         self,
-        quic_connection: QuicConnection,
         *,
+        quic_connection: QuicConnection,
         is_client: bool = True,
         connection: WebTransportConnection | None = None,
     ):
@@ -87,18 +87,18 @@ class WebTransportProtocolHandler(EventEmitter):
             "errors": 0,
             "connected_at": None,
         }
-        logger.debug(f"WebTransport protocol handler initialized (client={is_client})")
+        logger.debug("WebTransport protocol handler initialized (client=%s)", is_client)
 
     @classmethod
     def create(
         cls,
-        quic_connection: QuicConnection,
         *,
+        quic_connection: QuicConnection,
         is_client: bool = True,
         connection: WebTransportConnection | None = None,
     ) -> Self:
         """Factory method to create a new WebTransport protocol handler instance."""
-        return cls(quic_connection, is_client=is_client, connection=connection)
+        return cls(quic_connection=quic_connection, is_client=is_client, connection=connection)
 
     @property
     def is_connected(self) -> bool:
@@ -141,14 +141,14 @@ class WebTransportProtocolHandler(EventEmitter):
             logger.info("Connection established.")
             self._trigger_transmission()
 
-    def abort_stream(self, stream_id: StreamId, error_code: int) -> None:
+    def abort_stream(self, *, stream_id: StreamId, error_code: int) -> None:
         """Abort a stream immediately."""
-        logger.warning(f"Aborting stream {stream_id} with error code {error_code}")
-        self._quic.reset_stream(stream_id, error_code)
+        logger.warning("Aborting stream %d with error code %d", stream_id, error_code)
+        self._quic.reset_stream(stream_id=stream_id, error_code=error_code)
         self._trigger_transmission()
-        self._cleanup_stream(stream_id)
+        self._cleanup_stream(stream_id=stream_id)
 
-    def accept_webtransport_session(self, stream_id: StreamId, session_id: SessionId) -> None:
+    def accept_webtransport_session(self, *, stream_id: StreamId, session_id: SessionId) -> None:
         """Accept a pending WebTransport session (server-only)."""
         if self._is_client:
             raise ProtocolError("Only servers can accept WebTransport sessions")
@@ -157,30 +157,33 @@ class WebTransportProtocolHandler(EventEmitter):
         if not session_info or session_info.stream_id != stream_id:
             raise ProtocolError(f"No pending session found for stream {stream_id} and id {session_id}")
 
-        self._h3.send_headers(stream_id, {":status": "200"})
+        self._h3.send_headers(stream_id=stream_id, headers={":status": "200"})
         session_info.state = SessionState.CONNECTED
         session_info.ready_at = get_timestamp()
 
         self._trigger_transmission()
-        asyncio.create_task(self.emit(EventType.SESSION_READY, data=session_info.to_dict()))
-        logger.info(f"Accepted WebTransport session: {session_id}")
+        asyncio.create_task(self.emit(event_type=EventType.SESSION_READY, data=session_info.to_dict()))
+        logger.info("Accepted WebTransport session: %s", session_id)
 
-    def close_webtransport_session(self, session_id: SessionId, *, code: int = 0, reason: str | None = None) -> None:
+    def close_webtransport_session(self, *, session_id: SessionId, code: int = 0, reason: str | None = None) -> None:
         """Close a specific WebTransport session."""
         session_info = self._sessions.get(session_id)
         if not session_info or session_info.state == SessionState.CLOSED:
             return
 
-        logger.info(f"Closing WebTransport session: {session_id} (code={code})")
-        self._quic.reset_stream(session_info.stream_id, code)
+        logger.info("Closing WebTransport session: %s (code=%d)", session_id, code)
+        self._quic.reset_stream(stream_id=session_info.stream_id, error_code=code)
         self._trigger_transmission()
-        self._cleanup_session(session_id)
+        self._cleanup_session(session_id=session_id)
         asyncio.create_task(
-            self.emit(EventType.SESSION_CLOSED, data={"session_id": session_id, "code": code, "reason": reason})
+            self.emit(
+                event_type=EventType.SESSION_CLOSED,
+                data={"session_id": session_id, "code": code, "reason": reason},
+            )
         )
 
     async def create_webtransport_session(
-        self, path: str, *, headers: Headers | None = None
+        self, *, path: str, headers: Headers | None = None
     ) -> tuple[SessionId, StreamId]:
         """Initiate a new WebTransport session (client-only)."""
         if not self._is_client:
@@ -201,7 +204,7 @@ class WebTransportProtocolHandler(EventEmitter):
         }
 
         stream_id = self._quic.get_next_available_stream_id(is_unidirectional=False)
-        self._h3.send_headers(stream_id, connect_headers, end_stream=False)
+        self._h3.send_headers(stream_id=stream_id, headers=connect_headers, end_stream=False)
 
         session_info = WebTransportSessionInfo(
             session_id=session_id,
@@ -211,12 +214,16 @@ class WebTransportProtocolHandler(EventEmitter):
             path=path,
             headers=headers_dict,
         )
-        self._register_session(session_id, session_info)
+        self._register_session(session_id=session_id, session_info=session_info)
         self._trigger_transmission()
-        logger.info(f"Initiated WebTransport session: {session_id} on control stream {stream_id}")
+        logger.info(
+            "Initiated WebTransport session: %s on control stream %d",
+            session_id,
+            stream_id,
+        )
         return session_id, stream_id
 
-    def create_webtransport_stream(self, session_id: SessionId, *, is_unidirectional: bool = False) -> StreamId:
+    def create_webtransport_stream(self, *, session_id: SessionId, is_unidirectional: bool = False) -> StreamId:
         """Create a new WebTransport data stream for a session."""
         session_info = self._sessions.get(session_id)
         if not session_info or session_info.state != SessionState.CONNECTED:
@@ -226,10 +233,10 @@ class WebTransportProtocolHandler(EventEmitter):
             session_id=session_info.stream_id, is_unidirectional=is_unidirectional
         )
         direction = StreamDirection.SEND_ONLY if is_unidirectional else StreamDirection.BIDIRECTIONAL
-        self._register_stream(session_id, stream_id, direction)
+        self._register_stream(session_id=session_id, stream_id=stream_id, direction=direction)
 
         self._trigger_transmission()
-        logger.debug(f"Created WebTransport stream {stream_id} ({direction})")
+        logger.debug("Created WebTransport stream %d (%s)", stream_id, direction)
         return stream_id
 
     async def establish_session(
@@ -238,32 +245,41 @@ class WebTransportProtocolHandler(EventEmitter):
         """Establish a WebTransport session with a specified timeout."""
         if not self.is_connected:
             raise ConnectionError("Protocol not connected")
-        with Timer("establish_session") as timer:
+        with Timer(name="establish_session") as timer:
             session_id, stream_id = await asyncio.wait_for(
-                self.create_webtransport_session(path=path, headers=headers), timeout=timeout
+                self.create_webtransport_session(path=path, headers=headers),
+                timeout=timeout,
             )
 
             def session_ready_condition(event: Event) -> bool:
                 return isinstance(event.data, dict) and event.data.get("session_id") == session_id
 
-            await self.wait_for(EventType.SESSION_READY, timeout=timeout, condition=session_ready_condition)
-            logger.info(f"WebTransport session established in {timer.elapsed:.2f}s: {session_id}")
+            await self.wait_for(
+                event_type=EventType.SESSION_READY,
+                timeout=timeout,
+                condition=session_ready_condition,
+            )
+            logger.info(
+                "WebTransport session established in %.2fs: %s",
+                timer.elapsed,
+                session_id,
+            )
             return session_id, stream_id
 
-    async def handle_quic_event(self, event: QuicEvent) -> None:
+    async def handle_quic_event(self, *, event: QuicEvent) -> None:
         """Process a QUIC event through the H3 engine and handle results."""
         if self._connection_state == ConnectionState.CLOSED:
             return
 
         if isinstance(event, StreamReset):
-            await self._handle_stream_reset(event)
+            await self._handle_stream_reset(event=event)
 
-        h3_events = self._h3.handle_event(event)
+        h3_events = self._h3.handle_event(event=event)
         for h3_event in h3_events:
-            await self._handle_h3_event(h3_event)
+            await self._handle_h3_event(h3_event=h3_event)
         self._trigger_transmission()
 
-    def send_webtransport_datagram(self, session_id: SessionId, data: bytes) -> None:
+    def send_webtransport_datagram(self, *, session_id: SessionId, data: bytes) -> None:
         """Send a WebTransport datagram for a session."""
         session_info = self._sessions.get(session_id)
         if not session_info or session_info.state != SessionState.CONNECTED:
@@ -274,10 +290,13 @@ class WebTransportProtocolHandler(EventEmitter):
         self._stats["datagrams_sent"] += 1
         self._trigger_transmission()
 
-    def send_webtransport_stream_data(self, stream_id: StreamId, data: bytes, *, end_stream: bool = False) -> None:
+    def send_webtransport_stream_data(self, *, stream_id: StreamId, data: bytes, end_stream: bool = False) -> None:
         """Send data on a specific WebTransport stream."""
         stream_info = self._streams.get(stream_id)
-        if not stream_info or stream_info.state in (StreamState.HALF_CLOSED_LOCAL, StreamState.CLOSED):
+        if not stream_info or stream_info.state in (
+            StreamState.HALF_CLOSED_LOCAL,
+            StreamState.CLOSED,
+        ):
             raise ProtocolError(f"Stream {stream_id} not found or not writable")
 
         self._h3.send_data(stream_id=stream_id, data=data, end_stream=end_stream)
@@ -285,7 +304,7 @@ class WebTransportProtocolHandler(EventEmitter):
         stream_info.bytes_sent += len(data)
         self._trigger_transmission()
         if end_stream:
-            self._update_stream_state_on_send_end(stream_id)
+            self._update_stream_state_on_send_end(stream_id=stream_id)
 
     def get_all_sessions(self) -> list[WebTransportSessionInfo]:
         """Get a list of all current sessions."""
@@ -318,7 +337,7 @@ class WebTransportProtocolHandler(EventEmitter):
             "uptime": (get_timestamp() - stats["connected_at"]) if stats.get("connected_at") else 0.0,
         }
 
-    def get_session_info(self, session_id: SessionId) -> WebTransportSessionInfo | None:
+    def get_session_info(self, *, session_id: SessionId) -> WebTransportSessionInfo | None:
         """Get information about a specific session."""
         return self._sessions.get(session_id)
 
@@ -336,19 +355,19 @@ class WebTransportProtocolHandler(EventEmitter):
                     future.set_result(None)
 
         event_name = f"stream_data_received:{stream_id}"
-        self.on(event_name, data_handler)
+        self.on(event_type=event_name, handler=data_handler)
         try:
             await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
             raise TimeoutError(f"Timeout waiting for stream {stream_id} to end") from None
         finally:
-            self.off(event_name, data_handler)
+            self.off(event_type=event_name, handler=data_handler)
         return b"".join(chunks)
 
     async def recover_session(self, *, session_id: SessionId, max_retries: int = 3) -> bool:
         """Attempt to recover a failed session by creating a new one."""
-        validate_session_id(session_id)
-        session_info = self.get_session_info(session_id)
+        validate_session_id(session_id=session_id)
+        session_info = self.get_session_info(session_id=session_id)
         if not session_info:
             return False
         for attempt in range(max_retries):
@@ -356,48 +375,64 @@ class WebTransportProtocolHandler(EventEmitter):
                 new_session_id, _ = await self.create_webtransport_session(
                     path=session_info.path, headers=session_info.headers
                 )
-                logger.info(f"Recovered session {session_id} as new session {new_session_id} (attempt {attempt + 1})")
+                logger.info(
+                    "Recovered session %s as new session %s (attempt %d)",
+                    session_id,
+                    new_session_id,
+                    attempt + 1,
+                )
                 return True
             except Exception as e:
-                logger.warning(f"Session recovery attempt {attempt + 1} failed: {e}")
+                logger.warning(
+                    "Session recovery attempt %d failed: %s",
+                    attempt + 1,
+                    e,
+                    exc_info=True,
+                )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2**attempt)
         return False
 
     def write_stream_chunked(self, *, stream_id: StreamId, data: Data, chunk_size: int = 8192) -> int:
         """Send data on a stream in managed chunks."""
-        validate_stream_id(stream_id)
-        data_bytes = ensure_bytes(data)
+        validate_stream_id(stream_id=stream_id)
+        data_bytes = ensure_bytes(data=data)
         total_sent = 0
         for i in range(0, len(data_bytes), chunk_size):
             chunk = data_bytes[i : i + chunk_size]
             is_last_chunk = (i + chunk_size) >= len(data_bytes)
             try:
-                self.send_webtransport_stream_data(stream_id, chunk, end_stream=is_last_chunk)
+                self.send_webtransport_stream_data(stream_id=stream_id, data=chunk, end_stream=is_last_chunk)
                 total_sent += len(chunk)
             except Exception as e:
-                logger.error(f"Error sending chunk {i // chunk_size + 1} for stream {stream_id}: {e}")
+                logger.error(
+                    "Error sending chunk %d for stream %d: %s",
+                    i // chunk_size + 1,
+                    stream_id,
+                    e,
+                    exc_info=True,
+                )
                 break
         return total_sent
 
-    def _cleanup_session(self, session_id: SessionId) -> None:
+    def _cleanup_session(self, *, session_id: SessionId) -> None:
         """Remove a session and all its associated streams."""
         if session_info := self._sessions.pop(session_id, None):
             self._session_control_streams.pop(session_info.stream_id, None)
             stream_ids_to_remove = list(self._session_owned_streams.pop(session_id, set()))
             for stream_id in stream_ids_to_remove:
-                self._cleanup_stream(stream_id)
-            logger.info(f"Cleaned up session {session_id} and its associated streams.")
+                self._cleanup_stream(stream_id=stream_id)
+            logger.info("Cleaned up session %s and its associated streams.", session_id)
 
-    def _cleanup_stream(self, stream_id: StreamId) -> None:
+    def _cleanup_stream(self, *, stream_id: StreamId) -> None:
         """Remove a single stream from internal tracking."""
         if self._streams.pop(stream_id, None):
             session_id = self._data_stream_to_session.pop(stream_id, None)
             if session_id and session_id in self._session_owned_streams:
                 self._session_owned_streams[session_id].discard(stream_id)
-            asyncio.create_task(self.emit(f"stream_closed:{stream_id}"))
+            asyncio.create_task(self.emit(event_type=f"stream_closed:{stream_id}"))
 
-    async def _handle_datagram_received(self, event: DatagramReceived) -> None:
+    async def _handle_datagram_received(self, *, event: DatagramReceived) -> None:
         """Handle a datagram received from the H3 engine."""
         if connection := self.connection:
             if hasattr(connection, "record_activity"):
@@ -408,30 +443,33 @@ class WebTransportProtocolHandler(EventEmitter):
 
         if session_id := self._session_control_streams.get(event.stream_id):
             if self._sessions.get(session_id):
-                await self.emit(EventType.DATAGRAM_RECEIVED, data={"session_id": session_id, "data": event.data})
+                await self.emit(
+                    event_type=EventType.DATAGRAM_RECEIVED,
+                    data={"session_id": session_id, "data": event.data},
+                )
 
-    async def _handle_h3_event(self, h3_event: H3Event) -> None:
+    async def _handle_h3_event(self, *, h3_event: H3Event) -> None:
         """Route H3 events to their specific handlers."""
         match h3_event:
             case HeadersReceived():
-                await self._handle_session_headers(h3_event)
+                await self._handle_session_headers(event=h3_event)
             case WebTransportStreamDataReceived():
-                await self._handle_webtransport_stream_data(h3_event)
+                await self._handle_webtransport_stream_data(event=h3_event)
             case DatagramReceived():
-                await self._handle_datagram_received(h3_event)
+                await self._handle_datagram_received(event=h3_event)
             case DataReceived():
                 pass
             case _:
-                logger.debug(f"Ignoring unhandled H3 event: {type(h3_event)}")
+                logger.debug("Ignoring unhandled H3 event: %s", type(h3_event))
 
-    async def _handle_session_headers(self, event: HeadersReceived) -> None:
+    async def _handle_session_headers(self, *, event: HeadersReceived) -> None:
         """Handle HEADERS frames for session negotiation."""
         if connection := self.connection:
             if hasattr(connection, "record_activity"):
                 connection.record_activity()
         self._last_activity = get_timestamp()
         headers_dict = event.headers
-        logger.debug(f"H3 headers received on stream {event.stream_id}: {headers_dict}")
+        logger.debug("H3 headers received on stream %d: %s", event.stream_id, headers_dict)
 
         if self._is_client:
             if session_id := self._session_control_streams.get(event.stream_id):
@@ -439,16 +477,20 @@ class WebTransportProtocolHandler(EventEmitter):
                     session = self._sessions[session_id]
                     session.state = SessionState.CONNECTED
                     session.ready_at = get_timestamp()
-                    logger.info(f"Client session {session_id} is ready.")
-                    await self.emit(EventType.SESSION_READY, data=session.to_dict())
+                    logger.info("Client session %s is ready.", session_id)
+                    await self.emit(event_type=EventType.SESSION_READY, data=session.to_dict())
                 elif session_id:
                     status = headers_dict.get(":status", "unknown")
-                    logger.error(f"Session {session_id} creation failed with status {status}")
+                    logger.error("Session %s creation failed with status %s", session_id, status)
                     await self.emit(
-                        EventType.SESSION_CLOSED,
-                        data={"session_id": session_id, "code": 1, "reason": f"HTTP status {status}"},
+                        event_type=EventType.SESSION_CLOSED,
+                        data={
+                            "session_id": session_id,
+                            "code": 1,
+                            "reason": f"HTTP status {status}",
+                        },
                     )
-                    self._cleanup_session(session_id)
+                    self._cleanup_session(session_id=session_id)
         elif headers_dict.get(":method") == "CONNECT" and headers_dict.get(":protocol") == "webtransport":
             session_id = generate_session_id()
             app_headers = headers_dict
@@ -460,24 +502,36 @@ class WebTransportProtocolHandler(EventEmitter):
                 path=app_headers.get(":path", "/"),
                 headers=app_headers,
             )
-            self._register_session(session_id, session_info)
+            self._register_session(session_id=session_id, session_info=session_info)
             event_data = session_info.to_dict()
             if connection := self.connection:
                 event_data["connection"] = connection
-            logger.info(f"Received WebTransport session request: {session_id} for path '{session_info.path}'")
-            await self.emit(EventType.SESSION_REQUEST, data=event_data)
+            logger.info(
+                "Received WebTransport session request: %s for path '%s'",
+                session_id,
+                session_info.path,
+            )
+            await self.emit(event_type=EventType.SESSION_REQUEST, data=event_data)
 
-    async def _handle_stream_reset(self, event: StreamReset) -> None:
+    async def _handle_stream_reset(self, *, event: StreamReset) -> None:
         """Handle a reset stream event."""
         if session_id := self._session_control_streams.get(event.stream_id):
-            logger.info(f"Session {session_id} closed due to control stream {event.stream_id} reset.")
-            await self.emit(
-                EventType.SESSION_CLOSED,
-                data={"session_id": session_id, "code": event.error_code, "reason": "Control stream reset"},
+            logger.info(
+                "Session %s closed due to control stream %d reset.",
+                session_id,
+                event.stream_id,
             )
-            self._cleanup_session(session_id)
+            await self.emit(
+                event_type=EventType.SESSION_CLOSED,
+                data={
+                    "session_id": session_id,
+                    "code": event.error_code,
+                    "reason": "Control stream reset",
+                },
+            )
+            self._cleanup_session(session_id=session_id)
 
-    async def _handle_webtransport_stream_data(self, event: WebTransportStreamDataReceived) -> None:
+    async def _handle_webtransport_stream_data(self, *, event: WebTransportStreamDataReceived) -> None:
         """Handle data received on a WebTransport data stream."""
         if connection := self.connection:
             if hasattr(connection, "record_activity"):
@@ -487,30 +541,39 @@ class WebTransportProtocolHandler(EventEmitter):
 
         if stream_id not in self._data_stream_to_session:
             if not (session_id := self._session_control_streams.get(session_stream_id)):
-                if self._quic._state not in (QuicConnectionState.CLOSING, QuicConnectionState.DRAINING):
+                if self._quic._state not in (
+                    QuicConnectionState.CLOSING,
+                    QuicConnectionState.DRAINING,
+                ):
                     logger.error(
-                        f"No session mapping found for session_stream_id {session_stream_id} on new stream {stream_id}."
+                        "No session mapping found for session_stream_id %d on new stream %d.",
+                        session_stream_id,
+                        stream_id,
                     )
                 return
 
-            direction = protocol_utils.get_stream_direction_from_id(stream_id, is_client=self._is_client)
-            self._register_stream(session_id, stream_id, direction)
+            direction = protocol_utils.get_stream_direction_from_id(stream_id=stream_id, is_client=self._is_client)
+            self._register_stream(session_id=session_id, stream_id=stream_id, direction=direction)
 
             event_data = self._streams[stream_id].to_dict()
-            event_data["initial_payload"] = {"data": event.data, "end_stream": event.stream_ended}
-            await self.emit(EventType.STREAM_OPENED, data=event_data)
+            event_data["initial_payload"] = {
+                "data": event.data,
+                "end_stream": event.stream_ended,
+            }
+            await self.emit(event_type=EventType.STREAM_OPENED, data=event_data)
         else:
             await self.emit(
-                f"stream_data_received:{stream_id}", data={"data": event.data, "end_stream": event.stream_ended}
+                event_type=f"stream_data_received:{stream_id}",
+                data={"data": event.data, "end_stream": event.stream_ended},
             )
 
-    def _register_session(self, session_id: SessionId, session_info: WebTransportSessionInfo) -> None:
+    def _register_session(self, *, session_id: SessionId, session_info: WebTransportSessionInfo) -> None:
         """Add a new session to internal tracking."""
         self._sessions[session_id] = session_info
         self._session_control_streams[session_info.stream_id] = session_id
         self._stats["sessions_created"] += 1
 
-    def _register_stream(self, session_id: SessionId, stream_id: StreamId, direction: StreamDirection) -> StreamInfo:
+    def _register_stream(self, *, session_id: SessionId, stream_id: StreamId, direction: StreamDirection) -> StreamInfo:
         """Add a new stream to internal tracking."""
         stream_info = StreamInfo(
             stream_id=stream_id,
@@ -523,7 +586,7 @@ class WebTransportProtocolHandler(EventEmitter):
         self._data_stream_to_session[stream_id] = session_id
         self._session_owned_streams[session_id].add(stream_id)
         self._stats["streams_created"] += 1
-        logger.debug(f"Registered {direction} stream {stream_id} for session {session_id}")
+        logger.debug("Registered %s stream %d for session %s", direction, stream_id, session_id)
         return stream_info
 
     def _trigger_transmission(self) -> None:
@@ -532,7 +595,7 @@ class WebTransportProtocolHandler(EventEmitter):
             if hasattr(connection, "_transmit"):
                 connection._transmit()
 
-    def _update_stream_state_on_receive_end(self, stream_id: StreamId) -> None:
+    def _update_stream_state_on_receive_end(self, *, stream_id: StreamId) -> None:
         """Update stream state when its receiving side is closed."""
         if not (stream_info := self._streams.get(stream_id)):
             return
@@ -541,9 +604,9 @@ class WebTransportProtocolHandler(EventEmitter):
             new_state = StreamState.CLOSED
         stream_info.state = new_state
         if new_state == StreamState.CLOSED:
-            self._cleanup_stream(stream_id)
+            self._cleanup_stream(stream_id=stream_id)
 
-    def _update_stream_state_on_send_end(self, stream_id: StreamId) -> None:
+    def _update_stream_state_on_send_end(self, *, stream_id: StreamId) -> None:
         """Update stream state when its sending side is closed."""
         if not (stream_info := self._streams.get(stream_id)):
             return
@@ -552,4 +615,4 @@ class WebTransportProtocolHandler(EventEmitter):
             new_state = StreamState.CLOSED
         stream_info.state = new_state
         if new_state == StreamState.CLOSED:
-            self._cleanup_stream(stream_id)
+            self._cleanup_stream(stream_id=stream_id)

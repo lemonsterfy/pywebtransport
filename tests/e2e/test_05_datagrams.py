@@ -32,16 +32,16 @@ async def test_basic_datagram() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
-            logger.info(f"Datagram stream ready (Max size: {datagrams.max_datagram_size} bytes).")
+            logger.info("Datagram stream ready (Max size: %s bytes).", datagrams.max_datagram_size)
 
             test_message = b"Hello, Datagram!"
             expected_response = b"ECHO: " + test_message
 
-            logger.info(f"Sending datagram: {test_message!r}")
-            await datagrams.send(test_message)
+            logger.info("Sending datagram: %r", test_message)
+            await datagrams.send(data=test_message)
 
             logger.info("Waiting for echo...")
             response = await datagrams.receive()
@@ -53,10 +53,10 @@ async def test_basic_datagram() -> bool:
                 logger.error("FAILURE: Datagram echo mismatch.")
                 return False
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -67,25 +67,25 @@ async def test_multiple_datagrams() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
 
-            logger.info(f"Sending {num_datagrams} datagrams sequentially...")
+            logger.info("Sending %d datagrams sequentially...", num_datagrams)
             for i in range(num_datagrams):
-                await datagrams.send(f"Datagram message {i + 1}".encode())
+                await datagrams.send(data=f"Datagram message {i + 1}".encode())
 
             stats = datagrams.stats
             if stats.get("datagrams_sent", 0) >= num_datagrams:
-                logger.info(f"SUCCESS: {stats.get('datagrams_sent', 0)} datagrams sent.")
+                logger.info("SUCCESS: %s datagrams sent.", stats.get("datagrams_sent", 0))
                 return True
             else:
                 logger.error(
-                    f"FAILURE: Expected {num_datagrams} sent, but stats show {stats.get('datagrams_sent', 0)}."
+                    "FAILURE: Expected %d sent, but stats show %s.", num_datagrams, stats.get("datagrams_sent", 0)
                 )
                 return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -95,26 +95,26 @@ async def test_datagram_sizes() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
             max_size = datagrams.max_datagram_size
-            logger.info(f"Max datagram size: {max_size} bytes.")
+            logger.info("Max datagram size: %s bytes.", max_size)
 
             logger.info("Testing oversized datagram...")
             try:
                 oversized_data = b"X" * (max_size + 1)
-                await datagrams.send(oversized_data)
+                await datagrams.send(data=oversized_data)
                 logger.error("FAILURE: Sending oversized datagram should have raised an exception.")
                 return False
             except DatagramError:
                 logger.info("SUCCESS: Oversized datagram correctly raised DatagramError.")
                 return True
             except Exception as e:
-                logger.error(f"FAILURE: Unexpected exception for oversized datagram: {e}")
+                logger.error("FAILURE: Unexpected exception for oversized datagram: %s", e)
                 return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -124,19 +124,19 @@ async def test_datagram_priority() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
 
             logger.info("Sending datagrams with different priorities...")
-            await datagrams.send(b"Priority 0", priority=0)
-            await datagrams.send(b"Priority 1", priority=1)
-            await datagrams.send(b"Priority 2", priority=2)
+            await datagrams.send(data=b"Priority 0", priority=0)
+            await datagrams.send(data=b"Priority 1", priority=1)
+            await datagrams.send(data=b"Priority 2", priority=2)
 
             logger.info("SUCCESS: Datagrams sent with priority parameter.")
             return True
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -146,18 +146,18 @@ async def test_datagram_ttl() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
 
             logger.info("Sending datagrams with different TTLs...")
-            await datagrams.send(b"TTL 1.0s", ttl=1.0)
-            await datagrams.send(b"TTL 5.0s", ttl=5.0)
+            await datagrams.send(data=b"TTL 1.0s", ttl=1.0)
+            await datagrams.send(data=b"TTL 5.0s", ttl=5.0)
 
             logger.info("SUCCESS: Datagrams sent with TTL parameter.")
             return True
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -167,13 +167,13 @@ async def test_json_datagrams() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
             json_payload = {"type": "greeting", "message": "Hello, JSON!"}
 
-            logger.info(f"Sending JSON payload: {json_payload}")
-            await datagrams.send_json(json_payload)
+            logger.info("Sending JSON payload: %s", json_payload)
+            await datagrams.send_json(data=json_payload)
 
             await asyncio.sleep(0.1)
 
@@ -185,7 +185,7 @@ async def test_json_datagrams() -> bool:
                 logger.error("FAILURE: JSON datagram was not sent according to stats.")
                 return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -196,21 +196,21 @@ async def test_datagram_burst() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
-            logger.info(f"Starting burst of {burst_size} datagrams...")
+            logger.info("Starting burst of %d datagrams...", burst_size)
             start_time = time.time()
 
-            tasks = [datagrams.send(f"Burst {i}".encode()) for i in range(burst_size)]
+            tasks = [datagrams.send(data=f"Burst {i}".encode()) for i in range(burst_size)]
             await asyncio.gather(*tasks)
             duration = time.time() - start_time
             rate = burst_size / duration if duration > 0 else float("inf")
 
-            logger.info(f"SUCCESS: Sent {burst_size} datagrams in {duration:.3f}s ({rate:.1f} dgrams/s).")
+            logger.info("SUCCESS: Sent %d datagrams in %.3fs (%.1f dgrams/s).", burst_size, duration, rate)
             return True
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -220,21 +220,21 @@ async def test_datagram_queue_behavior() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
 
-            logger.info(f"Initial send buffer size: {datagrams.get_send_buffer_size()}")
-            await datagrams.send(b"Queue test")
-            logger.info(f"Send buffer size after sending: {datagrams.get_send_buffer_size()}")
+            logger.info("Initial send buffer size: %s", datagrams.get_send_buffer_size())
+            await datagrams.send(data=b"Queue test")
+            logger.info("Send buffer size after sending: %s", datagrams.get_send_buffer_size())
 
             await asyncio.sleep(0.1)
-            logger.info(f"Send buffer size after delay: {datagrams.get_send_buffer_size()}")
+            logger.info("Send buffer size after delay: %s", datagrams.get_send_buffer_size())
 
             logger.info("SUCCESS: Datagram queue inspection methods are available.")
             return True
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -260,17 +260,17 @@ async def main() -> int:
         logger.info("")
         try:
             if await test_func():
-                logger.info(f"{test_name}: PASSED")
+                logger.info("%s: PASSED", test_name)
                 passed += 1
             else:
-                logger.error(f"{test_name}: FAILED")
+                logger.error("%s: FAILED", test_name)
         except Exception as e:
-            logger.error(f"{test_name}: CRASHED - {e}", exc_info=True)
+            logger.error("%s: CRASHED - %s", test_name, e, exc_info=True)
         await asyncio.sleep(1)
 
     logger.info("")
     logger.info("=" * 60)
-    logger.info(f"Test 05 Results: {passed}/{total} passed")
+    logger.info("Test 05 Results: %d/%d passed", passed, total)
 
     if passed == total:
         logger.info("TEST 05 PASSED: All datagram tests successful!")
@@ -290,6 +290,6 @@ if __name__ == "__main__":
         logger.warning("\nTest interrupted by user.")
         exit_code = 130
     except Exception as e:
-        logger.critical(f"Test suite crashed with an unhandled exception: {e}", exc_info=True)
+        logger.critical("Test suite crashed with an unhandled exception: %s", e, exc_info=True)
     finally:
         sys.exit(exit_code)

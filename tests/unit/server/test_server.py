@@ -246,10 +246,10 @@ class TestWebTransportServer:
     ) -> None:
         mock_protocol = mocker.create_autospec(WebTransportServerProtocol, instance=True)
 
-        await server._handle_new_connection(mocker.MagicMock(), mock_protocol)
+        await server._handle_new_connection(transport=mocker.MagicMock(), protocol=mock_protocol)
 
         mock_webtransport_connection.accept.assert_awaited_once()
-        mock_connection_manager.add_connection.assert_awaited_once_with(mock_webtransport_connection)
+        mock_connection_manager.add_connection.assert_awaited_once_with(connection=mock_webtransport_connection)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -273,11 +273,11 @@ class TestWebTransportServer:
     ) -> None:
         server_emitter_mock = mocker.patch.object(server, "emit", new_callable=mocker.AsyncMock)
         captured_handler = mocker.MagicMock()
-        mock_webtransport_connection.on.side_effect = lambda event, handler: captured_handler.set(handler)
+        mock_webtransport_connection.on.side_effect = lambda *, event_type, handler: captured_handler.set(handler)
         original_server_ref = weakref.ref(server) if server_ref_valid else lambda: None
         original_conn_ref = weakref.ref(mock_webtransport_connection) if conn_ref_valid else lambda: None
         mocker.patch("weakref.ref", side_effect=[original_server_ref, original_conn_ref])
-        await server._handle_new_connection(mocker.MagicMock(), mocker.MagicMock())
+        await server._handle_new_connection(transport=mocker.MagicMock(), protocol=mocker.MagicMock())
         event_handler = captured_handler.set.call_args[0][0]
 
         await event_handler(Event(type=EventType.SESSION_REQUEST, data=event_data))
@@ -285,7 +285,7 @@ class TestWebTransportServer:
         if should_emit:
             server_emitter_mock.assert_awaited_once()
             args, kwargs = server_emitter_mock.call_args
-            assert args[0] == EventType.SESSION_REQUEST
+            assert kwargs["event_type"] == EventType.SESSION_REQUEST
             assert kwargs["data"]["connection"] is mock_webtransport_connection
         else:
             server_emitter_mock.assert_not_called()
@@ -316,7 +316,7 @@ class TestWebTransportServer:
     ) -> None:
         mock_webtransport_connection.accept.side_effect = ConnectionError("Accept failed")
 
-        await server._handle_new_connection(mocker.MagicMock(), mocker.MagicMock())
+        await server._handle_new_connection(transport=mocker.MagicMock(), protocol=mocker.MagicMock())
 
         mock_webtransport_connection.close.assert_awaited_once()
         mock_connection_manager.add_connection.assert_not_called()
@@ -328,7 +328,7 @@ class TestWebTransportServer:
         mock_webtransport_connection.accept.side_effect = ConnectionError("Accept failed")
         type(mock_webtransport_connection).is_closed = mocker.PropertyMock(return_value=True)
 
-        await server._handle_new_connection(mocker.MagicMock(), mocker.MagicMock())
+        await server._handle_new_connection(transport=mocker.MagicMock(), protocol=mocker.MagicMock())
 
         mock_webtransport_connection.close.assert_not_called()
         assert server._stats.connections_rejected == 1
@@ -341,7 +341,7 @@ class TestWebTransportServer:
         mock_transport.close.side_effect = OSError("Transport busy")
         mock_webtransport_connection.accept.side_effect = ConnectionError("Accept failed")
 
-        await server._handle_new_connection(mock_transport, mocker.MagicMock())
+        await server._handle_new_connection(transport=mock_transport, protocol=mocker.MagicMock())
 
         assert server._stats.connection_errors == 1
 
@@ -459,7 +459,7 @@ class TestWebTransportServerProtocol:
     def protocol(self, mocker: MockerFixture, mock_server: Any) -> WebTransportServerProtocol:
         mocker.patch("aioquic.asyncio.protocol.QuicConnectionProtocol.__init__", return_value=None)
         mock_quic_conn = mocker.MagicMock()
-        protocol = WebTransportServerProtocol(mock_server, quic=mock_quic_conn)
+        protocol = WebTransportServerProtocol(server=mock_server, quic=mock_quic_conn)
         protocol._transport = mocker.MagicMock()
         return protocol
 
@@ -472,13 +472,13 @@ class TestWebTransportServerProtocol:
         mock_super_made = mocker.patch("aioquic.asyncio.protocol.QuicConnectionProtocol.connection_made")
         mock_transport = mocker.MagicMock()
 
-        protocol.connection_made(mock_transport)
+        protocol.connection_made(transport=mock_transport)
         await asyncio.sleep(0)
 
         mock_super_made.assert_called_once_with(mock_transport)
         server = protocol._server_ref()
         assert server is not None
-        cast(Any, server._handle_new_connection).assert_awaited_once_with(mock_transport, protocol)
+        cast(Any, server._handle_new_connection).assert_awaited_once_with(transport=mock_transport, protocol=protocol)
         assert protocol in server._active_protocols
         if protocol._event_processor_task:
             protocol._event_processor_task.cancel()
@@ -487,7 +487,7 @@ class TestWebTransportServerProtocol:
         mock_super_lost = mocker.patch("aioquic.asyncio.protocol.QuicConnectionProtocol.connection_lost")
         mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_connection._on_connection_lost = mocker.MagicMock()
-        protocol.set_connection(mock_connection)
+        protocol.set_connection(connection=mock_connection)
         protocol._event_processor_task = mocker.create_autospec(asyncio.Task, instance=True)
         protocol._event_processor_task.done.return_value = False
         test_exception = RuntimeError("Connection dropped")
@@ -495,10 +495,10 @@ class TestWebTransportServerProtocol:
         assert server
         server._active_protocols.add(protocol)
 
-        protocol.connection_lost(test_exception)
+        protocol.connection_lost(exc=test_exception)
 
         mock_super_lost.assert_called_once_with(test_exception)
-        mock_connection._on_connection_lost.assert_called_once_with(test_exception)
+        mock_connection._on_connection_lost.assert_called_once_with(exc=test_exception)
         protocol._event_processor_task.cancel.assert_called_once()
         assert protocol not in server._active_protocols
 
@@ -520,13 +520,13 @@ class TestWebTransportServerProtocol:
         task.done.return_value = task_done
         protocol._event_processor_task = task
         if has_connection:
-            protocol.set_connection(mock_connection)
+            protocol.set_connection(connection=mock_connection)
         if not server_exists:
             mock_ref = mocker.MagicMock(spec=weakref.ReferenceType)
             mock_ref.return_value = None
             protocol._server_ref = mock_ref
 
-        protocol.connection_lost(None)
+        protocol.connection_lost(exc=None)
 
         mock_super_lost.assert_called_once()
         assert task.cancel.called is not task_done
@@ -539,14 +539,14 @@ class TestWebTransportServerProtocol:
         mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_connection.protocol_handler.handle_quic_event = mocker.AsyncMock()
         mock_event = mocker.MagicMock()
-        protocol.connection_made(mocker.MagicMock())
-        protocol.set_connection(mock_connection)
+        protocol.connection_made(transport=mocker.MagicMock())
+        protocol.set_connection(connection=mock_connection)
         await asyncio.sleep(0)
 
-        protocol.quic_event_received(mock_event)
+        protocol.quic_event_received(event=mock_event)
         await asyncio.sleep(0)
 
-        mock_connection.protocol_handler.handle_quic_event.assert_awaited_once_with(mock_event)
+        mock_connection.protocol_handler.handle_quic_event.assert_awaited_once_with(event=mock_event)
         if protocol._event_processor_task:
             protocol._event_processor_task.cancel()
 
@@ -554,9 +554,9 @@ class TestWebTransportServerProtocol:
     async def test_process_events_loop_waits_for_connection(
         self, protocol: WebTransportServerProtocol, mocker: MockerFixture
     ) -> None:
-        protocol.connection_made(mocker.MagicMock())
+        protocol.connection_made(transport=mocker.MagicMock())
         await asyncio.sleep(0)
-        protocol.quic_event_received(mocker.MagicMock())
+        protocol.quic_event_received(event=mocker.MagicMock())
 
         assert protocol._event_queue.qsize() == 1
         await asyncio.sleep(0.02)
@@ -571,11 +571,11 @@ class TestWebTransportServerProtocol:
     ) -> None:
         mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_connection.protocol_handler.handle_quic_event = mocker.AsyncMock(side_effect=ValueError("handler error"))
-        protocol.connection_made(mocker.MagicMock())
-        protocol.set_connection(mock_connection)
+        protocol.connection_made(transport=mocker.MagicMock())
+        protocol.set_connection(connection=mock_connection)
         await asyncio.sleep(0)
 
-        protocol.quic_event_received(mocker.MagicMock())
+        protocol.quic_event_received(event=mocker.MagicMock())
         await asyncio.sleep(0)
 
         mock_connection.protocol_handler.handle_quic_event.assert_awaited_once()
@@ -588,11 +588,11 @@ class TestWebTransportServerProtocol:
     ) -> None:
         mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         type(mock_connection).protocol_handler = mocker.PropertyMock(return_value=None)
-        protocol.connection_made(mocker.MagicMock())
-        protocol.set_connection(mock_connection)
+        protocol.connection_made(transport=mocker.MagicMock())
+        protocol.set_connection(connection=mock_connection)
         await asyncio.sleep(0)
 
-        protocol.quic_event_received(mocker.MagicMock())
+        protocol.quic_event_received(event=mocker.MagicMock())
         await asyncio.sleep(0)
 
         if protocol._event_processor_task:
@@ -603,7 +603,7 @@ class TestWebTransportServerProtocol:
         self, protocol: WebTransportServerProtocol, mocker: MockerFixture
     ) -> None:
         mocker.patch.object(protocol._event_queue, "get", side_effect=RuntimeError("queue failed"))
-        protocol.connection_made(mocker.MagicMock())
+        protocol.connection_made(transport=mocker.MagicMock())
 
         await asyncio.sleep(0)
 
@@ -616,13 +616,13 @@ class TestWebTransportServerProtocol:
         mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
         mock_connection.protocol_handler.handle_quic_event = mocker.AsyncMock()
         mock_event = mocker.MagicMock()
-        protocol.connection_made(mocker.MagicMock())
-        protocol.quic_event_received(mock_event)
+        protocol.connection_made(transport=mocker.MagicMock())
+        protocol.quic_event_received(event=mock_event)
 
-        protocol.set_connection(mock_connection)
+        protocol.set_connection(connection=mock_connection)
         await asyncio.sleep(0)
 
-        mock_connection.protocol_handler.handle_quic_event.assert_awaited_once_with(mock_event)
+        mock_connection.protocol_handler.handle_quic_event.assert_awaited_once_with(event=mock_event)
         if protocol._event_processor_task:
             protocol._event_processor_task.cancel()
 

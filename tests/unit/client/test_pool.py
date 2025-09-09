@@ -18,9 +18,9 @@ class TestClientPool:
         return mocker.MagicMock(spec=ClientConfig)
 
     @pytest.fixture
-    def mock_client_create(self, mocker: MockerFixture, mock_webtransport_client: Any) -> Any:
+    def mock_client_constructor(self, mocker: MockerFixture, mock_webtransport_client: Any) -> Any:
         return mocker.patch(
-            "pywebtransport.client.pool.WebTransportClient.create",
+            "pywebtransport.client.pool.WebTransportClient",
             return_value=mock_webtransport_client,
         )
 
@@ -33,7 +33,7 @@ class TestClientPool:
         return client
 
     @pytest.fixture
-    async def pool(self, mock_client_create: Any) -> AsyncGenerator[ClientPool, None]:
+    async def pool(self, mock_client_constructor: Any) -> AsyncGenerator[ClientPool, None]:
         pool_instance = ClientPool.create(num_clients=3)
         async with pool_instance as activated_pool:
             yield activated_pool
@@ -50,14 +50,14 @@ class TestClientPool:
 
     @pytest.mark.asyncio
     async def test_aenter_and_aexit(
-        self, mocker: MockerFixture, mock_webtransport_client: Any, mock_client_create: Any
+        self, mocker: MockerFixture, mock_webtransport_client: Any, mock_client_constructor: Any
     ) -> None:
         num_clients = 3
         pool = ClientPool.create(num_clients=num_clients)
 
         async with pool as returned_pool:
             assert returned_pool is pool
-            assert mock_client_create.call_count == num_clients
+            assert mock_client_constructor.call_count == num_clients
             assert pool.get_client_count() == num_clients
             assert all(c is mock_webtransport_client for c in pool._clients)
             assert mock_webtransport_client.__aenter__.call_count == num_clients
@@ -90,12 +90,14 @@ class TestClientPool:
     ) -> None:
         mock_session = mocker.MagicMock(spec=WebTransportSession)
         mock_webtransport_client.connect.return_value = mock_session
+        url = "https://example.com"
 
-        sessions = await pool.connect_all("https://example.com")
+        sessions = await pool.connect_all(url=url)
 
         assert len(sessions) == 3
         assert all(s is mock_session for s in sessions)
         assert mock_webtransport_client.connect.call_count == 3
+        mock_webtransport_client.connect.assert_awaited_with(url=url)
 
     @pytest.mark.asyncio
     async def test_aenter_activation_failure_and_cleanup_failure(
@@ -104,7 +106,7 @@ class TestClientPool:
         failing_client = mocker.create_autospec(WebTransportClient, instance=True)
         failing_client.__aenter__ = mocker.AsyncMock(side_effect=ValueError("Activation failed"))
         failing_client.close = mocker.AsyncMock(side_effect=IOError("Cleanup failed"))
-        mocker.patch("pywebtransport.client.pool.WebTransportClient.create", return_value=failing_client)
+        mocker.patch("pywebtransport.client.pool.WebTransportClient", return_value=failing_client)
         pool = ClientPool.create(num_clients=1)
 
         with pytest.raises(ExceptionGroup) as exc_info:
@@ -127,13 +129,13 @@ class TestClientPool:
         failing_client.__aenter__ = mocker.AsyncMock(return_value=failing_client)
         failing_client.connect = mocker.AsyncMock(side_effect=ClientError("Connection failed"))
         mocker.patch(
-            "pywebtransport.client.pool.WebTransportClient.create",
+            "pywebtransport.client.pool.WebTransportClient",
             side_effect=[successful_client, failing_client],
         )
         pool = ClientPool.create(num_clients=2)
 
         async with pool:
-            sessions = await pool.connect_all("https://example.com")
+            sessions = await pool.connect_all(url="https://example.com")
 
             assert len(sessions) == 1
             assert sessions[0] is mock_session
@@ -153,24 +155,28 @@ class TestClientPool:
         assert pool.get_client_count() == 0
 
     @pytest.mark.asyncio
-    async def test_methods_on_activated_empty_pool(self, mock_client_create: Any) -> None:
+    async def test_methods_on_activated_empty_pool(self, mock_client_constructor: Any) -> None:
         pool = ClientPool.create(num_clients=1)
         async with pool:
             await pool.close_all()
             assert pool.get_client_count() == 0
 
-            assert await pool.connect_all("https://example.com") == []
+            assert await pool.connect_all(url="https://example.com") == []
             with pytest.raises(ClientError, match="No clients available"):
                 await pool.get_client()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "method_name, args",
-        [("get_client", ()), ("connect_all", ("https://example.com",)), ("close_all", ())],
+        "method_name, kwargs",
+        [
+            ("get_client", {}),
+            ("connect_all", {"url": "https://example.com"}),
+            ("close_all", {}),
+        ],
     )
-    async def test_methods_raise_if_not_activated(self, method_name: str, args: tuple[Any, ...]) -> None:
+    async def test_methods_raise_if_not_activated(self, method_name: str, kwargs: dict[str, Any]) -> None:
         pool = ClientPool.create(num_clients=1)
         method_to_test = getattr(pool, method_name)
 
         with pytest.raises(ClientError, match="ClientPool has not been activated"):
-            await method_to_test(*args)
+            await method_to_test(**kwargs)

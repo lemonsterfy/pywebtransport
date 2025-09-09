@@ -182,7 +182,7 @@ class TestServerCluster:
     @pytest.mark.asyncio
     async def test_add_server(self, cluster: ServerCluster, server_configs: list[ServerConfig]) -> None:
         new_config = ServerConfig(bind_port=8003, certfile="c3.pem", keyfile="k3.pem")
-        result = await cluster.add_server(new_config)
+        result = await cluster.add_server(config=new_config)
         assert result is None
         assert len(cluster._configs) == 3
 
@@ -190,7 +190,7 @@ class TestServerCluster:
         assert len(cluster._servers) == 3
 
         another_config = ServerConfig(bind_port=8004, certfile="c4.pem", keyfile="k4.pem")
-        new_server = await cluster.add_server(another_config)
+        new_server = await cluster.add_server(config=another_config)
         assert new_server is not None
         assert len(cluster._servers) == 4
         cast(Any, new_server.listen).assert_awaited_once()
@@ -206,7 +206,7 @@ class TestServerCluster:
         created_server_ref = []
 
         async def controlled_creation(*args: Any, **kwargs: Any) -> WebTransportServer:
-            server = await original_create(*args, **kwargs)
+            server = await original_create(**kwargs)
             created_server_ref.append(server)
             creation_started.set()
             await asyncio.sleep(0.01)
@@ -220,7 +220,7 @@ class TestServerCluster:
             async with cluster._lock:
                 cluster._running = False
 
-        add_task = asyncio.create_task(cluster.add_server(new_config))
+        add_task = asyncio.create_task(cluster.add_server(config=new_config))
         stop_task = asyncio.create_task(stop_cluster_concurrently())
 
         result = await add_task
@@ -241,7 +241,7 @@ class TestServerCluster:
         )
         new_config = ServerConfig(bind_port=8003, certfile="c3.pem", keyfile="k3.pem")
 
-        result = await cluster.add_server(new_config)
+        result = await cluster.add_server(config=new_config)
 
         assert result is None
         assert await cluster.get_server_count() == initial_count
@@ -298,13 +298,13 @@ class TestServerCluster:
     @pytest.mark.parametrize(
         "method_name, method_args",
         [
-            ("start_all", ()),
-            ("stop_all", ()),
-            ("add_server", (ServerConfig(),)),
+            ("start_all", {}),
+            ("stop_all", {}),
+            ("add_server", {"config": ServerConfig()}),
             ("remove_server", {"host": "localhost", "port": 8000}),
-            ("get_cluster_stats", ()),
-            ("get_server_count", ()),
-            ("get_servers", ()),
+            ("get_cluster_stats", {}),
+            ("get_server_count", {}),
+            ("get_servers", {}),
         ],
     )
     async def test_public_methods_raise_if_not_activated(
@@ -314,7 +314,4 @@ class TestServerCluster:
         method = getattr(cluster, method_name)
 
         with pytest.raises(ServerError, match="ServerCluster has not been activated"):
-            if isinstance(method_args, dict):
-                await method(**method_args)
-            else:
-                await method(*method_args)
+            await method(**method_args)

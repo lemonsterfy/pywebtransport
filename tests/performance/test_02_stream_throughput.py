@@ -4,9 +4,8 @@ Performance benchmark for WebTransport stream throughput.
 
 import asyncio
 import ssl
-from collections.abc import Callable
 from hashlib import md5
-from typing import Final
+from typing import Final, Protocol
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
@@ -22,6 +21,12 @@ PRODUCE_ENDPOINT: Final[str] = "/produce"
 _test_data_cache: dict[int, bytes] = {}
 
 
+class DataFactoryProtocol(Protocol):
+    """A protocol for the test data factory function."""
+
+    def __call__(self, *, size: int) -> bytes: ...
+
+
 @pytest.fixture(scope="module")
 def client_config() -> ClientConfig:
     """Provide a client configuration with generous timeouts for large data transfers."""
@@ -34,10 +39,10 @@ def client_config() -> ClientConfig:
 
 
 @pytest.fixture(scope="module")
-def get_test_data() -> Callable[[int], bytes]:
+def get_test_data() -> DataFactoryProtocol:
     """Provide a factory function to generate and cache test data of a given size."""
 
-    def _data_factory(size: int) -> bytes:
+    def _data_factory(*, size: int) -> bytes:
         if size not in _test_data_cache:
             _test_data_cache[size] = md5(f"pywebtransport_test_data_{size}".encode()).digest() * (size // 16 + 1)
         return _test_data_cache[size][:size]
@@ -53,18 +58,18 @@ class TestStreamThroughput:
         self,
         benchmark: BenchmarkFixture,
         client_config: ClientConfig,
-        get_test_data: Callable[[int], bytes],
+        get_test_data: DataFactoryProtocol,
         data_size: int,
     ) -> None:
         """Benchmark bidirectional stream echo performance."""
-        test_data = get_test_data(data_size)
+        test_data = get_test_data(size=data_size)
         expected_response = b"ECHO: " + test_data
 
         async def run_bidi_transfer() -> bytes:
-            async with WebTransportClient.create(config=client_config) as client:
-                session = await client.connect(f"{SERVER_URL}{ECHO_ENDPOINT}")
+            async with WebTransportClient(config=client_config) as client:
+                session = await client.connect(url=f"{SERVER_URL}{ECHO_ENDPOINT}")
                 stream = await session.create_bidirectional_stream()
-                await stream.write_all(test_data)
+                await stream.write_all(data=test_data)
                 response = await stream.read_all()
                 return response
 
@@ -82,17 +87,17 @@ class TestStreamThroughput:
         self,
         benchmark: BenchmarkFixture,
         client_config: ClientConfig,
-        get_test_data: Callable[[int], bytes],
+        get_test_data: DataFactoryProtocol,
         data_size: int,
     ) -> None:
         """Benchmark unidirectional stream upload performance."""
-        test_data = get_test_data(data_size)
+        test_data = get_test_data(size=data_size)
 
         async def run_upload_transfer() -> None:
-            async with WebTransportClient.create(config=client_config) as client:
-                session = await client.connect(f"{SERVER_URL}{DISCARD_ENDPOINT}")
+            async with WebTransportClient(config=client_config) as client:
+                session = await client.connect(url=f"{SERVER_URL}{DISCARD_ENDPOINT}")
                 stream = await session.create_unidirectional_stream()
-                await stream.write_all(test_data)
+                await stream.write_all(data=test_data)
 
         benchmark(lambda: asyncio.run(run_upload_transfer()))
 
@@ -109,10 +114,10 @@ class TestStreamThroughput:
         """Benchmark stream download performance."""
 
         async def run_download_transfer() -> bytes:
-            async with WebTransportClient.create(config=client_config) as client:
-                session = await client.connect(f"{SERVER_URL}{PRODUCE_ENDPOINT}")
+            async with WebTransportClient(config=client_config) as client:
+                session = await client.connect(url=f"{SERVER_URL}{PRODUCE_ENDPOINT}")
                 stream = await session.create_bidirectional_stream()
-                await stream.write_all(f"SEND:{data_size}".encode())
+                await stream.write_all(data=f"SEND:{data_size}".encode())
                 response = await stream.read_all()
                 return response
 

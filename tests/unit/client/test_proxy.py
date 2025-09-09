@@ -61,7 +61,7 @@ class TestWebTransportProxy:
     @pytest.fixture(autouse=True)
     def setup_common_mocks(self, mocker: MockerFixture, mock_underlying_client: Any) -> None:
         mocker.patch(
-            "pywebtransport.client.proxy.WebTransportClient.create",
+            "pywebtransport.client.proxy.WebTransportClient",
             return_value=mock_underlying_client,
         )
 
@@ -94,10 +94,10 @@ class TestWebTransportProxy:
         mock_proxy_session.create_bidirectional_stream.return_value = mock_tunnel_stream
         mock_tunnel_stream.read.return_value = b"HTTP/1.1 200 OK\r\n\r\n"
 
-        tunnel = await proxy.connect_through_proxy(self.TARGET_URL)
+        tunnel = await proxy.connect_through_proxy(target_url=self.TARGET_URL)
 
         assert tunnel is mock_tunnel_stream
-        mock_underlying_client.connect.assert_awaited_once_with(self.PROXY_URL, headers=None, timeout=10.0)
+        mock_underlying_client.connect.assert_awaited_once_with(url=self.PROXY_URL, headers=None, timeout=10.0)
         mock_proxy_session.create_bidirectional_stream.assert_awaited_once()
         mock_tunnel_stream.write.assert_awaited_once()
         mock_tunnel_stream.read.assert_awaited_once()
@@ -114,7 +114,7 @@ class TestWebTransportProxy:
         mock_tunnel_stream.read.return_value = b"HTTP/1.1 200 OK\r\n\r\n"
         proxy._proxy_session = mock_proxy_session
 
-        await proxy.connect_through_proxy(self.TARGET_URL)
+        await proxy.connect_through_proxy(target_url=self.TARGET_URL)
 
         mock_underlying_client.connect.assert_not_awaited()
         mock_proxy_session.create_bidirectional_stream.assert_awaited_once()
@@ -150,7 +150,7 @@ class TestWebTransportProxy:
         mock_underlying_client.connect.side_effect = TimeoutError("Proxy timeout")
 
         with pytest.raises(ConnectionError, match="Failed to establish proxy session"):
-            await proxy.connect_through_proxy(self.TARGET_URL)
+            await proxy.connect_through_proxy(target_url=self.TARGET_URL)
 
     @pytest.mark.asyncio
     async def test_connect_proxy_returns_bad_response(
@@ -165,7 +165,7 @@ class TestWebTransportProxy:
         mock_tunnel_stream.read.return_value = b"HTTP/1.1 500 Internal Server Error\r\n\r\n"
 
         with pytest.raises(ClientError, match="Proxy error"):
-            await proxy.connect_through_proxy(self.TARGET_URL)
+            await proxy.connect_through_proxy(target_url=self.TARGET_URL)
 
         mock_tunnel_stream.close.assert_awaited_once()
 
@@ -182,7 +182,7 @@ class TestWebTransportProxy:
         mock_tunnel_stream.read.side_effect = asyncio.TimeoutError
 
         with pytest.raises(TimeoutError, match="Timeout while establishing tunnel"):
-            await proxy.connect_through_proxy(self.TARGET_URL)
+            await proxy.connect_through_proxy(target_url=self.TARGET_URL)
 
         mock_tunnel_stream.close.assert_awaited_once()
 
@@ -194,7 +194,7 @@ class TestWebTransportProxy:
         proxy._proxy_session = None
 
         with pytest.raises(SessionError, match="Proxy session is not available"):
-            await proxy.connect_through_proxy(self.TARGET_URL)
+            await proxy.connect_through_proxy(target_url=self.TARGET_URL)
 
     @pytest.mark.asyncio
     async def test_connect_failure_with_already_closed_stream(
@@ -210,22 +210,22 @@ class TestWebTransportProxy:
         mock_tunnel_stream.is_closed = True
 
         with pytest.raises(ValueError, match="Write failed"):
-            await proxy.connect_through_proxy(self.TARGET_URL)
+            await proxy.connect_through_proxy(target_url=self.TARGET_URL)
 
         mock_tunnel_stream.close.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "method_name, args",
+        "method_name, kwargs",
         [
-            ("close", ()),
-            ("connect_through_proxy", ("https://target.com",)),
-            ("_ensure_proxy_session", (None, 10.0)),
+            ("close", {}),
+            ("connect_through_proxy", {"target_url": "https://target.com"}),
+            ("_ensure_proxy_session", {"headers": None, "timeout": 10.0}),
         ],
     )
-    async def test_methods_raise_if_not_activated(self, method_name: str, args: tuple[Any, ...]) -> None:
+    async def test_methods_raise_if_not_activated(self, method_name: str, kwargs: dict[str, Any]) -> None:
         proxy = WebTransportProxy(proxy_url=self.PROXY_URL)
         method_to_test = getattr(proxy, method_name)
 
         with pytest.raises(ClientError, match="WebTransportProxy has not been activated"):
-            await method_to_test(*args)
+            await method_to_test(**kwargs)

@@ -1,36 +1,60 @@
 """Unit tests for the pywebtransport.constants module."""
 
+import ssl
 from enum import IntEnum
 
 import pytest
-from pytest_mock import MockerFixture
 
 from pywebtransport import __version__ as project_version
 from pywebtransport.constants import (
+    DEFAULT_ACCESS_LOG,
+    DEFAULT_ALPN_PROTOCOLS,
+    DEFAULT_AUTO_RECONNECT,
+    DEFAULT_BIND_HOST,
+    DEFAULT_CLIENT_VERIFY_MODE,
+    DEFAULT_CONGESTION_CONTROL_ALGORITHM,
+    DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_DEBUG,
+    DEFAULT_DEV_PORT,
+    DEFAULT_KEEP_ALIVE,
     DEFAULT_LOG_LEVEL,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_MAX_STREAMS,
+    DEFAULT_SERVER_MAX_CONNECTIONS,
+    DEFAULT_SERVER_VERIFY_MODE,
+    DEFAULT_VERSION,
+    DRAFT_VERSION,
+    MAX_STREAM_ID,
     ORIGIN_HEADER,
+    SETTINGS_ENABLE_WEBTRANSPORT,
+    SUPPORTED_CONGESTION_CONTROL_ALGORITHMS,
     USER_AGENT_HEADER,
+    WEBTRANSPORT_H3_BIDI_STREAM_TYPE,
+    WEBTRANSPORT_HEADER,
     WEBTRANSPORT_SCHEMES,
     Defaults,
     ErrorCodes,
-    WebTransportConstants,
 )
 
 
 class TestConstantsValues:
-    def test_module_level_constants(self) -> None:
+    def test_top_level_constants_values(self) -> None:
+        assert DEFAULT_CONGESTION_CONTROL_ALGORITHM == "cubic"
         assert DEFAULT_LOG_LEVEL == "INFO"
+        assert DEFAULT_VERSION == "h3"
+        assert DRAFT_VERSION == 13
+        assert MAX_STREAM_ID == 2**62 - 1
         assert ORIGIN_HEADER == "origin"
+        assert SETTINGS_ENABLE_WEBTRANSPORT == 0x2B603742
+        assert SUPPORTED_CONGESTION_CONTROL_ALGORITHMS == ("reno", "cubic")
         assert USER_AGENT_HEADER == "user-agent"
+        assert WEBTRANSPORT_H3_BIDI_STREAM_TYPE == 0x41
+        assert WEBTRANSPORT_HEADER == "webtransport"
         assert WEBTRANSPORT_SCHEMES == ("https", "wss")
-
-    def test_webtransport_constants_class(self) -> None:
-        assert WebTransportConstants.DEFAULT_SECURE_PORT == 443
-        assert WebTransportConstants.DEFAULT_SERVER_MAX_CONNECTIONS == 3000
-        assert WebTransportConstants.DEFAULT_VERSION == "h3"
-        assert WebTransportConstants.WEBTRANSPORT_H3_BIDI_STREAM_TYPE == 0x41
-        assert WebTransportConstants.SETTINGS_ENABLE_WEBTRANSPORT == 0x2B603742
-        assert WebTransportConstants.DEFAULT_CONNECT_TIMEOUT == 30.0
+        assert DEFAULT_DEBUG is False
+        assert DEFAULT_BIND_HOST == "localhost"
+        assert DEFAULT_CLIENT_VERIFY_MODE == ssl.CERT_REQUIRED
+        assert DEFAULT_SERVER_VERIFY_MODE == ssl.CERT_NONE
 
 
 class TestErrorCodes:
@@ -47,8 +71,8 @@ class TestErrorCodes:
             (ErrorCodes.H3_DATAGRAM_ERROR, 0x33),
             (ErrorCodes.H3_NO_ERROR, 0x100),
             (ErrorCodes.H3_GENERAL_PROTOCOL_ERROR, 0x101),
-            (ErrorCodes.H3_SETTINGS_ERROR, 0x109),
             (ErrorCodes.H3_INTERNAL_ERROR, 0x102),
+            (ErrorCodes.H3_SETTINGS_ERROR, 0x109),
             (ErrorCodes.QPACK_DECOMPRESSION_FAILED, 0x200),
             (ErrorCodes.QPACK_ENCODER_STREAM_ERROR, 0x201),
             (ErrorCodes.QPACK_DECODER_STREAM_ERROR, 0x202),
@@ -62,58 +86,44 @@ class TestErrorCodes:
 
 
 class TestDefaults:
-    def test_get_client_config(self, mocker: MockerFixture) -> None:
-        mocker.patch(
-            "pywebtransport.constants._DEFAULT_CLIENT_CONFIG",
-            {
-                "connect_timeout": WebTransportConstants.DEFAULT_CONNECT_TIMEOUT,
-                "read_timeout": WebTransportConstants.DEFAULT_READ_TIMEOUT,
-                "write_timeout": WebTransportConstants.DEFAULT_WRITE_TIMEOUT,
-                "close_timeout": WebTransportConstants.DEFAULT_CLOSE_TIMEOUT,
-                "stream_creation_timeout": WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT,
-                "connection_keepalive_timeout": WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
-                "connection_cleanup_interval": WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL,
-                "connection_idle_timeout": WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT,
-                "connection_idle_check_interval": WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
-                "stream_cleanup_interval": WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
-                "max_connections": WebTransportConstants.DEFAULT_CLIENT_MAX_CONNECTIONS,
-                "max_streams": WebTransportConstants.DEFAULT_MAX_STREAMS,
-                "max_incoming_streams": WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS,
-                "stream_buffer_size": WebTransportConstants.DEFAULT_BUFFER_SIZE,
-                "alpn_protocols": list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS),
-                "http_version": "3",
-                "verify_mode": None,
-                "check_hostname": True,
-                "user_agent": f"pywebtransport/{project_version}",
-                "keep_alive": True,
-            },
-        )
-
+    def test_get_client_config(self) -> None:
         config = Defaults.get_client_config()
 
-        assert config["connect_timeout"] == 30.0
-        assert config["max_streams"] == 100
+        assert config["alpn_protocols"] == list(DEFAULT_ALPN_PROTOCOLS)
+        assert config["auto_reconnect"] == DEFAULT_AUTO_RECONNECT
+        assert config["congestion_control_algorithm"] == "cubic"
+        assert config["connect_timeout"] == DEFAULT_CONNECT_TIMEOUT
+        assert config["debug"] == DEFAULT_DEBUG
+        assert config["keep_alive"] == DEFAULT_KEEP_ALIVE
+        assert config["max_retries"] == DEFAULT_MAX_RETRIES
+        assert config["max_streams"] == DEFAULT_MAX_STREAMS
         assert config["user_agent"] == f"pywebtransport/{project_version}"
+        assert config["verify_mode"] == DEFAULT_CLIENT_VERIFY_MODE
 
     def test_get_client_config_returns_copy(self) -> None:
         config1 = Defaults.get_client_config()
         config2 = Defaults.get_client_config()
-
         assert config1 is not config2
+
         config1["max_streams"] = 999
-        assert Defaults.get_client_config()["max_streams"] == 100
+        assert Defaults.get_client_config()["max_streams"] == DEFAULT_MAX_STREAMS
 
     def test_get_server_config(self) -> None:
         config = Defaults.get_server_config()
 
-        assert config["bind_host"] == "localhost"
-        assert config["bind_port"] == WebTransportConstants.DEFAULT_DEV_PORT
-        assert config["connection_keepalive_timeout"] == WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
+        assert config["access_log"] == DEFAULT_ACCESS_LOG
+        assert config["bind_host"] == DEFAULT_BIND_HOST
+        assert config["bind_port"] == DEFAULT_DEV_PORT
+        assert config["congestion_control_algorithm"] == "cubic"
+        assert config["debug"] == DEFAULT_DEBUG
+        assert config["keep_alive"] == DEFAULT_KEEP_ALIVE
+        assert config["max_connections"] == DEFAULT_SERVER_MAX_CONNECTIONS
+        assert config["verify_mode"] == DEFAULT_SERVER_VERIFY_MODE
 
     def test_get_server_config_returns_copy(self) -> None:
         config1 = Defaults.get_server_config()
         config2 = Defaults.get_server_config()
-
         assert config1 is not config2
+
         config1["max_connections"] = 9999
-        assert Defaults.get_server_config()["max_connections"] == 3000
+        assert Defaults.get_server_config()["max_connections"] == DEFAULT_SERVER_MAX_CONNECTIONS

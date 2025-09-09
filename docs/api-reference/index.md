@@ -6,56 +6,58 @@ Complete reference documentation for PyWebTransport's public APIs.
 
 ## Overview
 
-PyWebTransport provides a comprehensive WebTransport implementation for Python with async/await support. The API is designed in layers, from high-level convenience functions to low-level protocol control, enabling both rapid development and fine-grained customization.
+PyWebTransport provides a comprehensive, production-grade WebTransport implementation for Python with a pure async/await design. The API is structured in layers, from a high-level application framework to low-level protocol control, enabling both rapid development and fine-grained customization.
 
 **Key Features:**
 
-- Full WebTransport protocol implementation (bidirectional streams, unidirectional streams, datagrams).
-- High-performance async client and server application frameworks.
-- Production-ready components for connection pooling, management, and load balancing.
-- Comprehensive monitoring and debugging capabilities.
-- Type-safe API with complete type annotations.
-- Extensive test coverage (unit, integration, end-to-end).
+- **Full Async Support**: Built from the ground up on `asyncio` for high-performance, non-blocking I/O.
+- **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for pooling, auto-reconnection, and proxying.
+- **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
+- **Structured Messaging**: Pluggable `JSON`, `MsgPack`, and `Protobuf` serializers for sending and receiving structured data objects over streams and datagrams.
+- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and monitoring.
+- **Event-Driven Architecture**: A powerful `EventEmitter` and `EventBus` system for decoupled, asynchronous communication between components.
+- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
+
+---
+
+## Application-Layer APIs
+
+The primary entry points for building WebTransport applications. These abstractions are designed for ease of use and cover the most common use cases.
+
+| Module                          | Description                                               | Key Classes                                                 |
+| :------------------------------ | :-------------------------------------------------------- | :---------------------------------------------------------- |
+| **[Client](client.md)**         | High-level client and connection management abstractions. | `WebTransportClient`, `ClientPool`, `ReconnectingClient`    |
+| **[Server](server.md)**         | High-level server application framework with routing.     | `ServerApp`, `WebTransportServer`, `ServerMonitor`          |
+| **[Serializer](serializer.md)** | Framework for structured data serialization.              | `JSONSerializer`, `MsgPackSerializer`, `ProtobufSerializer` |
 
 ---
 
 ## Core APIs
 
-Essential interfaces for WebTransport development.
+Foundational components that provide the core logic and building blocks for the high-level APIs. Use these for more advanced customization and control.
 
-| Module                      | Description                                               | Key Classes                                              |
-| :-------------------------- | :-------------------------------------------------------- | :------------------------------------------------------- |
-| **[Client](client.md)**     | High-level client and connection management abstractions. | `WebTransportClient`, `ClientPool`, `ReconnectingClient` |
-| **[Server](server.md)**     | High-level server application framework with routing.     | `ServerApp`, `WebTransportServer`, `ServerMonitor`       |
-| **[Session](session.md)**   | Session lifecycle and communication management.           | `WebTransportSession`, `SessionManager`                  |
-| **[Stream](stream.md)**     | Reliable, ordered, and multiplexed stream communication.  | `WebTransportStream`, `WebTransportSendStream`           |
-| **[Datagram](datagram.md)** | Unreliable, low-latency datagram messaging.               | `WebTransportDatagramDuplexStream`                       |
-
----
-
-## Infrastructure APIs
-
-Lower-level APIs for advanced use cases and customization.
-
-| Module                          | Description                                       | Key Classes                                           |
-| :------------------------------ | :------------------------------------------------ | :---------------------------------------------------- |
-| **[Connection](connection.md)** | Low-level connection management and pooling.      | `WebTransportConnection`, `ConnectionPool`            |
-| **[Protocol](protocol.md)**     | Low-level WebTransport protocol implementation.   | `WebTransportProtocolHandler`                         |
-| **[Events](events.md)**         | Asynchronous, event-driven programming framework. | `EventEmitter`, `EventBus`, `Event`                   |
-| **[Exceptions](exceptions.md)** | Exception hierarchy and error handling patterns.  | `WebTransportError`, `StreamError`, `ConnectionError` |
+| Module                          | Description                                              | Key Classes                                    |
+| :------------------------------ | :------------------------------------------------------- | :--------------------------------------------- |
+| **[Connection](connection.md)** | Low-level connection management and pooling.             | `WebTransportConnection`, `ConnectionPool`     |
+| **[Datagram](datagram.md)**     | Unreliable, low-latency datagram messaging.              | `WebTransportDatagramDuplexStream`             |
+| **[Protocol](protocol.md)**     | Low-level WebTransport protocol implementation.          | `WebTransportProtocolHandler`                  |
+| **[Session](session.md)**       | Session lifecycle and communication management.          | `WebTransportSession`, `SessionManager`        |
+| **[Stream](stream.md)**         | Reliable, ordered, and multiplexed stream communication. | `WebTransportStream`, `WebTransportSendStream` |
 
 ---
 
-## Configuration & Support
+## Foundational APIs
 
-Configuration management and development utilities.
+Cross-cutting components that provide essential utilities, data structures, and constants used throughout the library.
 
-| Module                         | Description                                     | Key Classes / Concepts                          |
-| :----------------------------- | :---------------------------------------------- | :---------------------------------------------- |
-| **[Configuration](config.md)** | Client and server configuration data classes.   | `ClientConfig`, `ServerConfig`, `ConfigBuilder` |
-| **[Constants](constants.md)**  | Protocol constants and default values.          | `WebTransportConstants`, `ErrorCodes`           |
-| **[Types](types.md)**          | Core type aliases, protocols, and enumerations. | `StreamId`, `SessionId`, `StreamState`          |
-| **[Utils](utils.md)**          | Helper functions for common tasks.              | Logging, Networking, Security, Validation       |
+| Module                          | Description                                       | Key Classes / Concepts                 |
+| :------------------------------ | :------------------------------------------------ | :------------------------------------- |
+| **[Configuration](config.md)**  | Client and server configuration data classes.     | `ClientConfig`, `ServerConfig`         |
+| **[Constants](constants.md)**   | Protocol constants and default values.            | `ErrorCodes`                           |
+| **[Events](events.md)**         | Asynchronous, event-driven programming framework. | `EventEmitter`, `EventBus`, `Event`    |
+| **[Exceptions](exceptions.md)** | Exception hierarchy and error handling patterns.  | `WebTransportError`, `StreamError`     |
+| **[Types](types.md)**           | Core type aliases, protocols, and enumerations.   | `StreamId`, `SessionId`, `StreamState` |
+| **[Utils](utils.md)**           | Helper functions for common tasks.                |                                        |
 
 ---
 
@@ -63,5 +65,5 @@ Configuration management and development utilities.
 
 - **[Installation Guide](../installation.md)** - In-depth setup and installation guide.
 - **[Quick Start](../quickstart.md)** - A 5-minute tutorial to get started.
-- **[Client API](client.md)** - Detailed client API reference and usage patterns.
-- **[Server API](server.md)** - Detailed server API reference and usage patterns.
+- **[Connection API](connection.md)** - The core API for managing a single connection's lifecycle.
+- **[Session API](session.md)** - The primary API for creating streams and sending datagrams.

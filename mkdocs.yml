@@ -1,5 +1,5 @@
 site_name: PyWebTransport
-site_description: A high-performance, async-native WebTransport implementation for Python.
+site_description: The canonical, async-native WebTransport stack for Python.
 site_url: https://pywebtransport.readthedocs.io
 repo_url: https://github.com/lemonsterfy/pywebtransport
 repo_name: lemonsterfy/pywebtransport
@@ -32,17 +32,18 @@ nav:
   - API Reference:
       - Overview: api-reference/index.md
       - Client: api-reference/client.md
+      - Configuration: api-reference/config.md
+      - Connection: api-reference/connection.md
+      - Constants: api-reference/constants.md
+      - Datagram: api-reference/datagram.md
+      - Events: api-reference/events.md
+      - Exceptions: api-reference/exceptions.md
+      - Protocol: api-reference/protocol.md
+      - Serializer: api-reference/serializer.md
       - Server: api-reference/server.md
       - Session: api-reference/session.md
       - Stream: api-reference/stream.md
-      - Datagram: api-reference/datagram.md
-      - Connection: api-reference/connection.md
-      - Configuration: api-reference/config.md
-      - Events: api-reference/events.md
       - Types: api-reference/types.md
-      - Constants: api-reference/constants.md
-      - Exceptions: api-reference/exceptions.md
-      - Protocol: api-reference/protocol.md
       - Utils: api-reference/utils.md
 
 plugins:
