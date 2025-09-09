@@ -6,8 +6,8 @@ from typing import Any, Type
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, ClientError, TimeoutError, WebTransportSession
-from pywebtransport.client import ClientStats, WebTransportClient
+from pywebtransport import ClientConfig, ClientError, TimeoutError, WebTransportClient, WebTransportSession
+from pywebtransport.client import ClientStats, ReconnectingClient
 from pywebtransport.connection import ConnectionManager, WebTransportConnection
 
 
@@ -58,6 +58,53 @@ class TestClientStats:
         stats.min_connect_time = float("inf")
         stats_dict = stats.to_dict()
         assert stats_dict["performance"]["min_connect_time"] == 0.0
+
+
+class TestWebTransportClientFactory:
+    URL = "https://example.com"
+
+    @pytest.fixture
+    def mock_reconnecting_client_create(self, mocker: MockerFixture) -> Any:
+        mock = mocker.patch("pywebtransport.client.reconnecting.ReconnectingClient")
+        mock.create.return_value = mocker.MagicMock(spec=ReconnectingClient)
+        return mock.create
+
+    def test_create_returns_standard_client_when_reconnect_is_false(
+        self, mocker: MockerFixture, mock_reconnecting_client_create: Any
+    ) -> None:
+        init_spy = mocker.spy(WebTransportClient, "__init__")
+        config = ClientConfig(auto_reconnect=False)
+
+        client = WebTransportClient.create(url=self.URL, config=config)
+
+        assert isinstance(client, WebTransportClient)
+        assert client is not mock_reconnecting_client_create.return_value
+        mock_reconnecting_client_create.assert_not_called()
+        init_spy.assert_called_once()
+        assert init_spy.call_args.kwargs["config"] is config
+
+    def test_create_returns_reconnecting_client_when_reconnect_is_true(
+        self, mock_reconnecting_client_create: Any
+    ) -> None:
+        config = ClientConfig(auto_reconnect=True)
+
+        client = WebTransportClient.create(url=self.URL, config=config)
+
+        mock_reconnecting_client_create.assert_called_once_with(url=self.URL, config=config)
+        assert client is mock_reconnecting_client_create.return_value
+
+    def test_create_defaults_to_standard_client_when_no_config_is_provided(
+        self, mocker: MockerFixture, mock_reconnecting_client_create: Any
+    ) -> None:
+        init_spy = mocker.spy(WebTransportClient, "__init__")
+        mock_default_config = ClientConfig(auto_reconnect=False)
+        mocker.patch("pywebtransport.client.client.ClientConfig.create", return_value=mock_default_config)
+
+        client = WebTransportClient.create(url=self.URL)
+
+        assert isinstance(client, WebTransportClient)
+        mock_reconnecting_client_create.assert_not_called()
+        init_spy.assert_called_once()
 
 
 class TestWebTransportClient:
@@ -150,7 +197,7 @@ class TestWebTransportClient:
         client = WebTransportClient()
         headers = {"X-Test": "true"}
 
-        client.set_default_headers(headers)
+        client.set_default_headers(headers=headers)
 
         assert client._default_headers == headers
         headers["X-Another"] = "value"
@@ -220,9 +267,9 @@ class TestWebTransportClient:
         mock_session_class = mocker.patch("pywebtransport.client.client.WebTransportSession", return_value=mock_session)
         client = WebTransportClient()
 
-        session: Any = await client.connect("https://example.com")
+        session: Any = await client.connect(url="https://example.com")
 
-        mock_connection_manager.add_connection.assert_awaited_once_with(mock_webtransport_connection)
+        mock_connection_manager.add_connection.assert_awaited_once_with(connection=mock_webtransport_connection)
         mock_create_client.assert_awaited_once()
         mock_webtransport_connection.wait_for_ready_session.assert_awaited_once()
         assert session is mock_session
@@ -245,9 +292,9 @@ class TestWebTransportClient:
     @pytest.mark.asyncio
     async def test_connect_with_headers(self, mock_client_config: Any, mock_create_client: Any) -> None:
         client = WebTransportClient()
-        client.set_default_headers({"default": "header"})
+        client.set_default_headers(headers={"default": "header"})
 
-        await client.connect("https://example.com", headers={"extra": "header"})
+        await client.connect(url="https://example.com", headers={"extra": "header"})
 
         expected_headers = {"default": "header", "extra": "header"}
         mock_client_config.update.assert_called_once_with(headers=expected_headers)
@@ -258,7 +305,7 @@ class TestWebTransportClient:
         await client.close()
 
         with pytest.raises(ClientError, match="Client is closed"):
-            await client.connect("https://example.com")
+            await client.connect(url="https://example.com")
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("exception_to_raise", [asyncio.TimeoutError, ConnectionRefusedError])
@@ -270,7 +317,7 @@ class TestWebTransportClient:
         expected_exception = TimeoutError if exception_to_raise == asyncio.TimeoutError else ClientError
 
         with pytest.raises(expected_exception):
-            await client.connect("https://example.com")
+            await client.connect(url="https://example.com")
 
         mock_webtransport_connection.close.assert_not_awaited()
         stats = client._stats
@@ -286,7 +333,7 @@ class TestWebTransportClient:
         client = WebTransportClient()
 
         with pytest.raises(ClientError, match="Session ready timeout"):
-            await client.connect("https://example.com")
+            await client.connect(url="https://example.com")
 
         mock_webtransport_connection.close.assert_awaited_once()
         assert client._stats.connections_failed == 1
@@ -299,7 +346,7 @@ class TestWebTransportClient:
         client = WebTransportClient()
 
         with pytest.raises(ClientError, match="Protocol handler not initialized"):
-            await client.connect("https://example.com")
+            await client.connect(url="https://example.com")
 
         mock_webtransport_connection.close.assert_awaited_once()
         assert client._stats.connections_failed == 1

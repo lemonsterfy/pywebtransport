@@ -14,7 +14,7 @@ from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = ["ClientMonitor"]
 
-logger = get_logger("client.monitor")
+logger = get_logger(name="client.monitor")
 
 
 class ClientMonitor:
@@ -22,6 +22,11 @@ class ClientMonitor:
 
     def __init__(self, client: WebTransportClient, *, monitoring_interval: float = 30.0):
         """Initialize the client monitor."""
+        if not isinstance(client, WebTransportClient):
+            raise TypeError(
+                "ClientMonitor only supports WebTransportClient instances, "
+                "not other client-like objects such as ReconnectingClient."
+            )
         self._client = client
         self._interval = monitoring_interval
         self._monitor_task: asyncio.Task[None] | None = None
@@ -29,9 +34,9 @@ class ClientMonitor:
         self._alerts: deque[dict[str, Any]] = deque(maxlen=100)
 
     @classmethod
-    def create(cls, client: WebTransportClient, *, monitoring_interval: float = 30.0) -> Self:
+    def create(cls, *, client: WebTransportClient, monitoring_interval: float = 30.0) -> Self:
         """Factory method to create a new client monitor instance."""
-        return cls(client, monitoring_interval=monitoring_interval)
+        return cls(client=client, monitoring_interval=monitoring_interval)
 
     @property
     def is_monitoring(self) -> bool:
@@ -45,7 +50,10 @@ class ClientMonitor:
                 self._monitor_task = asyncio.create_task(self._monitor_loop())
                 logger.info("Client monitoring started.")
             except RuntimeError:
-                logger.error("Failed to start client monitor: No running event loop.")
+                logger.error(
+                    "Failed to start client monitor: No running event loop.",
+                    exc_info=True,
+                )
         return self
 
     async def __aexit__(
@@ -83,11 +91,17 @@ class ClientMonitor:
 
         success_rate = connections_stats.get("success_rate", 1.0)
         if connections_stats.get("attempted", 0) > 10 and success_rate < 0.9:
-            self._create_alert("low_success_rate", f"Low connection success rate: {success_rate:.2%}")
+            self._create_alert(
+                alert_type="low_success_rate",
+                message=f"Low connection success rate: {success_rate:.2%}",
+            )
 
         avg_connect_time = performance_stats.get("avg_connect_time", 0.0)
         if avg_connect_time > 5.0:
-            self._create_alert("slow_connections", f"Slow connections: {avg_connect_time:.2f}s average")
+            self._create_alert(
+                alert_type="slow_connections",
+                message=f"Slow connections: {avg_connect_time:.2f}s average",
+            )
 
     def _collect_metrics(self) -> None:
         """Collect a snapshot of the client's current statistics."""
@@ -97,14 +111,18 @@ class ClientMonitor:
             metrics = {"timestamp": timestamp, "stats": stats}
             self._metrics_history.append(metrics)
         except Exception as e:
-            logger.error(f"Metrics collection failed: {e}")
+            logger.error("Metrics collection failed: %s", e, exc_info=True)
 
-    def _create_alert(self, alert_type: str, message: str) -> None:
+    def _create_alert(self, *, alert_type: str, message: str) -> None:
         """Create and store a new alert, avoiding duplicates."""
         if not self._alerts or self._alerts[-1].get("message") != message:
-            alert = {"type": alert_type, "message": message, "timestamp": get_timestamp()}
+            alert = {
+                "type": alert_type,
+                "message": message,
+                "timestamp": get_timestamp(),
+            }
             self._alerts.append(alert)
-            logger.warning(f"Client Health Alert: {message}")
+            logger.warning("Client Health Alert: %s", message)
 
     async def _monitor_loop(self) -> None:
         """Run the main loop for periodically collecting metrics and checking for alerts."""
@@ -116,4 +134,4 @@ class ClientMonitor:
         except asyncio.CancelledError:
             logger.info("Client monitor loop has been cancelled.")
         except Exception as e:
-            logger.error(f"Client monitor loop encountered a critical error: {e}", exc_info=e)
+            logger.error("Client monitor loop encountered a critical error: %s", e, exc_info=True)

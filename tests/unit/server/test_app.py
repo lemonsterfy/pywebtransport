@@ -60,23 +60,25 @@ class TestServerApp:
 
     def test_init(self, app: ServerApp, mock_server: Any) -> None:
         assert app.server is mock_server
-        cast(Any, app.server).on.assert_called_once_with(EventType.SESSION_REQUEST, app._handle_session_request)
+        cast(Any, app.server).on.assert_called_once_with(
+            event_type=EventType.SESSION_REQUEST, handler=app._handle_session_request
+        )
 
     def test_decorators(self, app: ServerApp) -> None:
-        @app.route("/test")
+        @app.route(path="/test")
         async def handler1(session: WebTransportSession) -> None: ...
 
-        @app.pattern_route("/other/.*")
+        @app.pattern_route(pattern="/other/.*")
         async def handler2(session: WebTransportSession) -> None: ...
 
-        cast(Any, app._router).add_route.assert_called_once_with("/test", handler1)
-        cast(Any, app._router).add_pattern_route.assert_called_once_with("/other/.*", handler2)
+        cast(Any, app._router).add_route.assert_called_once_with(path="/test", handler=handler1)
+        cast(Any, app._router).add_pattern_route.assert_called_once_with(pattern="/other/.*", handler=handler2)
 
         @app.middleware
         async def middleware(session: WebTransportSession) -> bool:
             return True
 
-        cast(Any, app._middleware_manager).add_middleware.assert_called_once_with(middleware)
+        cast(Any, app._middleware_manager).add_middleware.assert_called_once_with(middleware=middleware)
 
         @app.on_startup
         def startup_handler() -> None: ...
@@ -148,7 +150,7 @@ class TestServerApp:
         stateful_middleware = mocker.MagicMock()
         stateful_middleware.__aenter__ = mocker.AsyncMock()
         stateful_middleware.__aexit__ = mocker.AsyncMock()
-        app.add_middleware(stateful_middleware)
+        app.add_middleware(middleware=stateful_middleware)
         app.on_startup(mock_handler)
 
         await app.startup()
@@ -165,7 +167,7 @@ class TestServerApp:
             mock_handler.assert_awaited()
         else:
             mock_handler.assert_called()
-        stateful_middleware.__aexit__.assert_awaited_once()
+        stateful_middleware.__aexit__.assert_awaited_once_with(exc_type=None, exc_val=None, exc_tb=None)
 
     @pytest.mark.asyncio
     async def test_handle_session_request_happy_path(
@@ -193,7 +195,7 @@ class TestServerApp:
         await app._handle_session_request(event)
 
         mock_conn.protocol_handler.accept_webtransport_session.assert_called_once_with(stream_id=4, session_id="s1")
-        mock_server.session_manager.add_session.assert_awaited_once_with(mock_session.return_value)
+        mock_server.session_manager.add_session.assert_awaited_once_with(session=mock_session.return_value)
         assert captured_coro is not None
         await captured_coro
         mock_handler.assert_awaited_once()
@@ -314,7 +316,7 @@ class TestServerApp:
         await app._handle_session_request(event)
 
         mock_conn.protocol_handler.close_webtransport_session.assert_called_once_with(
-            "s1", code=1, reason="Internal server configuration error"
+            session_id="s1", code=1, reason="Internal server configuration error"
         )
 
     @pytest.mark.asyncio
@@ -330,7 +332,7 @@ class TestServerApp:
         await app._handle_session_request(event)
 
         mock_conn.protocol_handler.close_webtransport_session.assert_called_once_with(
-            "s1", code=1, reason="Internal server error"
+            session_id="s1", code=1, reason="Internal server error"
         )
 
     @pytest.mark.asyncio

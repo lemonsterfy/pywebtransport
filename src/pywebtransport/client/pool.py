@@ -16,13 +16,13 @@ from pywebtransport.utils import get_logger
 
 __all__ = ["ClientPool"]
 
-logger = get_logger("client.pool")
+logger = get_logger(name="client.pool")
 
 
 class ClientPool:
     """Manages a pool of WebTransportClient instances."""
 
-    def __init__(self, configs: list[ClientConfig | None]):
+    def __init__(self, *, configs: list[ClientConfig | None]):
         """Initialize the client pool."""
         if not configs:
             raise ValueError("ClientPool requires at least one client configuration.")
@@ -44,7 +44,7 @@ class ClientPool:
             return self
 
         self._lock = asyncio.Lock()
-        created_clients = [WebTransportClient.create(config=config) for config in self._configs]
+        created_clients = [WebTransportClient(config=config) for config in self._configs]
 
         try:
             async with asyncio.TaskGroup() as tg:
@@ -52,16 +52,20 @@ class ClientPool:
                     tg.create_task(client.__aenter__())
             self._clients = created_clients
         except* Exception as eg:
-            logger.error(f"Failed to activate clients in pool: {eg.exceptions}", exc_info=eg)
+            logger.error("Failed to activate clients in pool: %s", eg.exceptions, exc_info=eg)
             try:
                 async with asyncio.TaskGroup() as cleanup_tg:
                     for client in created_clients:
                         cleanup_tg.create_task(client.close())
             except* Exception as cleanup_eg:
-                logger.error(f"Errors during client pool startup cleanup: {cleanup_eg.exceptions}")
+                logger.error(
+                    "Errors during client pool startup cleanup: %s",
+                    cleanup_eg.exceptions,
+                    exc_info=cleanup_eg,
+                )
             raise eg
 
-        logger.info(f"Client pool started with {len(self._clients)} clients.")
+        logger.info("Client pool started with %d clients.", len(self._clients))
         return self
 
     async def __aexit__(
@@ -83,18 +87,22 @@ class ClientPool:
         if not self._clients:
             return
 
-        logger.info(f"Closing all {len(self._clients)} clients in the pool.")
+        logger.info("Closing all %d clients in the pool.", len(self._clients))
         try:
             async with asyncio.TaskGroup() as tg:
                 for client in self._clients:
                     tg.create_task(client.close())
         except* Exception as eg:
-            logger.error(f"Errors occurred while closing client pool: {eg.exceptions}")
+            logger.error(
+                "Errors occurred while closing client pool: %s",
+                eg.exceptions,
+                exc_info=eg,
+            )
 
         self._clients.clear()
         logger.info("Client pool closed.")
 
-    async def connect_all(self, url: str) -> list[WebTransportSession]:
+    async def connect_all(self, *, url: str) -> list[WebTransportSession]:
         """Connect all clients in the pool to a URL concurrently."""
         if self._lock is None:
             raise ClientError(
@@ -108,16 +116,16 @@ class ClientPool:
         try:
             async with asyncio.TaskGroup() as tg:
                 for client in self._clients:
-                    tasks.append(tg.create_task(client.connect(url)))
+                    tasks.append(tg.create_task(client.connect(url=url)))
         except* Exception as eg:
-            logger.warning(f"Some clients in the pool failed to connect: {eg.exceptions}")
+            logger.warning("Some clients in the pool failed to connect: %s", eg.exceptions)
 
         sessions = []
         for i, task in enumerate(tasks):
             if task.done() and not task.exception():
                 sessions.append(task.result())
             else:
-                logger.warning(f"Client {i} in the pool failed to connect: {task.exception()}")
+                logger.warning("Client %d in the pool failed to connect: %s", i, task.exception())
         return sessions
 
     async def get_client(self) -> WebTransportClient:

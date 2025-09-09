@@ -18,7 +18,7 @@ from pywebtransport.utils import get_logger
 
 __all__ = ["ConnectionLoadBalancer"]
 
-logger = get_logger("connection.load_balancer")
+logger = get_logger(name="connection.load_balancer")
 
 
 class ConnectionLoadBalancer:
@@ -26,8 +26,8 @@ class ConnectionLoadBalancer:
 
     def __init__(
         self,
-        *,
         targets: list[tuple[str, int]],
+        *,
         health_check_interval: float = 30.0,
         health_check_timeout: float = 5.0,
     ):
@@ -42,8 +42,8 @@ class ConnectionLoadBalancer:
         self._current_index = 0
         self._connections: dict[str, WebTransportConnection] = {}
         self._failed_targets: set[str] = set()
-        self._target_weights: dict[str, float] = {self._get_target_key(h, p): 1.0 for h, p in self._targets}
-        self._target_latencies: dict[str, float] = {self._get_target_key(h, p): 0.0 for h, p in self._targets}
+        self._target_weights: dict[str, float] = {self._get_target_key(host=h, port=p): 1.0 for h, p in self._targets}
+        self._target_latencies: dict[str, float] = {self._get_target_key(host=h, port=p): 0.0 for h, p in self._targets}
         self._health_check_task: asyncio.Task[None] | None = None
         self._pending_creations: dict[str, asyncio.Event] = {}
 
@@ -95,19 +95,23 @@ class ConnectionLoadBalancer:
         if not connections_to_close:
             return
 
-        logger.info(f"Closing {len(connections_to_close)} connections")
+        logger.info("Closing %d connections", len(connections_to_close))
         try:
             async with asyncio.TaskGroup() as tg:
                 for connection in connections_to_close:
                     tg.create_task(connection.close())
         except* Exception as eg:
-            logger.error(f"Errors occurred while closing connections: {eg.exceptions}")
+            logger.error(
+                "Errors occurred while closing connections: %s",
+                eg.exceptions,
+                exc_info=eg,
+            )
         logger.info("All connections closed")
 
     async def get_connection(
         self,
-        config: ClientConfig,
         *,
+        config: ClientConfig,
         path: str = "/",
         strategy: str = "round_robin",
     ) -> WebTransportConnection:
@@ -118,15 +122,15 @@ class ConnectionLoadBalancer:
                 "asynchronous context manager (`async with ...`)."
             )
 
-        host, port = await self._get_next_target(strategy)
-        target_key = self._get_target_key(host, port)
+        host, port = await self._get_next_target(strategy=strategy)
+        target_key = self._get_target_key(host=host, port=port)
 
         while True:
             async with self._lock:
                 if target_key in self._connections:
                     connection = self._connections[target_key]
                     if connection.is_connected:
-                        logger.debug(f"Reusing connection to {host}:{port}")
+                        logger.debug("Reusing connection to %s:%s", host, port)
                         return connection
                     else:
                         del self._connections[target_key]
@@ -143,7 +147,7 @@ class ConnectionLoadBalancer:
                 continue
 
             try:
-                logger.debug(f"Creating new connection to {host}:{port}")
+                logger.debug("Creating new connection to %s:%s", host, port)
                 start_time = time.time()
                 connection = await WebTransportConnection.create_client(config=config, host=host, port=port, path=path)
                 latency = time.time() - start_time
@@ -153,12 +157,17 @@ class ConnectionLoadBalancer:
                     self._failed_targets.discard(target_key)
                     self._connections[target_key] = connection
 
-                logger.info(f"Connected to {host}:{port} (latency: {latency * 1000:.1f}ms)")
+                logger.info(
+                    "Connected to %s:%s (latency: %.1fms)",
+                    host,
+                    port,
+                    latency * 1000,
+                )
                 return connection
             except Exception as e:
                 async with self._lock:
                     self._failed_targets.add(target_key)
-                logger.error(f"Failed to connect to {host}:{port}: {e}")
+                logger.error("Failed to connect to %s:%s: %s", host, port, e, exc_info=True)
                 raise
             finally:
                 async with self._lock:
@@ -190,7 +199,7 @@ class ConnectionLoadBalancer:
         async with self._lock:
             stats = {}
             for host, port in self._targets:
-                target_key = self._get_target_key(host, port)
+                target_key = self._get_target_key(host=host, port=port)
                 conn = self._connections.get(target_key)
                 stats[target_key] = {
                     "host": host,
@@ -209,13 +218,13 @@ class ConnectionLoadBalancer:
                 "ConnectionLoadBalancer has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
-        target_key = self._get_target_key(host, port)
+        target_key = self._get_target_key(host=host, port=port)
         async with self._lock:
             if target_key in self._target_weights:
                 self._target_weights[target_key] = max(0.0, weight)
-                logger.debug(f"Updated weight for {target_key}: {weight}")
+                logger.debug("Updated weight for %s: %s", target_key, weight)
 
-    async def _get_next_target(self, strategy: str) -> tuple[str, int]:
+    async def _get_next_target(self, *, strategy: str) -> tuple[str, int]:
         """Get the next target based on the chosen load balancing strategy."""
         if self._lock is None:
             raise ConnectionError(
@@ -224,7 +233,9 @@ class ConnectionLoadBalancer:
             )
         async with self._lock:
             available_targets = [
-                target for target in self._targets if self._get_target_key(*target) not in self._failed_targets
+                target
+                for target in self._targets
+                if self._get_target_key(host=target[0], port=target[1]) not in self._failed_targets
             ]
             if not available_targets:
                 raise ConnectionError("No available targets in the load balancer.")
@@ -234,18 +245,23 @@ class ConnectionLoadBalancer:
                     self._current_index = (self._current_index + 1) % len(available_targets)
                     return available_targets[self._current_index]
                 case "weighted":
-                    weights = [self._target_weights[self._get_target_key(*t)] for t in available_targets]
+                    weights = [
+                        self._target_weights[self._get_target_key(host=t[0], port=t[1])] for t in available_targets
+                    ]
                     total_weight = sum(weights)
                     if total_weight == 0:
                         return random.choice(available_targets)
-                    return random.choices(available_targets, weights=weights, k=1)[0]
+                    return random.choices(population=available_targets, weights=weights, k=1)[0]
                 case "least_latency":
-                    latency_targets = [(self._target_latencies[self._get_target_key(*t)], t) for t in available_targets]
+                    latency_targets = [
+                        (self._target_latencies[self._get_target_key(host=t[0], port=t[1])], t)
+                        for t in available_targets
+                    ]
                     return min(latency_targets, key=lambda item: item[0])[1]
                 case _:
                     raise ValueError(f"Unknown load balancing strategy: {strategy}")
 
-    def _get_target_key(self, host: str, port: int) -> str:
+    def _get_target_key(self, *, host: str, port: int) -> str:
         """Generate a unique key for a given host and port."""
         return f"{host}:{port}"
 
@@ -265,22 +281,26 @@ class ConnectionLoadBalancer:
                 if not failed_targets_copy:
                     continue
 
-                async def check_target(target_key: str) -> None:
+                async def check_target(*, target_key: str) -> None:
                     try:
                         host, port_str = target_key.split(":", 1)
                         port = int(port_str)
-                        if await test_tcp_connection(host=host, port=port, timeout=self._health_check_timeout):
-                            logger.info(f"Target {target_key} is back online")
+                        if await test_tcp_connection(
+                            host=host,
+                            port=port,
+                            timeout=self._health_check_timeout,
+                        ):
+                            logger.info("Target %s is back online", target_key)
                             async with lock:
                                 self._failed_targets.discard(target_key)
                                 self._target_latencies[target_key] = 0.0
                     except Exception as e:
-                        logger.debug(f"Health check for {target_key} failed: {e}")
+                        logger.debug("Health check for %s failed: %s", target_key, e)
 
                 try:
                     async with asyncio.TaskGroup() as tg:
                         for target_key in failed_targets_copy:
-                            tg.create_task(check_target(target_key))
+                            tg.create_task(check_target(target_key=target_key))
                 except* Exception:
                     pass
 
@@ -288,7 +308,7 @@ class ConnectionLoadBalancer:
                 logger.info("Health check loop cancelled.")
                 break
             except Exception as e:
-                logger.error(f"Health check loop critical error: {e}", exc_info=e)
+                logger.error("Health check loop critical error: %s", e, exc_info=e)
 
     def _start_health_check_task(self) -> None:
         """Start the periodic health check task if not already running."""

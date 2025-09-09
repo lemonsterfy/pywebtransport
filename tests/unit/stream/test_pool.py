@@ -121,7 +121,7 @@ class TestStreamPool:
             pool._total_managed_streams = 1
             another_stream = mock_stream_factory()
 
-            await pool.return_stream(another_stream)
+            await pool.return_stream(stream=another_stream)
 
             assert len(pool._available) == 1
             assert pool._available[0] is stream_in_pool
@@ -138,7 +138,7 @@ class TestStreamPool:
             stale_stream = mock_stream_factory()
             type(stale_stream).is_closed = True
 
-            await pool.return_stream(stale_stream)
+            await pool.return_stream(stream=stale_stream)
 
             assert not pool._available
             assert pool._total_managed_streams == 0
@@ -166,7 +166,7 @@ class TestStreamPool:
             assert not task_b.done()
 
             stream_a = await task_a
-            await pool.return_stream(stream_a)
+            await pool.return_stream(stream=stream_a)
             stream_b = await asyncio.wait_for(task_b, timeout=1.0)
 
             assert stream_b is stream_a
@@ -351,7 +351,7 @@ class TestStreamPool:
     ) -> None:
         pool = StreamPool(session=mock_session)
         method = getattr(pool, method_name)
-        args = (mock_stream_factory(),) if method_name == "return_stream" else ()
+        kwargs = {"stream": mock_stream_factory()} if method_name == "return_stream" else {}
 
         with pytest.raises(StreamError, match="StreamPool has not been activated"):
-            await method(*args)
+            await method(**kwargs)

@@ -16,7 +16,7 @@ from pywebtransport.utils import get_logger
 
 __all__ = ["WebTransportBrowser"]
 
-logger = get_logger("client.browser")
+logger = get_logger(name="client.browser")
 
 
 class WebTransportBrowser:
@@ -24,7 +24,7 @@ class WebTransportBrowser:
 
     def __init__(self, *, config: ClientConfig | None = None) -> None:
         """Initialize the browser-like WebTransport client."""
-        self._client = WebTransportClient.create(config=config)
+        self._client = WebTransportClient(config=config)
         self._history: list[str] = []
         self._history_index: int = -1
         self._current_session: WebTransportSession | None = None
@@ -85,7 +85,7 @@ class WebTransportBrowser:
             if self._history_index > 0:
                 self._history_index -= 1
                 url_to_navigate = self._history[self._history_index]
-                return await self._navigate_internal(url_to_navigate)
+                return await self._navigate_internal(url=url_to_navigate)
             return None
 
     async def forward(self) -> WebTransportSession | None:
@@ -100,10 +100,10 @@ class WebTransportBrowser:
             if self._history_index < len(self._history) - 1:
                 self._history_index += 1
                 url_to_navigate = self._history[self._history_index]
-                return await self._navigate_internal(url_to_navigate)
+                return await self._navigate_internal(url=url_to_navigate)
             return None
 
-    async def navigate(self, url: str) -> WebTransportSession:
+    async def navigate(self, *, url: str) -> WebTransportSession:
         """Navigate to a URL, creating a new session and clearing forward history."""
         if self._lock is None:
             raise ClientError(
@@ -122,7 +122,7 @@ class WebTransportBrowser:
                 self._history.append(url)
 
             self._history_index = len(self._history) - 1
-            return await self._navigate_internal(url)
+            return await self._navigate_internal(url=url)
 
     async def refresh(self) -> WebTransportSession | None:
         """Refresh the current session by reconnecting to the current URL."""
@@ -136,7 +136,7 @@ class WebTransportBrowser:
             if not self._history:
                 return None
             current_url = self._history[self._history_index]
-            return await self._navigate_internal(current_url)
+            return await self._navigate_internal(url=current_url)
 
     async def get_history(self) -> list[str]:
         """Get a copy of the navigation history."""
@@ -149,7 +149,7 @@ class WebTransportBrowser:
         async with self._lock:
             return self._history.copy()
 
-    async def _navigate_internal(self, url: str) -> WebTransportSession:
+    async def _navigate_internal(self, *, url: str) -> WebTransportSession:
         """Handle the core navigation logic for session teardown and creation."""
         old_session = self._current_session
         self._current_session = None
@@ -158,10 +158,10 @@ class WebTransportBrowser:
             asyncio.create_task(old_session.close())
 
         try:
-            new_session = await self._client.connect(url)
+            new_session = await self._client.connect(url=url)
             self._current_session = new_session
             return new_session
         except Exception as e:
             self._current_session = old_session
-            logger.error(f"Failed to navigate to {url}: {e}", exc_info=True)
+            logger.error("Failed to navigate to %s: %s", url, e, exc_info=True)
             raise

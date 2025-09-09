@@ -2,7 +2,7 @@
 
 import pytest
 
-from pywebtransport import Headers, StreamId
+from pywebtransport.types import Headers, StreamId
 from pywebtransport.protocol.events import (
     DatagramReceived,
     DataReceived,
@@ -55,9 +55,9 @@ def test_datagram_received_event(data: bytes, stream_id: StreamId) -> None:
 @pytest.mark.parametrize(
     "headers, stream_id, stream_ended",
     [
-        ([(b":method", b"GET"), (b":path", b"/")], 0, False),
-        ([(b"content-type", b"application/json")], 4, True),
-        ([], 8, False),
+        ({"method": "GET", "path": "/"}, 0, False),
+        ({"content-type": "application/json"}, 4, True),
+        ({}, 8, False),
     ],
 )
 def test_headers_received_event(headers: Headers, stream_id: StreamId, stream_ended: bool) -> None:

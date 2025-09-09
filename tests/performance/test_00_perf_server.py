@@ -85,7 +85,7 @@ class PerformanceServerApp(ServerApp):
                     data = await stream.read(size=8192)
                     if not data:
                         break
-                    await stream.write(b"ECHO: " + data)
+                    await stream.write(data=b"ECHO: " + data)
 
             await echo_worker()
         except (StopAsyncIteration, ConnectionError):
@@ -108,34 +108,34 @@ class PerformanceServerApp(ServerApp):
                 "memory_rss_bytes": memory_info.rss,
                 "active_connections": stats.get("connections", {}).get("active", 0),
             }
-            await stream.write_all(json.dumps(usage_data).encode())
+            await stream.write_all(data=json.dumps(usage_data).encode())
             await stream.read_all()
 
         except (StopAsyncIteration, ConnectionError, asyncio.CancelledError):
             pass
         except Exception as e:
-            logger.error(f"Error in resource_usage_handler for session {session.session_id}: {e}")
+            logger.error("Error in resource_usage_handler for session %s: %s", session.session_id, e)
         finally:
             if stream and not stream.is_closed:
                 await stream.close()
 
     def _register_handlers(self) -> None:
         """Register session handlers for various performance test routes."""
-        self.route("/echo")(combined_echo_handler)
-        self.route("/connection_test")(self.connection_test_handler)
-        self.route("/persistent_echo")(self.persistent_echo_handler)
-        self.route("/discard")(self.create_long_running_stream_handler(handle_stream_discard))
-        self.route("/produce")(self.create_long_running_stream_handler(handle_stream_produce))
-        self.route("/request_response")(self.create_long_running_stream_handler(handle_stream_request_response))
-        self.route("/resource_usage")(self.resource_usage_handler)
+        self.route(path="/echo")(combined_echo_handler)
+        self.route(path="/connection_test")(self.connection_test_handler)
+        self.route(path="/persistent_echo")(self.persistent_echo_handler)
+        self.route(path="/discard")(self.create_long_running_stream_handler(handle_stream_discard))
+        self.route(path="/produce")(self.create_long_running_stream_handler(handle_stream_produce))
+        self.route(path="/request_response")(self.create_long_running_stream_handler(handle_stream_request_response))
+        self.route(path="/resource_usage")(self.resource_usage_handler)
 
 
-async def handle_stream_echo(stream: WebTransportStream) -> None:
+async def handle_stream_echo(*, stream: WebTransportStream) -> None:
     """Read all data from a stream and echo it back prefixed."""
     try:
         request_data = await stream.read_all()
         if request_data:
-            await stream.write_all(b"ECHO: " + request_data)
+            await stream.write_all(data=b"ECHO: " + request_data)
     except ConnectionError:
         pass
     finally:
@@ -165,7 +165,7 @@ async def handle_stream_produce(stream: WebTransportStream) -> None:
         bytes_sent = 0
         while bytes_sent < size_to_send:
             chunk = dummy_chunk[: min(len(dummy_chunk), size_to_send - bytes_sent)]
-            await stream.write(chunk)
+            await stream.write(data=chunk)
             bytes_sent += len(chunk)
 
     except (ValueError, ConnectionError):
@@ -181,7 +181,7 @@ async def handle_stream_request_response(stream: WebTransportStream) -> None:
         request = await stream.read_all()
         if request:
             response = b"R" * len(request)
-            await stream.write_all(response)
+            await stream.write_all(data=response)
     except ConnectionError:
         pass
     finally:
@@ -189,31 +189,31 @@ async def handle_stream_request_response(stream: WebTransportStream) -> None:
             await stream.close()
 
 
-async def datagram_echo_task(session: WebTransportSession) -> None:
+async def datagram_echo_task(*, session: WebTransportSession) -> None:
     """Receive datagrams and echo them back in a loop."""
     try:
         datagrams = await session.datagrams
         while True:
             data = await datagrams.receive()
-            await datagrams.send(b"ECHO: " + data)
+            await datagrams.send(data=b"ECHO: " + data)
     except (ConnectionError, asyncio.CancelledError):
         pass
 
 
-async def stream_handling_task(session: WebTransportSession) -> None:
+async def stream_handling_task(*, session: WebTransportSession) -> None:
     """Handle all incoming streams for a session's lifetime."""
     try:
         async for stream in session.incoming_streams():
             if isinstance(stream, WebTransportStream):
-                asyncio.create_task(handle_stream_echo(stream))
+                asyncio.create_task(handle_stream_echo(stream=stream))
     except (ConnectionError, asyncio.CancelledError):
         pass
 
 
 async def combined_echo_handler(session: WebTransportSession) -> None:
     """Handle sessions by echoing both datagrams and streams, with robust task cleanup."""
-    dgram_task = asyncio.create_task(datagram_echo_task(session))
-    strm_task = asyncio.create_task(stream_handling_task(session))
+    dgram_task = asyncio.create_task(datagram_echo_task(session=session))
+    strm_task = asyncio.create_task(stream_handling_task(session=session))
 
     try:
         await session.wait_closed()
@@ -226,8 +226,8 @@ async def combined_echo_handler(session: WebTransportSession) -> None:
 async def main() -> None:
     """Set up and run the performance test server."""
     if not CERT_PATH.exists() or not KEY_PATH.exists():
-        logger.info(f"Generating self-signed certificate for {CERT_PATH.stem}...")
-        generate_self_signed_cert(CERT_PATH.stem, output_dir=".")
+        logger.info("Generating self-signed certificate for %s...", CERT_PATH.stem)
+        generate_self_signed_cert(hostname=CERT_PATH.stem, output_dir=".")
 
     logger.info("Starting PyWebTransport Performance Test Server...")
     config = ServerConfig.create(
@@ -242,10 +242,10 @@ async def main() -> None:
         stream_cleanup_interval=STREAM_CLEANUP_INTERVAL,
     )
     app = PerformanceServerApp(config=config)
-    logger.info(f"Server binding to {config.bind_host}:{config.bind_port}")
-    logger.info(f"Maximum connections (default): {config.max_connections}")
-    logger.info(f"Connection idle timeout (default): {config.connection_idle_timeout}s")
-    logger.info(f"Session cleanup interval set to: {config.session_cleanup_interval}s")
+    logger.info("Server binding to %s:%s", config.bind_host, config.bind_port)
+    logger.info("Maximum connections (default): %s", config.max_connections)
+    logger.info("Connection idle timeout (default): %s" "s", config.connection_idle_timeout)
+    logger.info("Session cleanup interval set to: %s" "s", config.session_cleanup_interval)
     if DEBUG_MODE:
         logger.info("Debug mode enabled - verbose logging active")
     logger.info("Ready for performance tests!")
@@ -260,5 +260,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Server stopped gracefully by user.")
     except Exception as e:
-        logger.critical(f"Server crashed unexpectedly: {e}", exc_info=True)
+        logger.critical("Server crashed unexpectedly: %s", e, exc_info=True)
         sys.exit(1)

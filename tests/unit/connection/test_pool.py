@@ -108,11 +108,11 @@ class TestConnectionPool:
     async def test_return_connection_full_pool_closes_it(self, mock_connection_factory: Callable[[], Any]) -> None:
         async with ConnectionPool(max_size=1) as pool:
             conn1 = mock_connection_factory()
-            await pool.return_connection(conn1)
+            await pool.return_connection(connection=conn1)
             assert len(pool._pool["127.0.0.1:4433"]) == 1
             conn2 = mock_connection_factory()
 
-            await pool.return_connection(conn2)
+            await pool.return_connection(connection=conn2)
 
             assert len(pool._pool["127.0.0.1:4433"]) == 1
             conn2.close.assert_awaited_once()
@@ -123,7 +123,7 @@ class TestConnectionPool:
             mock_connection.is_connected = False
             pool._total_connections["127.0.0.1:4433"] = 1
 
-            await pool.return_connection(mock_connection)
+            await pool.return_connection(connection=mock_connection)
 
             assert not pool._pool
             assert pool._total_connections["127.0.0.1:4433"] == 0
@@ -134,7 +134,7 @@ class TestConnectionPool:
         async with ConnectionPool() as pool:
             mock_connection.remote_address = None
 
-            await pool.return_connection(mock_connection)
+            await pool.return_connection(connection=mock_connection)
 
             assert not pool._pool
             cast(AsyncMock, mock_connection.close).assert_awaited_once()
@@ -170,7 +170,7 @@ class TestConnectionPool:
 
             conn1 = await tasks[0]
             await tasks[1]
-            await pool.return_connection(conn1)
+            await pool.return_connection(connection=conn1)
             conn3 = await asyncio.wait_for(tasks[2], timeout=1.0)
 
             assert conn3 is conn1
@@ -179,7 +179,6 @@ class TestConnectionPool:
     @pytest.mark.asyncio
     async def test_internal_methods_are_safe_before_activation(self) -> None:
         pool = ConnectionPool()
-
         await pool._cleanup_idle_connections()
 
     def test_start_cleanup_task_is_idempotent(self, mocker: MockerFixture) -> None:
@@ -197,7 +196,6 @@ class TestConnectionPool:
         pool = ConnectionPool()
         mocker.patch("asyncio.create_task", side_effect=RuntimeError("no loop"))
         mocker.patch.object(pool, "_cleanup_idle_connections")
-
         pool._start_cleanup_task()
 
     @pytest.mark.asyncio
@@ -248,9 +246,7 @@ class TestConnectionPool:
                 "pywebtransport.connection.pool.time.time",
                 side_effect=[ValueError("Time is broken"), time.time()],
             )
-
             await pool._cleanup_idle_connections()
-
             assert "Pool cleanup task error" in caplog.text
 
     def test_get_stats(self, mocker: MockerFixture) -> None:

@@ -10,9 +10,49 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
 
-from pywebtransport.constants import Defaults, WebTransportConstants
+from pywebtransport.constants import (
+    DEFAULT_ACCESS_LOG,
+    DEFAULT_ALPN_PROTOCOLS,
+    DEFAULT_AUTO_RECONNECT,
+    DEFAULT_BIND_HOST,
+    DEFAULT_BUFFER_SIZE,
+    DEFAULT_CERTFILE,
+    DEFAULT_CLIENT_MAX_CONNECTIONS,
+    DEFAULT_CLIENT_VERIFY_MODE,
+    DEFAULT_CLOSE_TIMEOUT,
+    DEFAULT_CONGESTION_CONTROL_ALGORITHM,
+    DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_CONNECTION_CLEANUP_INTERVAL,
+    DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
+    DEFAULT_CONNECTION_IDLE_TIMEOUT,
+    DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
+    DEFAULT_DEBUG,
+    DEFAULT_DEV_PORT,
+    DEFAULT_KEEP_ALIVE,
+    DEFAULT_KEYFILE,
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_MAX_DATAGRAM_SIZE,
+    DEFAULT_MAX_INCOMING_STREAMS,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_MAX_RETRY_DELAY,
+    DEFAULT_MAX_SESSIONS,
+    DEFAULT_MAX_STREAMS,
+    DEFAULT_MAX_STREAMS_PER_CONNECTION,
+    DEFAULT_READ_TIMEOUT,
+    DEFAULT_RETRY_BACKOFF,
+    DEFAULT_RETRY_DELAY,
+    DEFAULT_SERVER_MAX_CONNECTIONS,
+    DEFAULT_SERVER_VERIFY_MODE,
+    DEFAULT_SESSION_CLEANUP_INTERVAL,
+    DEFAULT_STREAM_CLEANUP_INTERVAL,
+    DEFAULT_STREAM_CREATION_TIMEOUT,
+    DEFAULT_WRITE_TIMEOUT,
+    MAX_BUFFER_SIZE,
+    SUPPORTED_CONGESTION_CONTROL_ALGORITHMS,
+    Defaults,
+)
 from pywebtransport.exceptions import ConfigurationError, certificate_not_found, invalid_config
-from pywebtransport.types import Address, Headers
+from pywebtransport.types import Address, Headers, MiddlewareProtocol
 from pywebtransport.utils import normalize_headers
 from pywebtransport.version import __version__
 
@@ -23,46 +63,46 @@ __all__ = [
 ]
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ClientConfig:
     """A comprehensive configuration for the WebTransport client."""
 
-    connect_timeout: float = WebTransportConstants.DEFAULT_CONNECT_TIMEOUT
-    read_timeout: float | None = WebTransportConstants.DEFAULT_READ_TIMEOUT
-    write_timeout: float | None = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
-    close_timeout: float = WebTransportConstants.DEFAULT_CLOSE_TIMEOUT
-    stream_creation_timeout: float = WebTransportConstants.DEFAULT_STREAM_CREATION_TIMEOUT
-    connection_keepalive_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
-    connection_cleanup_interval: float = WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL
-    connection_idle_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT
-    connection_idle_check_interval: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
-    stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL
-    max_connections: int = WebTransportConstants.DEFAULT_CLIENT_MAX_CONNECTIONS
-    max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS
-    max_incoming_streams: int = WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS
-    stream_buffer_size: int = WebTransportConstants.DEFAULT_BUFFER_SIZE
-    max_stream_buffer_size: int = WebTransportConstants.MAX_BUFFER_SIZE
-    verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+    alpn_protocols: list[str] = field(default_factory=lambda: list(DEFAULT_ALPN_PROTOCOLS))
+    auto_reconnect: bool = DEFAULT_AUTO_RECONNECT
     ca_certs: str | None = None
     certfile: str | None = None
-    keyfile: str | None = None
-    check_hostname: bool = True
-    keep_alive: bool = True
-    alpn_protocols: list[str] = field(default_factory=lambda: list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS))
-    http_version: str = "3"
-    user_agent: str = f"pywebtransport/{__version__}"
+    close_timeout: float = DEFAULT_CLOSE_TIMEOUT
+    congestion_control_algorithm: str = DEFAULT_CONGESTION_CONTROL_ALGORITHM
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT
+    connection_cleanup_interval: float = DEFAULT_CONNECTION_CLEANUP_INTERVAL
+    connection_idle_check_interval: float = DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
+    connection_idle_timeout: float = DEFAULT_CONNECTION_IDLE_TIMEOUT
+    connection_keepalive_timeout: float = DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
+    debug: bool = DEFAULT_DEBUG
     headers: Headers = field(default_factory=dict)
-    max_datagram_size: int = WebTransportConstants.MAX_DATAGRAM_SIZE
-    max_retries: int = 3
-    retry_delay: float = 1.0
-    retry_backoff: float = 2.0
-    max_retry_delay: float = 30.0
-    debug: bool = False
-    log_level: str = "INFO"
+    keep_alive: bool = DEFAULT_KEEP_ALIVE
+    keyfile: str | None = None
+    log_level: str = DEFAULT_LOG_LEVEL
+    max_connections: int = DEFAULT_CLIENT_MAX_CONNECTIONS
+    max_datagram_size: int = DEFAULT_MAX_DATAGRAM_SIZE
+    max_incoming_streams: int = DEFAULT_MAX_INCOMING_STREAMS
+    max_retries: int = DEFAULT_MAX_RETRIES
+    max_retry_delay: float = DEFAULT_MAX_RETRY_DELAY
+    max_stream_buffer_size: int = MAX_BUFFER_SIZE
+    max_streams: int = DEFAULT_MAX_STREAMS
+    read_timeout: float | None = DEFAULT_READ_TIMEOUT
+    retry_backoff: float = DEFAULT_RETRY_BACKOFF
+    retry_delay: float = DEFAULT_RETRY_DELAY
+    stream_buffer_size: int = DEFAULT_BUFFER_SIZE
+    stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
+    stream_creation_timeout: float = DEFAULT_STREAM_CREATION_TIMEOUT
+    user_agent: str = f"pywebtransport/{__version__}"
+    verify_mode: ssl.VerifyMode | None = DEFAULT_CLIENT_VERIFY_MODE
+    write_timeout: float | None = DEFAULT_WRITE_TIMEOUT
 
     def __post_init__(self) -> None:
         """Normalize headers and validate the configuration after initialization."""
-        self.headers = normalize_headers(self.headers)
+        self.headers = normalize_headers(headers=self.headers)
         if "user-agent" not in self.headers:
             self.headers["user-agent"] = self.user_agent
         self.validate()
@@ -71,7 +111,7 @@ class ClientConfig:
     def create(cls, **kwargs: Any) -> Self:
         """Factory method to create a client configuration with specified overrides."""
         config_dict = {**Defaults.get_client_config(), **kwargs}
-        return cls.from_dict(config_dict)
+        return cls.from_dict(config_dict=config_dict)
 
     @classmethod
     def create_for_development(cls, *, verify_ssl: bool = False) -> Self:
@@ -86,7 +126,11 @@ class ClientConfig:
 
     @classmethod
     def create_for_production(
-        cls, *, ca_certs: str | None = None, certfile: str | None = None, keyfile: str | None = None
+        cls,
+        *,
+        ca_certs: str | None = None,
+        certfile: str | None = None,
+        keyfile: str | None = None,
     ) -> Self:
         """Factory method to create a client configuration suitable for production."""
         return cls.create(
@@ -104,7 +148,7 @@ class ClientConfig:
         )
 
     @classmethod
-    def from_dict(cls, config_dict: dict[str, Any]) -> Self:
+    def from_dict(cls, *, config_dict: dict[str, Any]) -> Self:
         """Create a ClientConfig instance from a dictionary."""
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}
@@ -114,7 +158,7 @@ class ClientConfig:
         """Create a deep copy of the configuration."""
         return copy.deepcopy(self)
 
-    def merge(self, other: ClientConfig | dict[str, Any]) -> Self:
+    def merge(self, *, other: ClientConfig | dict[str, Any]) -> Self:
         """Merge this configuration with another config or dictionary."""
         match other:
             case dict():
@@ -150,99 +194,130 @@ class ClientConfig:
             if hasattr(new_config, key):
                 setattr(new_config, key, value)
             else:
-                raise invalid_config(key, value, "unknown configuration key")
+                raise invalid_config(key=key, value=value, reason="unknown configuration key")
         new_config.validate()
         return new_config
 
     def validate(self) -> None:
         """Validate the integrity and correctness of the configuration values."""
+        if not self.alpn_protocols:
+            raise invalid_config(key="alpn_protocols", value=self.alpn_protocols, reason="cannot be empty")
+        if self.congestion_control_algorithm not in SUPPORTED_CONGESTION_CONTROL_ALGORITHMS:
+            raise invalid_config(
+                key="congestion_control_algorithm",
+                value=self.congestion_control_algorithm,
+                reason=f"must be one of {SUPPORTED_CONGESTION_CONTROL_ALGORITHMS}",
+            )
+
         try:
-            _validate_timeout(self.connect_timeout)
-            _validate_timeout(self.read_timeout)
-            _validate_timeout(self.write_timeout)
-            _validate_timeout(self.stream_creation_timeout)
-            _validate_timeout(self.close_timeout)
-            _validate_timeout(self.connection_keepalive_timeout)
-            _validate_timeout(self.connection_cleanup_interval)
-            _validate_timeout(self.connection_idle_timeout)
-            _validate_timeout(self.connection_idle_check_interval)
-            _validate_timeout(self.stream_cleanup_interval)
+            _validate_timeout(timeout=self.close_timeout)
+            _validate_timeout(timeout=self.connect_timeout)
+            _validate_timeout(timeout=self.connection_cleanup_interval)
+            _validate_timeout(timeout=self.connection_idle_check_interval)
+            _validate_timeout(timeout=self.connection_idle_timeout)
+            _validate_timeout(timeout=self.connection_keepalive_timeout)
+            _validate_timeout(timeout=self.read_timeout)
+            _validate_timeout(timeout=self.stream_cleanup_interval)
+            _validate_timeout(timeout=self.stream_creation_timeout)
+            _validate_timeout(timeout=self.write_timeout)
         except ValueError as e:
-            raise invalid_config("timeout", str(e), "invalid timeout value") from e
+            raise invalid_config(key="timeout", value=str(e), reason="invalid timeout value") from e
+
         if self.max_connections <= 0:
-            raise invalid_config("max_connections", self.max_connections, "must be positive")
-        if self.max_streams <= 0:
-            raise invalid_config("max_streams", self.max_streams, "must be positive")
+            raise invalid_config(key="max_connections", value=self.max_connections, reason="must be positive")
+        if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
+            raise invalid_config(
+                key="max_datagram_size",
+                value=self.max_datagram_size,
+                reason="must be 1-65535",
+            )
         if self.max_incoming_streams <= 0:
-            raise invalid_config("max_incoming_streams", self.max_incoming_streams, "must be positive")
+            raise invalid_config(
+                key="max_incoming_streams",
+                value=self.max_incoming_streams,
+                reason="must be positive",
+            )
+        if self.max_streams <= 0:
+            raise invalid_config(key="max_streams", value=self.max_streams, reason="must be positive")
         if self.stream_buffer_size <= 0:
-            raise invalid_config("stream_buffer_size", self.stream_buffer_size, "must be positive")
+            raise invalid_config(
+                key="stream_buffer_size",
+                value=self.stream_buffer_size,
+                reason="must be positive",
+            )
         if self.max_stream_buffer_size < self.stream_buffer_size:
-            raise invalid_config("max_stream_buffer_size", self.max_stream_buffer_size, "must be >= stream_buffer_size")
-        if self.verify_mode not in [ssl.CERT_NONE, ssl.CERT_OPTIONAL, ssl.CERT_REQUIRED, None]:
-            raise invalid_config("verify_mode", self.verify_mode, "invalid SSL verify mode")
-        if self.certfile and not Path(self.certfile).exists():
-            raise certificate_not_found(self.certfile)
-        if self.keyfile and not Path(self.keyfile).exists():
-            raise certificate_not_found(self.keyfile)
+            raise invalid_config(
+                key="max_stream_buffer_size",
+                value=self.max_stream_buffer_size,
+                reason="must be >= stream_buffer_size",
+            )
+
+        if self.max_retries < 0:
+            raise invalid_config(key="max_retries", value=self.max_retries, reason="must be non-negative")
+        if self.max_retry_delay <= 0:
+            raise invalid_config(
+                key="max_retry_delay",
+                value=self.max_retry_delay,
+                reason="must be positive",
+            )
+        if self.retry_backoff < 1.0:
+            raise invalid_config(key="retry_backoff", value=self.retry_backoff, reason="must be >= 1.0")
+        if self.retry_delay <= 0:
+            raise invalid_config(key="retry_delay", value=self.retry_delay, reason="must be positive")
+
         if self.ca_certs and not Path(self.ca_certs).exists():
-            raise certificate_not_found(self.ca_certs)
+            raise certificate_not_found(path=self.ca_certs)
+        if self.certfile and not Path(self.certfile).exists():
+            raise certificate_not_found(path=self.certfile)
+        if self.keyfile and not Path(self.keyfile).exists():
+            raise certificate_not_found(path=self.keyfile)
         if bool(self.certfile) != bool(self.keyfile):
             raise invalid_config(
-                "certfile/keyfile",
-                f"certfile={self.certfile}, keyfile={self.keyfile}",
-                "both must be provided together",
+                key="certfile/keyfile",
+                value=f"certfile={self.certfile}, keyfile={self.keyfile}",
+                reason="both must be provided together",
             )
-        if self.http_version not in ["2", "3"]:
-            raise invalid_config("http_version", self.http_version, "must be '2' or '3'")
-        if not self.alpn_protocols:
-            raise invalid_config("alpn_protocols", self.alpn_protocols, "cannot be empty")
-        if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
-            raise invalid_config("max_datagram_size", self.max_datagram_size, "must be 1-65535")
-        if self.max_retries < 0:
-            raise invalid_config("max_retries", self.max_retries, "must be non-negative")
-        if self.retry_delay <= 0:
-            raise invalid_config("retry_delay", self.retry_delay, "must be positive")
-        if self.retry_backoff < 1.0:
-            raise invalid_config("retry_backoff", self.retry_backoff, "must be >= 1.0")
-        if self.max_retry_delay <= 0:
-            raise invalid_config("max_retry_delay", self.max_retry_delay, "must be positive")
+        if self.verify_mode not in [
+            ssl.CERT_NONE,
+            ssl.CERT_OPTIONAL,
+            ssl.CERT_REQUIRED,
+            None,
+        ]:
+            raise invalid_config(key="verify_mode", value=self.verify_mode, reason="invalid SSL verify mode")
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ServerConfig:
     """A comprehensive configuration for the WebTransport server."""
 
-    bind_host: str = "localhost"
-    bind_port: int = WebTransportConstants.DEFAULT_DEV_PORT
-    max_connections: int = WebTransportConstants.DEFAULT_SERVER_MAX_CONNECTIONS
-    max_sessions: int = WebTransportConstants.DEFAULT_MAX_SESSIONS
-    max_streams_per_connection: int = WebTransportConstants.DEFAULT_MAX_STREAMS_PER_CONNECTION
-    max_incoming_streams: int = WebTransportConstants.DEFAULT_MAX_INCOMING_STREAMS
-    connection_keepalive_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
-    connection_cleanup_interval: float = WebTransportConstants.DEFAULT_CONNECTION_CLEANUP_INTERVAL
-    connection_idle_timeout: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_TIMEOUT
-    connection_idle_check_interval: float = WebTransportConstants.DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
-    session_cleanup_interval: float = WebTransportConstants.DEFAULT_SESSION_CLEANUP_INTERVAL
-    stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL
-    read_timeout: float | None = WebTransportConstants.DEFAULT_READ_TIMEOUT
-    write_timeout: float | None = WebTransportConstants.DEFAULT_WRITE_TIMEOUT
-    certfile: str = ""
-    keyfile: str = ""
+    access_log: bool = DEFAULT_ACCESS_LOG
+    alpn_protocols: list[str] = field(default_factory=lambda: list(DEFAULT_ALPN_PROTOCOLS))
+    bind_host: str = DEFAULT_BIND_HOST
+    bind_port: int = DEFAULT_DEV_PORT
     ca_certs: str | None = None
-    verify_mode: ssl.VerifyMode = ssl.CERT_NONE
-    alpn_protocols: list[str] = field(default_factory=lambda: list(WebTransportConstants.DEFAULT_ALPN_PROTOCOLS))
-    http_version: str = "3"
-    backlog: int = 128
-    reuse_port: bool = True
-    keep_alive: bool = True
-    stream_buffer_size: int = WebTransportConstants.DEFAULT_BUFFER_SIZE
-    max_stream_buffer_size: int = WebTransportConstants.MAX_BUFFER_SIZE
-    max_datagram_size: int = WebTransportConstants.MAX_DATAGRAM_SIZE
-    middleware: list[Any] = field(default_factory=list)
-    debug: bool = False
-    log_level: str = "INFO"
-    access_log: bool = True
+    certfile: str = DEFAULT_CERTFILE
+    congestion_control_algorithm: str = DEFAULT_CONGESTION_CONTROL_ALGORITHM
+    connection_cleanup_interval: float = DEFAULT_CONNECTION_CLEANUP_INTERVAL
+    connection_idle_check_interval: float = DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
+    connection_idle_timeout: float = DEFAULT_CONNECTION_IDLE_TIMEOUT
+    connection_keepalive_timeout: float = DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
+    debug: bool = DEFAULT_DEBUG
+    keep_alive: bool = DEFAULT_KEEP_ALIVE
+    keyfile: str = DEFAULT_KEYFILE
+    log_level: str = DEFAULT_LOG_LEVEL
+    max_connections: int = DEFAULT_SERVER_MAX_CONNECTIONS
+    max_datagram_size: int = DEFAULT_MAX_DATAGRAM_SIZE
+    max_incoming_streams: int = DEFAULT_MAX_INCOMING_STREAMS
+    max_sessions: int = DEFAULT_MAX_SESSIONS
+    max_stream_buffer_size: int = MAX_BUFFER_SIZE
+    max_streams_per_connection: int = DEFAULT_MAX_STREAMS_PER_CONNECTION
+    middleware: list[MiddlewareProtocol] = field(default_factory=list)
+    read_timeout: float | None = DEFAULT_READ_TIMEOUT
+    session_cleanup_interval: float = DEFAULT_SESSION_CLEANUP_INTERVAL
+    stream_buffer_size: int = DEFAULT_BUFFER_SIZE
+    stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
+    verify_mode: ssl.VerifyMode = DEFAULT_SERVER_VERIFY_MODE
+    write_timeout: float | None = DEFAULT_WRITE_TIMEOUT
 
     def __post_init__(self) -> None:
         """Validate the configuration after initialization."""
@@ -252,11 +327,16 @@ class ServerConfig:
     def create(cls, **kwargs: Any) -> Self:
         """Factory method to create a server configuration with specified overrides."""
         config_dict = {**Defaults.get_server_config(), **kwargs}
-        return cls.from_dict(config_dict)
+        return cls.from_dict(config_dict=config_dict)
 
     @classmethod
     def create_for_development(
-        cls, *, host: str = "localhost", port: int = 4433, certfile: str | None = None, keyfile: str | None = None
+        cls,
+        *,
+        host: str = "localhost",
+        port: int = 4433,
+        certfile: str | None = None,
+        keyfile: str | None = None,
     ) -> Self:
         """Factory method to create a server configuration suitable for development."""
         config = cls.create(
@@ -276,7 +356,13 @@ class ServerConfig:
 
     @classmethod
     def create_for_production(
-        cls, *, host: str, port: int, certfile: str, keyfile: str, ca_certs: str | None = None
+        cls,
+        *,
+        host: str,
+        port: int,
+        certfile: str,
+        keyfile: str,
+        ca_certs: str | None = None,
     ) -> Self:
         """Factory method to create a server configuration suitable for production."""
         return cls.create(
@@ -286,14 +372,14 @@ class ServerConfig:
             keyfile=keyfile,
             ca_certs=ca_certs,
             verify_mode=ssl.CERT_OPTIONAL if ca_certs else ssl.CERT_NONE,
-            max_connections=WebTransportConstants.DEFAULT_SERVER_MAX_CONNECTIONS,
-            max_streams_per_connection=WebTransportConstants.DEFAULT_MAX_STREAMS_PER_CONNECTION,
+            max_connections=DEFAULT_SERVER_MAX_CONNECTIONS,
+            max_streams_per_connection=DEFAULT_MAX_STREAMS_PER_CONNECTION,
             debug=False,
             log_level="INFO",
         )
 
     @classmethod
-    def from_dict(cls, config_dict: dict[str, Any]) -> Self:
+    def from_dict(cls, *, config_dict: dict[str, Any]) -> Self:
         """Create a ServerConfig instance from a dictionary."""
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}
@@ -307,7 +393,7 @@ class ServerConfig:
         """Get the bind address as a (host, port) tuple."""
         return (self.bind_host, self.bind_port)
 
-    def merge(self, other: ServerConfig | dict[str, Any]) -> Self:
+    def merge(self, *, other: ServerConfig | dict[str, Any]) -> Self:
         """Merge this configuration with another config or dictionary."""
         match other:
             case dict():
@@ -343,74 +429,103 @@ class ServerConfig:
             if hasattr(new_config, key):
                 setattr(new_config, key, value)
             else:
-                raise invalid_config(key, value, "unknown configuration key")
+                raise invalid_config(key=key, value=value, reason="unknown configuration key")
         new_config.validate()
         return new_config
 
     def validate(self) -> None:
         """Validate the integrity and correctness of the configuration values."""
+        if not self.alpn_protocols:
+            raise invalid_config(key="alpn_protocols", value=self.alpn_protocols, reason="cannot be empty")
         if not self.bind_host:
-            raise invalid_config("bind_host", self.bind_host, "cannot be empty")
+            raise invalid_config(key="bind_host", value=self.bind_host, reason="cannot be empty")
         try:
-            _validate_port(self.bind_port)
+            _validate_port(port=self.bind_port)
         except ValueError as e:
-            raise invalid_config("bind_port", self.bind_port, str(e)) from e
+            raise invalid_config(key="bind_port", value=self.bind_port, reason=str(e)) from e
+        if self.congestion_control_algorithm not in SUPPORTED_CONGESTION_CONTROL_ALGORITHMS:
+            raise invalid_config(
+                key="congestion_control_algorithm",
+                value=self.congestion_control_algorithm,
+                reason=f"must be one of {SUPPORTED_CONGESTION_CONTROL_ALGORITHMS}",
+            )
+
+        try:
+            _validate_timeout(timeout=self.connection_cleanup_interval)
+            _validate_timeout(timeout=self.connection_idle_check_interval)
+            _validate_timeout(timeout=self.connection_idle_timeout)
+            _validate_timeout(timeout=self.connection_keepalive_timeout)
+            _validate_timeout(timeout=self.read_timeout)
+            _validate_timeout(timeout=self.session_cleanup_interval)
+            _validate_timeout(timeout=self.stream_cleanup_interval)
+            _validate_timeout(timeout=self.write_timeout)
+        except ValueError as e:
+            raise invalid_config(key="timeout", value=str(e), reason="invalid timeout value") from e
+
         if self.max_connections <= 0:
-            raise invalid_config("max_connections", self.max_connections, "must be positive")
-        if self.max_sessions <= 0:
-            raise invalid_config("max_sessions", self.max_sessions, "must be positive")
-        if self.max_streams_per_connection <= 0:
-            raise invalid_config("max_streams_per_connection", self.max_streams_per_connection, "must be positive")
+            raise invalid_config(key="max_connections", value=self.max_connections, reason="must be positive")
+        if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
+            raise invalid_config(
+                key="max_datagram_size",
+                value=self.max_datagram_size,
+                reason="must be 1-65535",
+            )
         if self.max_incoming_streams <= 0:
-            raise invalid_config("max_incoming_streams", self.max_incoming_streams, "must be positive")
-        try:
-            _validate_timeout(self.connection_keepalive_timeout)
-            _validate_timeout(self.connection_cleanup_interval)
-            _validate_timeout(self.connection_idle_timeout)
-            _validate_timeout(self.connection_idle_check_interval)
-            _validate_timeout(self.session_cleanup_interval)
-            _validate_timeout(self.stream_cleanup_interval)
-            _validate_timeout(self.read_timeout)
-            _validate_timeout(self.write_timeout)
-        except ValueError as e:
-            raise invalid_config("timeout", str(e), "invalid timeout value") from e
+            raise invalid_config(
+                key="max_incoming_streams",
+                value=self.max_incoming_streams,
+                reason="must be positive",
+            )
+        if self.max_sessions <= 0:
+            raise invalid_config(key="max_sessions", value=self.max_sessions, reason="must be positive")
+        if self.max_streams_per_connection <= 0:
+            raise invalid_config(
+                key="max_streams_per_connection",
+                value=self.max_streams_per_connection,
+                reason="must be positive",
+            )
+        if self.stream_buffer_size <= 0:
+            raise invalid_config(
+                key="stream_buffer_size",
+                value=self.stream_buffer_size,
+                reason="must be positive",
+            )
+        if self.max_stream_buffer_size < self.stream_buffer_size:
+            raise invalid_config(
+                key="max_stream_buffer_size",
+                value=self.max_stream_buffer_size,
+                reason="must be >= stream_buffer_size",
+            )
+
+        if self.ca_certs and not Path(self.ca_certs).exists():
+            raise certificate_not_found(path=self.ca_certs)
         if self.certfile and not Path(self.certfile).exists():
-            raise certificate_not_found(self.certfile)
+            raise certificate_not_found(path=self.certfile)
         if self.keyfile and not Path(self.keyfile).exists():
-            raise certificate_not_found(self.keyfile)
+            raise certificate_not_found(path=self.keyfile)
         if bool(self.certfile) != bool(self.keyfile):
             raise invalid_config(
-                "certfile/keyfile",
-                f"certfile={self.certfile}, keyfile={self.keyfile}",
-                "certfile and keyfile must be provided together",
+                key="certfile/keyfile",
+                value=f"certfile={self.certfile}, keyfile={self.keyfile}",
+                reason="certfile and keyfile must be provided together",
             )
-        if self.ca_certs and not Path(self.ca_certs).exists():
-            raise certificate_not_found(self.ca_certs)
-        if self.verify_mode not in [ssl.CERT_NONE, ssl.CERT_OPTIONAL, ssl.CERT_REQUIRED]:
-            raise invalid_config("verify_mode", self.verify_mode, "invalid SSL verify mode")
-        if self.http_version not in ["2", "3"]:
-            raise invalid_config("http_version", self.http_version, "must be '2' or '3'")
-        if not self.alpn_protocols:
-            raise invalid_config("alpn_protocols", self.alpn_protocols, "cannot be empty")
-        if self.backlog <= 0:
-            raise invalid_config("backlog", self.backlog, "must be positive")
-        if self.stream_buffer_size <= 0:
-            raise invalid_config("stream_buffer_size", self.stream_buffer_size, "must be positive")
-        if self.max_stream_buffer_size < self.stream_buffer_size:
-            raise invalid_config("max_stream_buffer_size", self.max_stream_buffer_size, "must be >= stream_buffer_size")
-        if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
-            raise invalid_config("max_datagram_size", self.max_datagram_size, "must be 1-65535")
+        if self.verify_mode not in [
+            ssl.CERT_NONE,
+            ssl.CERT_OPTIONAL,
+            ssl.CERT_REQUIRED,
+        ]:
+            raise invalid_config(key="verify_mode", value=self.verify_mode, reason="invalid SSL verify mode")
 
 
 class ConfigBuilder:
     """A builder for fluently creating client or server configurations."""
 
-    def __init__(self, config_type: str = "client"):
+    def __init__(self, *, config_type: str = "client"):
         """Initialize the configuration builder."""
         self.config_type = config_type
         self._config_dict: dict[str, Any] = {}
 
-    def bind(self, host: str, port: int) -> Self:
+    def bind(self, *, host: str, port: int) -> Self:
         """Set the bind host and port (server only)."""
         if self.config_type != "server":
             raise ConfigurationError("bind() can only be used with server config")
@@ -473,7 +588,13 @@ class ConfigBuilder:
             self._config_dict["verify_mode"] = verify_mode
         return self
 
-    def timeout(self, *, connect: float | None = None, read: float | None = None, write: float | None = None) -> Self:
+    def timeout(
+        self,
+        *,
+        connect: float | None = None,
+        read: float | None = None,
+        write: float | None = None,
+    ) -> Self:
         """Set timeout values for the configuration."""
         if connect is not None:
             self._config_dict["connect_timeout"] = connect
@@ -484,13 +605,13 @@ class ConfigBuilder:
         return self
 
 
-def _validate_port(port: Any) -> None:
+def _validate_port(*, port: Any) -> None:
     """Validate that a value is a valid network port."""
     if not isinstance(port, int) or not (1 <= port <= 65535):
         raise ValueError(f"Port must be an integer between 1 and 65535, got {port}")
 
 
-def _validate_timeout(timeout: float | None) -> None:
+def _validate_timeout(*, timeout: float | None) -> None:
     """Validate a timeout value."""
     if timeout is not None:
         if not isinstance(timeout, (int, float)):

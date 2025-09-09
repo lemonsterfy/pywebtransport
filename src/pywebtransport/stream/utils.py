@@ -13,7 +13,7 @@ __all__ = [
     "echo_stream",
 ]
 
-logger = get_logger("stream.utils")
+logger = get_logger(name="stream.utils")
 
 
 async def copy_stream_data(
@@ -26,11 +26,11 @@ async def copy_stream_data(
     total_bytes = 0
     try:
         async for chunk in source.read_iter(chunk_size=chunk_size):
-            await destination.write(chunk)
+            await destination.write(data=chunk)
             total_bytes += len(chunk)
         await destination.close()
     except StreamError as e:
-        logger.error(f"Error copying stream data: {e}")
+        logger.error("Error copying stream data: %s", e, exc_info=True)
         await destination.abort(code=1)
         raise
     return total_bytes
@@ -40,8 +40,8 @@ async def echo_stream(*, stream: WebTransportStream) -> None:
     """Echo all data received on a bidirectional stream back to the sender."""
     try:
         async for chunk in stream.read_iter():
-            await stream.write(chunk)
+            await stream.write(data=chunk)
         await stream.close()
     except StreamError as e:
-        logger.error(f"Error in echo stream: {e}")
+        logger.error("Error in echo stream: %s", e, exc_info=True)
         await stream.abort(code=1)

@@ -32,31 +32,31 @@ async def test_stream_creation() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            logger.info(f"Connecting to {SERVER_URL}...")
-            session = await client.connect(SERVER_URL)
-            logger.info(f"Connected, session ID: {session.session_id}")
+        async with WebTransportClient(config=config) as client:
+            logger.info("Connecting to %s...", SERVER_URL)
+            session = await client.connect(url=SERVER_URL)
+            logger.info("Connected, session ID: %s", session.session_id)
 
             logger.info("Creating bidirectional stream...")
             stream = await session.create_bidirectional_stream()
 
             logger.info("Stream created successfully!")
-            logger.info(f"   - Stream ID: {stream.stream_id}")
-            logger.info(f"   - Stream state: {stream.state.value}")
-            logger.info(f"   - Readable: {stream.is_readable}, Writable: {stream.is_writable}")
+            logger.info("   - Stream ID: %s", stream.stream_id)
+            logger.info("   - Stream state: %s", stream.state.value)
+            logger.info("   - Readable: %s, Writable: %s", stream.is_readable, stream.is_writable)
 
             await stream.close()
             logger.info("Stream closed.")
             return True
 
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Connection failed: {e}")
+        logger.error("FAILURE: Connection failed: %s", e)
         return False
     except StreamError as e:
-        logger.error(f"FAILURE: Stream creation failed: {e}", exc_info=True)
+        logger.error("FAILURE: Stream creation failed: %s", e, exc_info=True)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -67,18 +67,18 @@ async def test_simple_echo() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             stream = await session.create_bidirectional_stream()
-            logger.info(f"Stream {stream.stream_id} created for echo test.")
+            logger.info("Stream %s created for echo test.", stream.stream_id)
 
             test_message = b"Hello, WebTransport!"
-            logger.info(f"Sending: {test_message!r}")
-            await stream.write_all(test_message)
+            logger.info("Sending: %r", test_message)
+            await stream.write_all(data=test_message)
 
             logger.info("Waiting for echo response...")
             response_data = await stream.read_all()
-            logger.info(f"Received response: {response_data!r}")
+            logger.info("Received response: %r", response_data)
 
             expected_response = b"ECHO: " + test_message
             if response_data == expected_response:
@@ -86,15 +86,15 @@ async def test_simple_echo() -> bool:
                 return True
             else:
                 logger.error("FAILURE: Echo response mismatch!")
-                logger.error(f"   - Expected: {expected_response!r}")
-                logger.error(f"   - Received: {response_data!r}")
+                logger.error("   - Expected: %r", expected_response)
+                logger.error("   - Received: %r", response_data)
                 return False
 
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -105,39 +105,39 @@ async def test_multiple_messages() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             messages = [b"Message 1", b"Message 2", b"Message 3"]
             success_count = 0
 
             for i, message in enumerate(messages):
-                logger.info(f"Processing message {i + 1}/{len(messages)}: {message!r}")
+                logger.info("Processing message %d/%d: %r", i + 1, len(messages), message)
                 stream = await session.create_bidirectional_stream()
                 try:
-                    await stream.write_all(message)
+                    await stream.write_all(data=message)
                     response_data = await stream.read_all()
                     expected = b"ECHO: " + message
                     if response_data == expected:
-                        logger.info(f"   - Echo for message {i + 1} successful.")
+                        logger.info("   - Echo for message %d successful.", i + 1)
                         success_count += 1
                     else:
-                        logger.error(f"   - FAILURE: Echo for message {i + 1} mismatch!")
+                        logger.error("   - FAILURE: Echo for message %d mismatch!", i + 1)
                 finally:
                     if not stream.is_closed:
                         await stream.close()
 
             if success_count == len(messages):
-                logger.info(f"SUCCESS: All {len(messages)} messages echoed correctly!")
+                logger.info("SUCCESS: All %d messages echoed correctly!", len(messages))
                 return True
             else:
-                logger.error(f"FAILURE: Only {success_count}/{len(messages)} messages were successful.")
+                logger.error("FAILURE: Only %d/%d messages were successful.", success_count, len(messages))
                 return False
 
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -157,17 +157,17 @@ async def main() -> int:
         logger.info("")
         try:
             if await test_func():
-                logger.info(f"{test_name}: PASSED")
+                logger.info("%s: PASSED", test_name)
                 passed += 1
             else:
-                logger.error(f"{test_name}: FAILED")
+                logger.error("%s: FAILED", test_name)
         except Exception as e:
-            logger.error(f"{test_name}: CRASHED - {e}", exc_info=True)
+            logger.error("%s: CRASHED - %s", test_name, e, exc_info=True)
         await asyncio.sleep(1)
 
     logger.info("")
     logger.info("=" * 50)
-    logger.info(f"Test 02 Results: {passed}/{total} passed")
+    logger.info("Test 02 Results: %d/%d passed", passed, total)
 
     if passed == total:
         logger.info("TEST 02 PASSED: All stream operations successful!")
@@ -187,6 +187,6 @@ if __name__ == "__main__":
         logger.warning("\nTest interrupted by user.")
         exit_code = 130
     except Exception as e:
-        logger.critical(f"Test suite crashed with an unhandled exception: {e}", exc_info=True)
+        logger.critical("Test suite crashed with an unhandled exception: %s", e, exc_info=True)
     finally:
         sys.exit(exit_code)

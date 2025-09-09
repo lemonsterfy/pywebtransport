@@ -19,7 +19,7 @@ __all__ = [
     "is_heartbeat_datagram",
 ]
 
-logger = get_logger("datagram.utils")
+logger = get_logger(name="datagram.utils")
 
 
 def create_heartbeat_datagram() -> bytes:
@@ -28,8 +28,8 @@ def create_heartbeat_datagram() -> bytes:
 
 
 async def datagram_throughput_test(
-    datagram_stream: WebTransportDatagramDuplexStream,
     *,
+    datagram_stream: WebTransportDatagramDuplexStream,
     duration: float = 10.0,
     datagram_size: int = 1000,
 ) -> dict[str, Any]:
@@ -45,7 +45,7 @@ async def datagram_throughput_test(
 
     while get_timestamp() < end_time:
         try:
-            if not await datagram_stream.try_send(test_data):
+            if not await datagram_stream.try_send(data=test_data):
                 await asyncio.sleep(0.01)
             sent_count += 1
         except Exception:
@@ -64,6 +64,6 @@ async def datagram_throughput_test(
     }
 
 
-def is_heartbeat_datagram(data: bytes) -> bool:
+def is_heartbeat_datagram(*, data: bytes) -> bool:
     """Check if the given data is a heartbeat datagram."""
     return data.startswith(b"HEARTBEAT:")

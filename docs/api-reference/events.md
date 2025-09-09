@@ -1,6 +1,6 @@
-# API Reference: Events
+# API Reference: events
 
-This document provides a comprehensive reference for the `pywebtransport.events` module, which offers a powerful, asynchronous, event-driven framework.
+This module provides a powerful, asynchronous, event-driven framework.
 
 ---
 
@@ -8,9 +8,11 @@ This document provides a comprehensive reference for the `pywebtransport.events`
 
 The base data class for all events within the system.
 
+**Note on Usage**: The constructor for `Event` requires all parameters to be passed as keyword arguments.
+
 ### Constructor
 
-- **`Event(type: EventType | str, timestamp: float = ..., data: EventData | None = None, source: Any | None = None, event_id: str = ...)`**: Initializes a new event object.
+- **`def __init__(self, *, type: EventType | str, timestamp: float = <factory>, data: EventData | None = None, source: Any | None = None, event_id: str = <factory>)`**: Initializes a new event object.
 
 ### Attributes
 
@@ -20,7 +22,7 @@ The base data class for all events within the system.
 - `source` (`Any | None`): The object that originated the event.
 - `event_id` (`str`): A unique identifier for the event instance.
 
-### Boolean Properties
+### Properties
 
 - `is_connection_event` (`bool`): `True` if the event type starts with `"connection_"`.
 - `is_datagram_event` (`bool`): `True` if the event type starts with `"datagram_"`.
@@ -28,45 +30,41 @@ The base data class for all events within the system.
 - `is_session_event` (`bool`): `True` if the event type starts with `"session_"`.
 - `is_stream_event` (`bool`): `True` if the event type starts with `"stream_"`.
 
-### Class Method Factories
+### Class Methods
 
-- **`for_connection(event_type: EventType, connection_info: dict[str, Any]) -> Event`**: Creates a new connection-related event.
-- **`for_datagram(event_type: EventType, datagram_info: dict[str, Any]) -> Event`**: Creates a new datagram-related event.
-- **`for_error(error: Exception, *, source: Any | None = None) -> Event`**: Creates a new error event.
-- **`for_session(event_type: EventType, session_info: dict[str, Any]) -> Event`**: Creates a new session-related event.
-- **`for_stream(event_type: EventType, stream_info: dict[str, Any]) -> Event`**: Creates a new stream-related event.
+- **`def for_connection(cls, *, event_type: EventType, connection_info: dict[str, Any]) -> Self`**: Creates a new connection-related event.
+- **`def for_datagram(cls, *, event_type: EventType, datagram_info: dict[str, Any]) -> Self`**: Creates a new datagram-related event.
+- **`def for_error(cls, *, error: Exception, source: Any = None) -> Self`**: Creates a new error event from an exception.
+- **`def for_session(cls, *, event_type: EventType, session_info: dict[str, Any]) -> Self`**: Creates a new session-related event.
+- **`def for_stream(cls, *, event_type: EventType, stream_info: dict[str, Any]) -> Self`**: Creates a new stream-related event.
 
 ### Instance Methods
 
-- **`to_dict() -> dict[str, Any]`**: Converts the event instance to a dictionary for serialization.
-
----
+- **`def to_dict(self) -> dict[str, Any]`**: Converts the event instance to a dictionary for serialization.
 
 ## EventEmitter Class
 
 The core class for managing and dispatching events.
 
-### Methods
+### Instance Methods
 
-- **`on(event_type: EventType | str, handler: EventHandler) -> None`**: Registers a persistent handler for an event type.
-- **`once(event_type: EventType | str, handler: EventHandler) -> None`**: Registers a handler that will be invoked only once.
-- **`off(event_type: EventType | str, handler: EventHandler | None = None) -> None`**: Removes a specific handler or all handlers for an event type.
-- **`on_any(handler: EventHandler) -> None`**: Registers a wildcard handler that receives all events.
-- **`off_any(handler: EventHandler | None = None) -> None`**: Removes a specific or all wildcard handlers.
-- **`async def emit(event_type: EventType | str, *, data: EventData | None = None, source: Any | None = None) -> None`**: Asynchronously creates and dispatches an event.
-- **`async def wait_for(event_type: EventType | str, *, timeout: Timeout | None = None, condition: Callable[[Event], bool] | None = None) -> Event`**: Waits for a specific event to be emitted that matches an optional condition.
-- **`listeners(event_type: EventType | str) -> list[EventHandler]`**: Returns a list of all listeners for a given event type.
-- **`listener_count(event_type: EventType | str) -> int`**: Returns the number of listeners for a given event type.
-- **`pause() -> None`**: Pauses event processing, queuing any new events.
-- **`resume() -> asyncio.Task | None`**: Resumes processing and dispatches all queued events.
-- **`get_event_history(event_type: EventType | str | None = None, limit: int = 100) -> list[Event]`**: Retrieves the history of recorded events.
-- **`clear_history() -> None`**: Clears the event history.
-- **`remove_all_listeners(event_type: EventType | str | None = None) -> None`**: Removes all listeners for a specific event or for all events.
-- **`set_max_listeners(max_listeners: int) -> None`**: Sets the maximum number of listeners allowed per event type.
-- **`get_stats() -> dict[str, Any]`**: Returns a dictionary of statistics about the emitter.
-- **`async def close() -> None`**: Cancels any running tasks and clears all listeners, preparing the emitter for garbage collection.
-
----
+- **`async def close(self) -> None`**: Cancels running tasks and clears all listeners.
+- **`def clear_history(self) -> None`**: Clears the event history.
+- **`async def emit(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None`**: Asynchronously creates and dispatches an event.
+- **`def get_event_history(self, *, event_type: EventType | str | None = None, limit: int = 100) -> list[Event]`**: Retrieves the history of recorded events.
+- **`def get_stats(self) -> dict[str, Any]`**: Returns a dictionary of statistics about the emitter.
+- **`def listener_count(self, *, event_type: EventType | str) -> int`**: Returns the number of listeners for a given event type.
+- **`def listeners(self, *, event_type: EventType | str) -> list[EventHandler]`**: Returns a list of all listeners for a given event type.
+- **`def off(self, *, event_type: EventType | str, handler: EventHandler | None = None) -> None`**: Removes a handler or all handlers for an event type.
+- **`def off_any(self, *, handler: EventHandler | None = None) -> None`**: Removes a specific or all wildcard handlers.
+- **`def on(self, *, event_type: EventType | str, handler: EventHandler) -> None`**: Registers a persistent handler for an event type.
+- **`def on_any(self, *, handler: EventHandler) -> None`**: Registers a wildcard handler that receives all events.
+- **`def once(self, *, event_type: EventType | str, handler: EventHandler) -> None`**: Registers a handler that will be invoked only once.
+- **`def pause(self) -> None`**: Pauses event processing, queuing any new events.
+- **`def remove_all_listeners(self, *, event_type: EventType | str | None = None) -> None`**: Removes all listeners for a specific or all event types.
+- **`def resume(self) -> asyncio.Task | None`**: Resumes processing and dispatches all queued events.
+- **`def set_max_listeners(self, *, max_listeners: int) -> None`**: Sets the maximum number of listeners allowed per event type.
+- **`async def wait_for(self, *, event_type: EventType | str, timeout: Timeout | None = None, condition: Callable[[Event], bool] | None = None) -> Event`**: Waits for a specific event that matches an optional condition.
 
 ## EventBus Class
 
@@ -74,31 +72,32 @@ A global, singleton event bus for decoupled, application-wide communication.
 
 ### Class Methods
 
-- **`async def get_instance() -> EventBus`**: Asynchronously retrieves the singleton instance of the bus.
+- **`async def get_instance(cls) -> EventBus`**: Asynchronously retrieves the singleton instance of the bus.
 
 ### Instance Methods
 
-- **`async def publish(event: Event) -> None`**: Publishes a pre-constructed `Event` object to all subscribers.
-- **`async def emit(...)`**: Same signature as `EventEmitter.emit`, but publishes on the global bus.
-- **`subscribe(event_type: EventType | str, handler: EventHandler, *, once: bool = False) -> str`**: Subscribes a handler to an event type and returns a unique subscription ID.
-- **`unsubscribe(subscription_id: str) -> None`**: Removes a subscription using its ID.
-- **`get_subscription_count() -> int`**: Returns the number of active subscriptions.
-- **`clear_all_subscriptions() -> None`**: Clears all subscriptions on the bus.
-- **`async def close() -> None`**: Closes the event bus and its underlying emitter.
+- **`async def close(self) -> None`**: Closes the event bus and its underlying emitter.
+- **`def clear_all_subscriptions(self) -> None`**: Clears all subscriptions on the bus.
+- **`async def emit(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None`**: Creates and dispatches an event on the global bus.
+- **`def get_subscription_count(self) -> int`**: Returns the number of active subscriptions.
+- **`async def publish(self, *, event: Event) -> None`**: Publishes a pre-constructed `Event` object to all subscribers.
+- **`def subscribe(self, *, event_type: EventType | str, handler: EventHandler, once: bool = False) -> str`**: Subscribes a handler and returns a unique subscription ID.
+- **`def unsubscribe(self, *, subscription_id: str) -> None`**: Removes a subscription using its ID.
 
----
+## Module-Level Functions and Decorators
 
-## Module-Level Functions & Decorators
+### Functions
 
 - **`async def create_event_bus() -> EventBus`**: An async factory function that returns the global `EventBus` instance.
-- **`create_event_emitter(max_listeners: int = 100) -> EventEmitter`**: A factory function that creates a new, standalone `EventEmitter` instance.
-- **`@event_handler(event_type: EventType | str)`**: A decorator to mark a function as a handler for a specific event type. This is primarily for organizational purposes and does not automatically register the handler.
+- **`def create_event_emitter(*, max_listeners: int = 100) -> EventEmitter`**: A factory function that creates a new, standalone `EventEmitter` instance.
 
----
+### Decorators
+
+- **`@event_handler(*, event_type: EventType | str)`**: A decorator to mark a function as a handler for a specific event type.
 
 ## See Also
 
 - **[Configuration API](config.md)**: Understand how to configure clients and servers.
+- **[Constants API](constants.md)**: Review default values and protocol-level constants.
 - **[Exceptions API](exceptions.md)**: Understand the library's error and exception hierarchy.
 - **[Types API](types.md)**: Review type definitions and enumerations.
-- **[Constants API](constants.md)**: Review default values and protocol-level constants.

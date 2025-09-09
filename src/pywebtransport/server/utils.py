@@ -21,7 +21,7 @@ __all__ = [
     "health_check_handler",
 ]
 
-logger = get_logger("server.utils")
+logger = get_logger(name="server.utils")
 
 
 def create_development_server(*, host: str = "localhost", port: int = 4433, generate_certs: bool = True) -> ServerApp:
@@ -30,8 +30,8 @@ def create_development_server(*, host: str = "localhost", port: int = 4433, gene
     key_path = Path(f"{host}.key")
 
     if generate_certs or not (cert_path.exists() and key_path.exists()):
-        logger.info(f"Generating self-signed certificate for {host}...")
-        generate_self_signed_cert(host)
+        logger.info("Generating self-signed certificate for %s...", host)
+        generate_self_signed_cert(hostname=host)
 
     config = ServerConfig.create_for_development(host=host, port=port, certfile=str(cert_path), keyfile=str(key_path))
 
@@ -41,15 +41,15 @@ def create_development_server(*, host: str = "localhost", port: int = 4433, gene
 def create_echo_server_app(*, config: ServerConfig | None = None) -> ServerApp:
     """Create a simple echo server application."""
     app = ServerApp(config=config)
-    app.route("/")(echo_handler)
+    app.route(path="/")(echo_handler)
     return app
 
 
 def create_simple_app() -> ServerApp:
     """Create a simple application with basic health and echo routes."""
     app = ServerApp()
-    app.route("/health")(health_check_handler)
-    app.route("/echo")(echo_handler)
+    app.route(path="/health")(health_check_handler)
+    app.route(path="/echo")(echo_handler)
     return app
 
 
@@ -57,52 +57,57 @@ async def echo_handler(session: WebTransportSession) -> None:
     """Echo all received datagrams and stream data back to the client."""
     try:
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(_echo_datagrams(session))
-            tg.create_task(_echo_streams(session))
+            tg.create_task(_echo_datagrams(session=session))
+            tg.create_task(_echo_streams(session=session))
     except* Exception as eg:
-        logger.error(f"Echo handler error for session {session.session_id}: {eg.exceptions}", exc_info=eg)
+        logger.error(
+            "Echo handler error for session %s: %s",
+            session.session_id,
+            eg.exceptions,
+            exc_info=True,
+        )
 
 
 async def health_check_handler(session: WebTransportSession) -> None:
     """Send a simple health status datagram and close the session."""
     try:
         datagrams = await session.datagrams
-        await datagrams.send(b'{"status": "healthy"}')
+        await datagrams.send(data=b'{"status": "healthy"}')
     except Exception as e:
-        logger.error(f"Health check datagram send failed: {e}")
+        logger.error("Health check datagram send failed: %s", e, exc_info=True)
     finally:
         await session.close()
 
 
-async def _echo_datagrams(session: WebTransportSession) -> None:
+async def _echo_datagrams(*, session: WebTransportSession) -> None:
     """Echo datagrams received on a session."""
     try:
         datagrams = await session.datagrams
         while not session.is_closed:
             data = await datagrams.receive()
             if data:
-                await datagrams.send(b"ECHO: " + data)
+                await datagrams.send(data=b"ECHO: " + data)
     except asyncio.CancelledError:
         pass
     except Exception:
         pass
 
 
-async def _echo_streams(session: WebTransportSession) -> None:
+async def _echo_streams(*, session: WebTransportSession) -> None:
     """Accept and handle all incoming streams for echoing."""
     try:
         async for stream in session.incoming_streams():
             if isinstance(stream, WebTransportStream):
-                asyncio.create_task(_echo_single_stream(stream))
+                asyncio.create_task(_echo_single_stream(stream=stream))
     except asyncio.CancelledError:
         pass
 
 
-async def _echo_single_stream(stream: WebTransportStream) -> None:
+async def _echo_single_stream(*, stream: WebTransportStream) -> None:
     """Echo data for a single bidirectional stream."""
     try:
         async for data in stream.read_iter():
-            await stream.write(b"ECHO: " + data)
+            await stream.write(data=b"ECHO: " + data)
         await stream.close()
     except Exception as e:
-        logger.error(f"Error echoing stream {stream.stream_id}: {e}")
+        logger.error("Error echoing stream %d: %s", stream.stream_id, e, exc_info=True)

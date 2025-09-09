@@ -32,18 +32,18 @@ async def test_session_statistics() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             logger.info("Performing operations to generate statistics...")
 
             for i in range(3):
                 stream = await session.create_bidirectional_stream()
-                await stream.write_all(f"Stats test {i + 1}".encode())
+                await stream.write_all(data=f"Stats test {i + 1}".encode())
                 await stream.read_all()
 
             datagrams = await session.datagrams
             for i in range(5):
-                await datagrams.send(f"Datagram {i + 1}".encode())
+                await datagrams.send(data=f"Datagram {i + 1}".encode())
 
             await asyncio.sleep(0.1)
             final_stats = await session.get_session_stats()
@@ -57,11 +57,11 @@ async def test_session_statistics() -> bool:
                 return True
             else:
                 logger.error("FAILURE: Session statistics mismatch.")
-                logger.error(f"   - Streams Created: {final_stats.get('streams_created', 0)} (expected >= 3)")
-                logger.error(f"   - Datagrams Sent: {final_stats.get('datagrams_sent', 0)} (expected >= 5)")
+                logger.error("   - Streams Created: %s (expected >= 3)", final_stats.get("streams_created", 0))
+                logger.error("   - Datagrams Sent: %s (expected >= 5)", final_stats.get("datagrams_sent", 0))
                 return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -71,8 +71,8 @@ async def test_connection_info() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             connection = session.connection
             if not connection:
                 logger.error("FAILURE: No connection object available on session.")
@@ -80,10 +80,10 @@ async def test_connection_info() -> bool:
 
             logger.info("Retrieving connection information...")
             info = connection.info
-            logger.info(f"   - Connection ID: {connection.connection_id}")
-            logger.info(f"   - State: {connection.state.value}")
-            logger.info(f"   - Remote Address: {connection.remote_address}")
-            logger.info(f"   - Uptime: {info.uptime:.2f}s")
+            logger.info("   - Connection ID: %s", connection.connection_id)
+            logger.info("   - State: %s", connection.state.value)
+            logger.info("   - Remote Address: %s", connection.remote_address)
+            logger.info("   - Uptime: %.2fs", info.uptime)
 
             if connection.is_connected and info.remote_address:
                 logger.info("SUCCESS: Connection information retrieved successfully.")
@@ -92,7 +92,7 @@ async def test_connection_info() -> bool:
                 logger.error("FAILURE: Connection information is incomplete or state is incorrect.")
                 return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -102,10 +102,10 @@ async def test_client_statistics() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
+        async with WebTransportClient(config=config) as client:
             logger.info("Performing 3 connections to generate client stats...")
             for _ in range(3):
-                session = await client.connect(SERVER_URL)
+                session = await client.connect(url=SERVER_URL)
                 await session.close()
                 await asyncio.sleep(0.2)
 
@@ -113,9 +113,9 @@ async def test_client_statistics() -> bool:
             connections = final_stats.get("connections", {})
             performance = final_stats.get("performance", {})
             logger.info("Final client statistics:")
-            logger.info(f"   - Connections Attempted: {connections.get('attempted', 0)}")
-            logger.info(f"   - Connections Successful: {connections.get('successful', 0)}")
-            logger.info(f"   - Avg Connect Time: {performance.get('avg_connect_time', 0):.3f}s")
+            logger.info("   - Connections Attempted: %s", connections.get("attempted", 0))
+            logger.info("   - Connections Successful: %s", connections.get("successful", 0))
+            logger.info("   - Avg Connect Time: %.3fs", performance.get("avg_connect_time", 0))
 
             if connections.get("attempted", 0) >= 3 and connections.get("successful", 0) >= 3:
                 logger.info("SUCCESS: Client statistics appear correct.")
@@ -124,7 +124,7 @@ async def test_client_statistics() -> bool:
                 logger.error("FAILURE: Client statistics are incorrect.")
                 return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -134,19 +134,19 @@ async def test_stream_management() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
-            logger.info(f"Connected, session: {session.session_id}")
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
+            logger.info("Connected, session: %s", session.session_id)
 
             streams = [await session.create_bidirectional_stream() for _ in range(5)]
-            logger.info(f"Created {len(streams)} streams.")
+            logger.info("Created %d streams.", len(streams))
 
             if session.stream_manager:
                 stream_manager = session.stream_manager
                 manager_stats = await stream_manager.get_stats()
                 logger.info("Stream manager statistics:")
-                logger.info(f"   - Total created: {manager_stats.get('total_created', 0)}")
-                logger.info(f"   - Current count: {manager_stats.get('current_count', 0)}")
+                logger.info("   - Total created: %s", manager_stats.get("total_created", 0))
+                logger.info("   - Current count: %s", manager_stats.get("current_count", 0))
 
                 all_streams = await stream_manager.get_all_streams()
                 if len(all_streams) == 5:
@@ -164,7 +164,7 @@ async def test_stream_management() -> bool:
 
             return True
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -174,20 +174,20 @@ async def test_datagram_statistics() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             datagrams = await session.datagrams
 
             logger.info("Sending datagrams to generate statistics...")
             for i in range(5):
-                await datagrams.send(f"Datagram stats test {i}".encode())
+                await datagrams.send(data=f"Datagram stats test {i}".encode())
 
             await asyncio.sleep(0.1)
             final_stats = datagrams.stats
 
             logger.info("Final datagram statistics:")
-            logger.info(f"   - Datagrams Sent: {final_stats.get('datagrams_sent', 0)}")
-            logger.info(f"   - Bytes Sent: {final_stats.get('bytes_sent', 0)}")
+            logger.info("   - Datagrams Sent: %s", final_stats.get("datagrams_sent", 0))
+            logger.info("   - Bytes Sent: %s", final_stats.get("bytes_sent", 0))
 
             if final_stats.get("datagrams_sent", 0) >= 5:
                 logger.info("SUCCESS: Datagram statistics appear correct.")
@@ -196,7 +196,7 @@ async def test_datagram_statistics() -> bool:
                 logger.error("FAILURE: Datagram statistics are incorrect.")
                 return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -206,8 +206,8 @@ async def test_performance_monitoring() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             logger.info("Starting simple performance monitoring loop...")
 
             for size in [1024, 8192]:
@@ -215,17 +215,17 @@ async def test_performance_monitoring() -> bool:
                 for _ in range(3):
                     stream = await session.create_bidirectional_stream()
                     start_time = time.time()
-                    await stream.write_all(b"x" * size)
+                    await stream.write_all(data=b"x" * size)
                     await stream.read(size=size + 10)
                     latencies.append(time.time() - start_time)
 
                 avg_rtt_ms = (sum(latencies) / len(latencies)) * 1000
-                logger.info(f"   - Avg RTT for {size} bytes: {avg_rtt_ms:.1f}ms")
+                logger.info("   - Avg RTT for %s bytes: %.1fms", size, avg_rtt_ms)
 
             logger.info("SUCCESS: Performance monitoring loop completed.")
             return True
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -236,8 +236,8 @@ async def test_session_lifecycle_events() -> bool:
 
     try:
         events_received = []
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             events_received.append("connected")
 
             await session.close()
@@ -247,10 +247,10 @@ async def test_session_lifecycle_events() -> bool:
             logger.info("SUCCESS: Session lifecycle events occurred in the correct order.")
             return True
         else:
-            logger.error(f"FAILURE: Incorrect event order: {events_received}")
+            logger.error("FAILURE: Incorrect event order: %s", events_received)
             return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -275,17 +275,17 @@ async def main() -> int:
         logger.info("")
         try:
             if await test_func():
-                logger.info(f"{test_name}: PASSED")
+                logger.info("%s: PASSED", test_name)
                 passed += 1
             else:
-                logger.error(f"{test_name}: FAILED")
+                logger.error("%s: FAILED", test_name)
         except Exception as e:
-            logger.error(f"{test_name}: CRASHED - {e}", exc_info=True)
+            logger.error("%s: CRASHED - %s", test_name, e, exc_info=True)
         await asyncio.sleep(1)
 
     logger.info("")
     logger.info("=" * 60)
-    logger.info(f"Test 07 Results: {passed}/{total} passed")
+    logger.info("Test 07 Results: %d/%d passed", passed, total)
 
     if passed == total:
         logger.info("TEST 07 PASSED: All advanced features tests successful!")
@@ -303,6 +303,6 @@ if __name__ == "__main__":
         logger.warning("\nTest interrupted by user.")
         exit_code = 130
     except Exception as e:
-        logger.critical(f"Test suite crashed with an unhandled exception: {e}", exc_info=True)
+        logger.critical("Test suite crashed with an unhandled exception: %s", e, exc_info=True)
     finally:
         sys.exit(exit_code)

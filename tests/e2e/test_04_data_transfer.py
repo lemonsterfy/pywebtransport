@@ -26,7 +26,7 @@ if DEBUG_MODE:
 logger = logging.getLogger("test_data_transfer")
 
 
-def generate_test_data(size: int) -> bytes:
+def generate_test_data(*, size: int) -> bytes:
     """Generates a block of test data of a specified size."""
     pattern = b"WebTransport Test Data 1234567890 " * (size // 34 + 1)
     return pattern[:size]
@@ -39,29 +39,29 @@ async def test_small_data() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             for size in test_sizes:
-                logger.info(f"Testing {size} bytes transfer...")
-                test_data = generate_test_data(size)
+                logger.info("Testing %s bytes transfer...", size)
+                test_data = generate_test_data(size=size)
                 stream = await session.create_bidirectional_stream()
 
-                await stream.write_all(test_data)
+                await stream.write_all(data=test_data)
                 response = await stream.read_all()
 
                 expected = b"ECHO: " + test_data
                 if response != expected:
-                    logger.error(f"FAILURE: Data mismatch for {size} bytes.")
+                    logger.error("FAILURE: Data mismatch for %s bytes.", size)
                     return False
-                logger.info(f"   - {size} bytes: OK")
+                logger.info("   - %s bytes: OK", size)
 
             logger.info("SUCCESS: All small data transfers completed successfully.")
             return True
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -72,30 +72,30 @@ async def test_medium_data() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=15.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             for size in test_sizes:
                 size_kb = size / 1024
-                logger.info(f"Testing {size_kb:.1f} KB transfer...")
-                test_data = generate_test_data(size)
+                logger.info("Testing %.1f KB transfer...", size_kb)
+                test_data = generate_test_data(size=size)
                 stream = await session.create_bidirectional_stream()
 
-                await stream.write_all(test_data)
+                await stream.write_all(data=test_data)
                 response_data = await stream.read_all()
 
                 expected = b"ECHO: " + test_data
                 if response_data != expected:
-                    logger.error(f"FAILURE: Data mismatch for {size_kb:.1f} KB.")
+                    logger.error("FAILURE: Data mismatch for %.1f KB.", size_kb)
                     return False
-                logger.info(f"   - {size_kb:.1f} KB: OK")
+                logger.info("   - %.1f KB: OK", size_kb)
 
             logger.info("SUCCESS: All medium data transfers completed successfully.")
             return True
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -107,19 +107,19 @@ async def test_chunked_transfer() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
-            test_data = generate_test_data(total_size)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
+            test_data = generate_test_data(size=total_size)
             stream = await session.create_bidirectional_stream()
-            logger.info(f"Sending {total_size} bytes in {chunk_size}-byte chunks...")
+            logger.info("Sending %s bytes in %s-byte chunks...", total_size, chunk_size)
 
             bytes_sent = 0
             for i in range(0, total_size, chunk_size):
                 chunk = test_data[i : i + chunk_size]
                 is_last_chunk = (i + chunk_size) >= total_size
-                await stream.write(chunk, end_stream=is_last_chunk)
+                await stream.write(data=chunk, end_stream=is_last_chunk)
                 bytes_sent += len(chunk)
-            logger.info(f"All {bytes_sent} bytes sent.")
+            logger.info("All %s bytes sent.", bytes_sent)
 
             response_data = await stream.read_all()
             expected = b"ECHO: " + test_data
@@ -130,10 +130,10 @@ async def test_chunked_transfer() -> bool:
             logger.info("SUCCESS: Chunked transfer completed successfully.")
             return True
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -143,13 +143,13 @@ async def test_binary_data() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=10.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
             binary_data = bytes(range(256)) * 100
-            logger.info(f"Testing transfer of {len(binary_data)} raw binary bytes.")
+            logger.info("Testing transfer of %d raw binary bytes.", len(binary_data))
             stream = await session.create_bidirectional_stream()
 
-            await stream.write_all(binary_data)
+            await stream.write_all(data=binary_data)
             response_data = await stream.read_all()
 
             expected = b"ECHO: " + binary_data
@@ -160,10 +160,10 @@ async def test_binary_data() -> bool:
             logger.info("SUCCESS: Binary data transfer completed without corruption.")
             return True
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -174,14 +174,14 @@ async def test_performance_benchmark() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=30.0)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
-            session = await client.connect(SERVER_URL)
-            test_data = generate_test_data(test_size)
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL)
+            test_data = generate_test_data(size=test_size)
             stream = await session.create_bidirectional_stream()
 
             logger.info("Starting 1MB round-trip transfer...")
             start_time = time.time()
-            await stream.write_all(test_data)
+            await stream.write_all(data=test_data)
             response_data = await stream.read_all()
             duration = time.time() - start_time
 
@@ -193,14 +193,14 @@ async def test_performance_benchmark() -> bool:
             total_mb = (len(test_data) + len(response_data)) / (1024 * 1024)
             throughput = total_mb / duration if duration > 0 else float("inf")
             logger.info("SUCCESS: Benchmark completed.")
-            logger.info(f"   - Total round-trip time: {duration:.3f}s")
-            logger.info(f"   - Aggregate throughput: {throughput:.2f} MB/s")
+            logger.info("   - Total round-trip time: %.3fs", duration)
+            logger.info("   - Aggregate throughput: %.2f MB/s", throughput)
             return True
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILURE: Test failed due to connection or timeout issue: {e}")
+        logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
     except Exception as e:
-        logger.error(f"FAILURE: An unexpected error occurred: {e}", exc_info=True)
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
@@ -222,17 +222,17 @@ async def main() -> int:
         logger.info("")
         try:
             if await test_func():
-                logger.info(f"{test_name}: PASSED")
+                logger.info("%s: PASSED", test_name)
                 passed += 1
             else:
-                logger.error(f"{test_name}: FAILED")
+                logger.error("%s: FAILED", test_name)
         except Exception as e:
-            logger.error(f"{test_name}: CRASHED - {e}", exc_info=True)
+            logger.error("%s: CRASHED - %s", test_name, e, exc_info=True)
         await asyncio.sleep(1)
 
     logger.info("")
     logger.info("=" * 60)
-    logger.info(f"Test 04 Results: {passed}/{total} passed")
+    logger.info("Test 04 Results: %d/%d passed", passed, total)
 
     if passed == total:
         logger.info("TEST 04 PASSED: All data transfer tests successful!")
@@ -252,6 +252,6 @@ if __name__ == "__main__":
         logger.warning("\nTest interrupted by user.")
         exit_code = 130
     except Exception as e:
-        logger.critical(f"Test suite crashed with an unhandled exception: {e}", exc_info=True)
+        logger.critical("Test suite crashed with an unhandled exception: %s", e, exc_info=True)
     finally:
         sys.exit(exit_code)

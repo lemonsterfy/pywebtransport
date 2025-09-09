@@ -99,7 +99,10 @@ class TestConnectionLoadBalancer:
         await asyncio.sleep(0)
 
         shutdown_task.cancel()
-        await shutdown_task
+        try:
+            await shutdown_task
+        except asyncio.CancelledError:
+            pytest.fail("shutdown() should not have propagated CancelledError")
 
         close_all_mock.assert_awaited_once()
         hanging_task.cancel()
@@ -276,21 +279,21 @@ class TestConnectionLoadBalancer:
         mocker: MockerFixture,
     ) -> None:
         if setup == "setup_latencies":
-            lb._target_latencies[lb._get_target_key(*lb._targets[0])] = 0.5
-            lb._target_latencies[lb._get_target_key(*lb._targets[1])] = 0.1
-            lb._target_latencies[lb._get_target_key(*lb._targets[2])] = 0.8
-            host, port = await lb._get_next_target("least_latency")
+            lb._target_latencies[lb._get_target_key(host=lb._targets[0][0], port=lb._targets[0][1])] = 0.5
+            lb._target_latencies[lb._get_target_key(host=lb._targets[1][0], port=lb._targets[1][1])] = 0.1
+            lb._target_latencies[lb._get_target_key(host=lb._targets[2][0], port=lb._targets[2][1])] = 0.8
+            host, port = await lb._get_next_target(strategy="least_latency")
             assert (host, port) == lb._targets[1]
         elif setup == "setup_zero_weights":
             for key in lb._target_weights:
                 lb._target_weights[key] = 0.0
             mock_choice = mocker.patch("random.choice", return_value=lb._targets[2])
-            target = await lb._get_next_target("weighted")
+            target = await lb._get_next_target(strategy="weighted")
             mock_choice.assert_called_once()
             assert target == lb._targets[2]
         elif strategy == "invalid_strategy":
             with pytest.raises(ValueError, match="Unknown load balancing strategy"):
-                await lb._get_next_target("invalid_strategy")
+                await lb._get_next_target(strategy="invalid_strategy")
 
     @pytest.mark.asyncio
     async def test_update_target_weight(self, lb: ConnectionLoadBalancer) -> None:
@@ -332,8 +335,8 @@ class TestConnectionLoadBalancer:
 
     @pytest.mark.asyncio
     async def test_get_load_balancer_stats(self, lb: ConnectionLoadBalancer, mock_connection: Any) -> None:
-        lb._failed_targets.add(lb._get_target_key(*lb._targets[0]))
-        lb._connections[lb._get_target_key(*lb._targets[1])] = mock_connection
+        lb._failed_targets.add(lb._get_target_key(host=lb._targets[0][0], port=lb._targets[0][1]))
+        lb._connections[lb._get_target_key(host=lb._targets[1][0], port=lb._targets[1][1])] = mock_connection
 
         stats = await lb.get_load_balancer_stats()
 
@@ -433,11 +436,11 @@ class TestConnectionLoadBalancer:
         async with ConnectionLoadBalancer(targets=targets, health_check_interval=0.01):
             await asyncio.wait_for(error_logged.wait(), timeout=1.0)
 
-        logger_mock.error.assert_called_once_with(f"Health check loop critical error: {error}", exc_info=error)
+        logger_mock.error.assert_called_once_with("Health check loop critical error: %s", error, exc_info=error)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "method_name, args",
+        "method_name, kwargs",
         [
             ("close_all_connections", {}),
             ("get_connection", {"config": None}),
@@ -447,10 +450,12 @@ class TestConnectionLoadBalancer:
         ],
     )
     async def test_methods_fail_if_not_activated(
-        self, targets: list[tuple[str, int]], method_name: str, args: dict[str, Any]
+        self, targets: list[tuple[str, int]], method_name: str, kwargs: dict[str, Any]
     ) -> None:
         lb = ConnectionLoadBalancer(targets=targets)
         method: Callable[..., Coroutine[Any, Any, Any]] = getattr(lb, method_name)
 
         with pytest.raises(ConnectionError, match="has not been activated"):
-            await method(**args)
+            if "config" in kwargs:
+                kwargs["config"] = ClientConfig()
+            await method(**kwargs)

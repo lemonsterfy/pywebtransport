@@ -42,11 +42,18 @@ pip install -e .
 
 ### Optional Dependencies
 
-You can install optional dependency groups for specific tasks like running tests or building documentation against the installed package.
+You can install optional dependency groups for specific features.
 
 ```bash
-pip install pywebtransport[docs]  # For building documentation
-pip install pywebtransport[test]  # For running tests
+# For high-performance structured data serialization
+pip install pywebtransport[msgpack]
+pip install pywebtransport[protobuf]
+
+# For building documentation
+pip install pywebtransport[docs]
+
+# For running tests against the installed package
+pip install pywebtransport[test]
 ```
 
 ## Virtual Environment Setup
@@ -85,7 +92,7 @@ python -c "import pywebtransport; print(pywebtransport.__version__)"
 
 **2. Test core component initialization:**
 
-Save the following code as `verify.py` and run it. This script does not make any network requests but confirms that the client and server objects can be created following the correct asynchronous lifecycle.
+Save the following code as `verify.py` and run it. This script does not make any network requests but confirms that the client and server objects can be created. It temporarily creates empty dummy.crt and dummy.key files to satisfy the minimum ServerConfig requirements without needing real certificates.
 
 ```python
 # verify.py
@@ -98,7 +105,7 @@ from pywebtransport import ClientConfig, ServerApp, ServerConfig, WebTransportCl
 async def verify() -> None:
     print("Initializing core components...")
     try:
-        async with WebTransportClient.create(config=ClientConfig.create()):
+        async with WebTransportClient(config=ClientConfig.create()):
             pass
 
         ServerApp(config=ServerConfig.create(certfile="dummy.crt", keyfile="dummy.key"))
@@ -144,13 +151,12 @@ PyWebTransport automatically installs its core dependencies:
 
 - **TLS 1.3 support** (included in Python 3.11+)
 - **asyncio support** (standard library)
-- **C compiler** (for building cryptography on some platforms)
 
 ## Platform-Specific Notes
 
 ### Linux
 
-Install build dependencies if needed:
+A C compiler and development headers are required to build the cryptography dependency.
 
 ```bash
 # Ubuntu/Debian
@@ -163,7 +169,7 @@ sudo dnf install python3-pip gcc openssl-devel
 
 ### macOS
 
-Install development tools if needed:
+Install the Xcode command-line tools if needed:
 
 ```bash
 xcode-select --install
@@ -171,7 +177,7 @@ xcode-select --install
 
 ### Windows
 
-Most installations work out of the box. If you encounter build errors:
+Most installations work out of the box. If you encounter build errors, you may need the C++ build tools.
 
 1. Install [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
 2. Restart your terminal
@@ -190,17 +196,7 @@ pip install --user pywebtransport
 
 ### Build Errors
 
-Ensure development tools are installed:
-
-```bash
-# Ubuntu/Debian
-sudo apt install build-essential python3-dev libssl-dev
-
-# macOS
-xcode-select --install
-
-# Windows: Install Visual C++ Build Tools
-```
+Ensure development tools and headers are installed as described in the "Platform-Specific Notes" section.
 
 ### Outdated pip
 
@@ -234,7 +230,7 @@ Basic Dockerfile:
 ```dockerfile
 FROM python:3.12-slim
 
-# Install system dependencies
+# Install system dependencies needed for building cryptography
 RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -274,13 +270,13 @@ pip uninstall pywebtransport
 Clean up a virtual environment:
 
 ```bash
-rm -rf pywebtransport-env  # Linux/macOS
-rmdir /s pywebtransport-env  # Windows
+rm -rf .venv  # Linux/macOS
+rmdir /s .venv  # Windows
 ```
 
 ## See Also
 
-- **[Home](index.md)**: Project homepage and overview  
-- **[Quick Start](quickstart.md)**: A 5-minute tutorial  
-- **[API Reference](api-reference/index.md)**: Complete API documentation  
+- **[Home](index.md)**: Project homepage and overview
+- **[Quick Start](quickstart.md)**: A 5-minute tutorial
+- **[API Reference](api-reference/index.md)**: Complete API documentation
 - **[Contributing Guide](../CONTRIBUTING.md)**: Learn how to contribute

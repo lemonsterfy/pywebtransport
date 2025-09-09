@@ -29,7 +29,8 @@ from pywebtransport import ServerApp, ServerConfig, WebTransportSession, WebTran
 from pywebtransport.exceptions import ConnectionError, SessionError
 from pywebtransport.utils import generate_self_signed_cert
 
-generate_self_signed_cert("localhost")
+# For local development, we can generate a self-signed certificate.
+generate_self_signed_cert(hostname="localhost")
 
 app = ServerApp(
     config=ServerConfig.create(
@@ -40,32 +41,41 @@ app = ServerApp(
 
 
 async def handle_datagrams(session: WebTransportSession) -> None:
+    """A background task to handle incoming datagrams."""
     try:
         datagrams = await session.datagrams
         while True:
             data = await datagrams.receive()
-            await datagrams.send(b"ECHO: " + data)
+            await datagrams.send(data=b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
+        # The session was closed, so we exit the loop.
         pass
 
 
 async def handle_streams(session: WebTransportSession) -> None:
+    """A background task to handle incoming streams."""
     try:
         async for stream in session.incoming_streams():
+            # A client's bidirectional stream appears as an incoming stream on the server.
             if isinstance(stream, WebTransportStream):
                 data = await stream.read_all()
-                await stream.write_all(b"ECHO: " + data)
+                await stream.write_all(data=b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
+        # The session was closed, so we exit the loop.
         pass
 
 
-@app.route("/")
+@app.route(path="/")
 async def echo_handler(session: WebTransportSession) -> None:
+    """The main session handler for the / path."""
+    # We create two concurrent tasks to handle datagrams and streams simultaneously.
     datagram_task = asyncio.create_task(handle_datagrams(session))
     stream_task = asyncio.create_task(handle_streams(session))
     try:
+        # Wait until the session is closed by the client.
         await session.wait_closed()
     finally:
+        # Once the session is closed, we ensure our background tasks are cleaned up.
         datagram_task.cancel()
         stream_task.cancel()
 
@@ -90,20 +100,22 @@ from pywebtransport import ClientConfig, WebTransportClient
 
 
 async def main() -> None:
+    # We disable SSL certificate verification because we are using a self-signed cert.
+    # For production, you should use a proper certificate and validation.
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
 
-    async with WebTransportClient.create(config=config) as client:
-        session = await client.connect("https://127.0.0.1:4433/")
+    async with WebTransportClient(config=config) as client:
+        session = await client.connect(url="https://127.0.0.1:4433/")
 
         print("Connection established. Testing datagrams...")
         datagrams = await session.datagrams
-        await datagrams.send(b"Hello, Datagram!")
+        await datagrams.send(data=b"Hello, Datagram!")
         response = await datagrams.receive()
         print(f"Datagram echo: {response!r}\n")
 
         print("Testing streams...")
         stream = await session.create_bidirectional_stream()
-        await stream.write_all(b"Hello, Stream!")
+        await stream.write_all(data=b"Hello, Stream!")
         response = await stream.read_all()
         print(f"Stream echo: {response!r}")
 
@@ -143,10 +155,11 @@ You should see output confirming the echoed messages from the server.
 A `WebTransportSession` is created by a `WebTransportClient` and represents a single connection. The `WebTransportClient` must be used as an async context manager.
 
 ```python
-# Client-side session
+# Create a client and connect to get a session
 config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
-async with WebTransportClient.create(config=config) as client:
-    session = await client.connect(url)
+
+async with WebTransportClient(config=config) as client:
+    session = await client.connect(url=url)
     # Use the session object
     print(f"Session to {session.path} is ready.")
     await session.close()
@@ -161,7 +174,7 @@ Send and receive unreliable, out-of-order messages.
 datagrams = await session.datagrams
 
 # Send a datagram
-await datagrams.send(b"unreliable message")
+await datagrams.send(data=b"unreliable message")
 
 # Receive a datagram
 data = await datagrams.receive()
@@ -175,10 +188,10 @@ Provide reliable, ordered communication channels.
 # Create a bidirectional stream
 stream = await session.create_bidirectional_stream()
 
-# Write data (and close the write-end)
-await stream.write_all(b"reliable message")
+# Write data and close the write-end
+await stream.write_all(data=b"reliable message")
 
-# Read data until the stream is closed by the peer
+# Read all data until the stream is closed by the peer
 response = await stream.read_all()
 ```
 

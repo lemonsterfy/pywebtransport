@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self, Type
 
-from pywebtransport.constants import WebTransportConstants
+from pywebtransport.constants import DEFAULT_MAX_STREAMS, DEFAULT_STREAM_CLEANUP_INTERVAL
 from pywebtransport.exceptions import StreamError
 from pywebtransport.stream.stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
 from pywebtransport.types import StreamId
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 __all__ = ["StreamManager"]
 
-logger = get_logger("stream.manager")
+logger = get_logger(name="stream.manager")
 
 StreamType = WebTransportStream | WebTransportReceiveStream | WebTransportSendStream
 
@@ -34,8 +34,8 @@ class StreamManager:
         self,
         session: WebTransportSession,
         *,
-        max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS,
-        stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
+        max_streams: int = DEFAULT_MAX_STREAMS,
+        stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL,
     ):
         """Initialize the stream manager."""
         self._session = session
@@ -44,24 +44,33 @@ class StreamManager:
         self._streams: dict[StreamId, StreamType] = {}
         self._lock: asyncio.Lock | None = None
         self._creation_semaphore: asyncio.Semaphore | None = None
-        self._stats = {"total_created": 0, "total_closed": 0, "current_count": 0, "max_concurrent": 0}
+        self._stats = {
+            "total_created": 0,
+            "total_closed": 0,
+            "current_count": 0,
+            "max_concurrent": 0,
+        }
         self._cleanup_task: asyncio.Task[None] | None = None
 
     @classmethod
     def create(
         cls,
-        session: WebTransportSession,
         *,
-        max_streams: int = WebTransportConstants.DEFAULT_MAX_STREAMS,
-        stream_cleanup_interval: float = WebTransportConstants.DEFAULT_STREAM_CLEANUP_INTERVAL,
+        session: WebTransportSession,
+        max_streams: int = DEFAULT_MAX_STREAMS,
+        stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL,
     ) -> Self:
         """Factory method to create a new stream manager instance."""
-        return cls(session, max_streams=max_streams, stream_cleanup_interval=stream_cleanup_interval)
+        return cls(
+            session=session,
+            max_streams=max_streams,
+            stream_cleanup_interval=stream_cleanup_interval,
+        )
 
     async def __aenter__(self) -> Self:
         """Enter the asynchronous context, initializing resources and starting background tasks."""
         self._lock = asyncio.Lock()
-        self._creation_semaphore = asyncio.Semaphore(self._max_streams)
+        self._creation_semaphore = asyncio.Semaphore(value=self._max_streams)
         self._start_cleanup_task()
         return self
 
@@ -86,7 +95,7 @@ class StreamManager:
         await self.close_all_streams()
         logger.info("Stream manager shutdown complete")
 
-    async def add_stream(self, stream: StreamType) -> None:
+    async def add_stream(self, *, stream: StreamType) -> None:
         """Add an externally created stream to the manager."""
         if self._lock is None:
             raise StreamError(
@@ -99,7 +108,11 @@ class StreamManager:
             self._streams[stream.stream_id] = stream
             self._stats["total_created"] += 1
             self._update_stats_unsafe()
-            logger.debug(f"Added stream {stream.stream_id} (total: {self._stats['current_count']})")
+            logger.debug(
+                "Added stream %d (total: %d)",
+                stream.stream_id,
+                self._stats["current_count"],
+            )
 
     async def close_all_streams(self) -> None:
         """Close and remove all currently managed streams."""
@@ -117,7 +130,7 @@ class StreamManager:
 
             streams_to_close = list(self._streams.values())
             num_to_close = len(streams_to_close)
-            logger.info(f"Initiating shutdown for {num_to_close} managed streams.")
+            logger.info("Initiating shutdown for %d managed streams.", num_to_close)
 
             self._stats["total_closed"] += num_to_close
             self._streams.clear()
@@ -129,7 +142,11 @@ class StreamManager:
                     if not stream.is_closed:
                         tg.create_task(stream.close())
         except* Exception as eg:
-            logger.error(f"Errors occurred while closing managed streams: {eg.exceptions}")
+            logger.error(
+                "Errors occurred while closing managed streams: %s",
+                eg.exceptions,
+                exc_info=eg,
+            )
             raise
         finally:
             if self._creation_semaphore:
@@ -151,7 +168,7 @@ class StreamManager:
         try:
             stream_id = await self._session._create_stream_on_protocol(is_unidirectional=False)
             stream = WebTransportStream(session=self._session, stream_id=stream_id)
-            await self.add_stream(stream)
+            await self.add_stream(stream=stream)
             return stream
         except Exception:
             self._creation_semaphore.release()
@@ -172,13 +189,13 @@ class StreamManager:
         try:
             stream_id = await self._session._create_stream_on_protocol(is_unidirectional=True)
             stream = WebTransportSendStream(session=self._session, stream_id=stream_id)
-            await self.add_stream(stream)
+            await self.add_stream(stream=stream)
             return stream
         except Exception:
             self._creation_semaphore.release()
             raise
 
-    async def remove_stream(self, stream_id: StreamId) -> StreamType | None:
+    async def remove_stream(self, *, stream_id: StreamId) -> StreamType | None:
         """Remove a stream from the manager by its ID."""
         if self._lock is None or self._creation_semaphore is None:
             raise StreamError(
@@ -191,7 +208,11 @@ class StreamManager:
                 self._creation_semaphore.release()
                 self._stats["total_closed"] += 1
                 self._update_stats_unsafe()
-                logger.debug(f"Removed stream {stream_id} (total: {self._stats['current_count']})")
+                logger.debug(
+                    "Removed stream %d (total: %d)",
+                    stream_id,
+                    self._stats["current_count"],
+                )
             return stream
 
     async def cleanup_closed_streams(self) -> int:
@@ -214,7 +235,7 @@ class StreamManager:
                         self._creation_semaphore.release()
                 self._stats["total_closed"] += len(closed_stream_ids)
                 self._update_stats_unsafe()
-                logger.debug(f"Cleaned up {len(closed_stream_ids)} closed streams")
+                logger.debug("Cleaned up %d closed streams", len(closed_stream_ids))
         return len(closed_stream_ids)
 
     async def get_all_streams(self) -> list[StreamType]:
@@ -253,7 +274,7 @@ class StreamManager:
                 "max_streams": self._max_streams,
             }
 
-    async def get_stream(self, stream_id: StreamId) -> StreamType | None:
+    async def get_stream(self, *, stream_id: StreamId) -> StreamType | None:
         """Retrieve a stream by its ID in a thread-safe manner."""
         if self._lock is None:
             raise StreamError(
@@ -270,7 +291,7 @@ class StreamManager:
                 try:
                     await self.cleanup_closed_streams()
                 except Exception as e:
-                    logger.error(f"Stream cleanup cycle failed: {e}", exc_info=e)
+                    logger.error("Stream cleanup cycle failed: %s", e, exc_info=e)
 
                 await asyncio.sleep(self._cleanup_interval)
         except asyncio.CancelledError:

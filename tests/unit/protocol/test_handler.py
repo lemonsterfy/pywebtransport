@@ -134,10 +134,10 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
+        handler_client._register_session(session_id="s1", session_info=session_info)
 
-        assert handler_client.get_session_info("s1") is session_info
-        assert handler_client.get_session_info("s2") is None
+        assert handler_client.get_session_info(session_id="s1") is session_info
+        assert handler_client.get_session_info(session_id="s2") is None
         assert handler_client.get_all_sessions() == [session_info]
 
     def test_get_health_status(self, handler_client: Any) -> None:
@@ -145,8 +145,10 @@ class TestWebTransportProtocolHandler:
         s_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", s_info)
-        stream_info = handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=s_info)
+        stream_info = handler_client._register_stream(
+            session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL
+        )
         stream_info.state = StreamState.OPEN
         handler_client._stats["errors"] = 1
         handler_client._stats["sessions_created"] = 5
@@ -190,7 +192,7 @@ class TestWebTransportProtocolHandler:
         assert session_id == "test-session-id"
         assert stream_id == 8
         mock_h3_engine.send_headers.assert_called_once()
-        sent_headers = mock_h3_engine.send_headers.call_args[0][1]
+        sent_headers = mock_h3_engine.send_headers.call_args.kwargs["headers"]
         assert sent_headers[":method"] == "CONNECT"
         assert sent_headers[":path"] == "/test"
         assert sent_headers[":authority"] == expected_authority
@@ -205,7 +207,7 @@ class TestWebTransportProtocolHandler:
 
         await handler_client.create_webtransport_session(path="/")
 
-        sent_headers = mock_h3_engine.send_headers.call_args[0][1]
+        sent_headers = mock_h3_engine.send_headers.call_args.kwargs["headers"]
         assert sent_headers[":authority"] == "localhost"
 
     @pytest.mark.asyncio
@@ -231,7 +233,7 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, path="/recover", headers={}, state=SessionState.CLOSED, created_at=0
         )
-        handler_client._register_session("s1", session_info)
+        handler_client._register_session(session_id="s1", session_info=session_info)
 
         result = await handler_client.recover_session(session_id="s1")
 
@@ -249,7 +251,7 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, path="/recover", headers={}, state=SessionState.CLOSED, created_at=0
         )
-        handler_client._register_session("s1", session_info)
+        handler_client._register_session(session_id="s1", session_info=session_info)
 
         assert await handler_client.recover_session(session_id="s1") is False
         assert sleep_mock.call_count == 2
@@ -260,11 +262,11 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTING, path="/", created_at=0
         )
-        handler_server._register_session("s1", session_info)
+        handler_server._register_session(session_id="s1", session_info=session_info)
 
         handler_server.accept_webtransport_session(stream_id=0, session_id="s1")
 
-        mock_h3_engine.send_headers.assert_called_once_with(0, {":status": "200"})
+        mock_h3_engine.send_headers.assert_called_once_with(stream_id=0, headers={":status": "200"})
 
     @pytest.mark.asyncio
     async def test_create_webtransport_session_server_raises_error(self, handler_server: Any) -> None:
@@ -284,21 +286,21 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=4, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
+        handler_client._register_session(session_id="s1", session_info=session_info)
         future: asyncio.Future[Any] = asyncio.Future()
 
         async def handler(event: Event) -> None:
             future.set_result(event)
 
-        handler_client.on(EventType.SESSION_CLOSED, handler)
+        handler_client.on(event_type=EventType.SESSION_CLOSED, handler=handler)
 
-        handler_client.close_webtransport_session("s1", code=123)
+        handler_client.close_webtransport_session(session_id="s1", code=123)
 
-        mock_quic_connection.reset_stream.assert_called_once_with(4, 123)
-        await asyncio.wait_for(future, 1)
+        mock_quic_connection.reset_stream.assert_called_once_with(stream_id=4, error_code=123)
+        await asyncio.wait_for(future, timeout=1)
 
     def test_close_session_no_op(self, handler_client: Any) -> None:
-        handler_client.close_webtransport_session("non-existent-session")
+        handler_client.close_webtransport_session(session_id="non-existent-session")
 
     @pytest.mark.parametrize("is_unidirectional", [True, False])
     def test_create_webtransport_stream(
@@ -307,25 +309,25 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
+        handler_client._register_session(session_id="s1", session_info=session_info)
         mock_h3_engine.create_webtransport_stream.return_value = 8
 
-        handler_client.create_webtransport_stream("s1", is_unidirectional=is_unidirectional)
+        handler_client.create_webtransport_stream(session_id="s1", is_unidirectional=is_unidirectional)
 
         mock_h3_engine.create_webtransport_stream.assert_called_once()
 
     def test_create_stream_on_invalid_session_raises_error(self, handler_client: Any) -> None:
         with pytest.raises(ProtocolError):
-            handler_client.create_webtransport_stream("none")
+            handler_client.create_webtransport_stream(session_id="none")
 
     def test_send_webtransport_stream_data(self, handler_client: Any, mock_h3_engine: Any) -> None:
         s_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", s_info)
-        handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=s_info)
+        handler_client._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
 
-        handler_client.send_webtransport_stream_data(4, b"data", end_stream=True)
+        handler_client.send_webtransport_stream_data(stream_id=4, data=b"data", end_stream=True)
 
         mock_h3_engine.send_data.assert_called_once_with(stream_id=4, data=b"data", end_stream=True)
 
@@ -333,15 +335,17 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
-        stream_info = handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=session_info)
+        stream_info = handler_client._register_stream(
+            session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL
+        )
         stream_info.state = StreamState.HALF_CLOSED_LOCAL
 
         with pytest.raises(ProtocolError, match="not found or not writable"):
-            handler_client.send_webtransport_stream_data(4, b"data")
+            handler_client.send_webtransport_stream_data(stream_id=4, data=b"data")
 
         with pytest.raises(ProtocolError, match="not found or not writable"):
-            handler_client.send_webtransport_stream_data(99, b"data")
+            handler_client.send_webtransport_stream_data(stream_id=99, data=b"data")
 
     @pytest.mark.asyncio
     async def test_read_and_write_stream(self, handler_client: Any) -> None:
@@ -349,13 +353,13 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
-        handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=session_info)
+        handler_client._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
         read_task = asyncio.create_task(handler_client.read_stream_complete(stream_id=4, timeout=0.1))
         await asyncio.sleep(0)
 
-        await handler_client.emit("stream_data_received:4", data={"data": b"chunk1", "end_stream": False})
-        await handler_client.emit("stream_data_received:4", data={"data": b"chunk2", "end_stream": True})
+        await handler_client.emit(event_type="stream_data_received:4", data={"data": b"chunk1", "end_stream": False})
+        await handler_client.emit(event_type="stream_data_received:4", data={"data": b"chunk2", "end_stream": True})
         result = await read_task
 
         assert result == b"chunk1chunk2"
@@ -366,15 +370,17 @@ class TestWebTransportProtocolHandler:
     async def test_read_stream_future_already_done(self, handler_client: Any) -> None:
         handler_client.connection_established()
         handler_client._register_session(
-            "s1",
-            WebTransportSessionInfo(session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0),
+            session_id="s1",
+            session_info=WebTransportSessionInfo(
+                session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
+            ),
         )
-        handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
         read_task = asyncio.create_task(handler_client.read_stream_complete(stream_id=4, timeout=0.1))
         await asyncio.sleep(0)
 
-        await handler_client.emit("stream_data_received:4", data={"data": b"chunk1", "end_stream": True})
-        await handler_client.emit("stream_data_received:4", data={"data": b"chunk2", "end_stream": False})
+        await handler_client.emit(event_type="stream_data_received:4", data={"data": b"chunk1", "end_stream": True})
+        await handler_client.emit(event_type="stream_data_received:4", data={"data": b"chunk2", "end_stream": False})
         result = await read_task
 
         assert result == b"chunk1"
@@ -384,8 +390,8 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
-        handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=session_info)
+        handler_client._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
         send_mock = mocker.patch.object(handler_client, "send_webtransport_stream_data")
         send_mock.side_effect = [None, ProtocolError("Stream broke")]
 
@@ -398,26 +404,26 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
-        handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=session_info)
+        handler_client._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
 
         handler_client.abort_stream(stream_id=4, error_code=555)
 
-        mock_quic_connection.reset_stream.assert_called_once_with(4, 555)
+        mock_quic_connection.reset_stream.assert_called_once_with(stream_id=4, error_code=555)
         assert 4 not in handler_client._streams
 
     def test_send_webtransport_datagram(self, handler_client: Any, mock_h3_engine: Any) -> None:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
+        handler_client._register_session(session_id="s1", session_info=session_info)
 
-        handler_client.send_webtransport_datagram("s1", b"dgram")
+        handler_client.send_webtransport_datagram(session_id="s1", data=b"dgram")
 
         mock_h3_engine.send_datagram.assert_called_once_with(stream_id=0, data=b"dgram")
         assert handler_client.stats["datagrams_sent"] == 1
         with pytest.raises(ProtocolError):
-            handler_client.send_webtransport_datagram("s-none", b"dgram")
+            handler_client.send_webtransport_datagram(session_id="s-none", data=b"dgram")
 
     @pytest.mark.asyncio
     async def test_handle_h3_event_routes_correctly(self, handler_client: Any, mocker: MockerFixture) -> None:
@@ -430,37 +436,37 @@ class TestWebTransportProtocolHandler:
         handler_client._handle_webtransport_stream_data = mocker.AsyncMock()
         handler_client._handle_datagram_received = mocker.AsyncMock()
 
-        await handler_client.handle_quic_event(StreamDataReceived(stream_id=0, data=b"", end_stream=False))
+        await handler_client.handle_quic_event(event=StreamDataReceived(stream_id=0, data=b"", end_stream=False))
 
-        handler_client._handle_session_headers.assert_awaited_once_with(headers_event)
-        handler_client._handle_webtransport_stream_data.assert_awaited_once_with(data_event)
-        handler_client._handle_datagram_received.assert_awaited_once_with(datagram_event)
+        handler_client._handle_session_headers.assert_awaited_once_with(event=headers_event)
+        handler_client._handle_webtransport_stream_data.assert_awaited_once_with(event=data_event)
+        handler_client._handle_datagram_received.assert_awaited_once_with(event=datagram_event)
 
     @pytest.mark.asyncio
     async def test_handle_stream_reset_closes_session(self, handler_client: Any) -> None:
         session_id, stream_id = await handler_client.create_webtransport_session(path="/test")
-        assert handler_client.get_session_info(session_id) is not None
+        assert handler_client.get_session_info(session_id=session_id) is not None
         closed_future: asyncio.Future[Any] = asyncio.Future()
 
         async def handler(event: Event) -> None:
             closed_future.set_result(event.data)
 
-        handler_client.on(EventType.SESSION_CLOSED, handler)
+        handler_client.on(event_type=EventType.SESSION_CLOSED, handler=handler)
 
         reset_event = StreamReset(stream_id=stream_id, error_code=123)
-        await handler_client.handle_quic_event(reset_event)
+        await handler_client.handle_quic_event(event=reset_event)
         event_data = await asyncio.wait_for(closed_future, timeout=1)
 
         assert event_data["session_id"] == session_id
         assert event_data["code"] == 123
-        assert handler_client.get_session_info(session_id) is None
+        assert handler_client.get_session_info(session_id=session_id) is None
 
     @pytest.mark.asyncio
     async def test_handle_stream_reset_unknown_stream(self, handler_client: Any, mocker: MockerFixture) -> None:
         emit_spy = mocker.spy(handler_client, "emit")
         reset_event = StreamReset(stream_id=999, error_code=123)
 
-        await handler_client.handle_quic_event(reset_event)
+        await handler_client.handle_quic_event(event=reset_event)
 
         assert emit_spy.call_count == 0
 
@@ -474,12 +480,12 @@ class TestWebTransportProtocolHandler:
         async def handler(event: Event) -> None:
             future.set_result(event)
 
-        handler_client.on(EventType.SESSION_READY, handler)
+        handler_client.on(event_type=EventType.SESSION_READY, handler=handler)
 
         await handler_client._handle_session_headers(
-            HeadersReceived(stream_id=stream_id, headers={":status": "200"}, stream_ended=False)
+            event=HeadersReceived(stream_id=stream_id, headers={":status": "200"}, stream_ended=False)
         )
-        event_result = await asyncio.wait_for(future, 1)
+        event_result = await asyncio.wait_for(future, timeout=1)
 
         assert event_result.data["session_id"] == session_id
         mock_parent_connection.record_activity.assert_called_once()
@@ -492,12 +498,12 @@ class TestWebTransportProtocolHandler:
         async def handler(event: Event) -> None:
             future.set_result(event)
 
-        handler_client.on(EventType.SESSION_CLOSED, handler)
+        handler_client.on(event_type=EventType.SESSION_CLOSED, handler=handler)
 
         await handler_client._handle_session_headers(
-            HeadersReceived(stream_id=stream_id, headers={":status": "404"}, stream_ended=True)
+            event=HeadersReceived(stream_id=stream_id, headers={":status": "404"}, stream_ended=True)
         )
-        result = await asyncio.wait_for(future, 1)
+        result = await asyncio.wait_for(future, timeout=1)
 
         assert result.data["session_id"] == session_id
 
@@ -508,7 +514,7 @@ class TestWebTransportProtocolHandler:
         emit_spy = mocker.spy(handler_client, "emit")
 
         await handler_client._handle_session_headers(
-            HeadersReceived(stream_id=999, headers={":status": "200"}, stream_ended=False)
+            event=HeadersReceived(stream_id=999, headers={":status": "200"}, stream_ended=False)
         )
 
         assert emit_spy.call_count == 0
@@ -522,11 +528,13 @@ class TestWebTransportProtocolHandler:
         async def handler(event: Event) -> None:
             future.set_result(event)
 
-        handler_server.on(EventType.SESSION_REQUEST, handler)
+        handler_server.on(event_type=EventType.SESSION_REQUEST, handler=handler)
         headers: Headers = {":method": "CONNECT", ":protocol": "webtransport", ":path": "/"}
 
-        await handler_server._handle_session_headers(HeadersReceived(stream_id=0, headers=headers, stream_ended=False))
-        result = await asyncio.wait_for(future, 1)
+        await handler_server._handle_session_headers(
+            event=HeadersReceived(stream_id=0, headers=headers, stream_ended=False)
+        )
+        result = await asyncio.wait_for(future, timeout=1)
 
         assert result.data["session_id"] == "test-session-id"
         assert result.data["connection"] is mock_parent_connection
@@ -539,7 +547,9 @@ class TestWebTransportProtocolHandler:
         emit_spy = mocker.spy(handler_server, "emit")
         headers: Headers = {":method": "GET"}
 
-        await handler_server._handle_session_headers(HeadersReceived(stream_id=0, headers=headers, stream_ended=False))
+        await handler_server._handle_session_headers(
+            event=HeadersReceived(stream_id=0, headers=headers, stream_ended=False)
+        )
 
         assert emit_spy.call_count == 0
 
@@ -551,7 +561,7 @@ class TestWebTransportProtocolHandler:
         s_info = WebTransportSessionInfo(
             session_id="s1", stream_id=session_control_stream_id, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_server._register_session("s1", s_info)
+        handler_server._register_session(session_id="s1", session_info=s_info)
         opened_future: asyncio.Future[Any] = asyncio.Future()
         initial_data = b"initial data"
         initial_ended = True
@@ -559,14 +569,14 @@ class TestWebTransportProtocolHandler:
         async def handler(event: Event) -> None:
             opened_future.set_result(event)
 
-        handler_server.on(EventType.STREAM_OPENED, handler)
+        handler_server.on(event_type=EventType.STREAM_OPENED, handler=handler)
 
         await handler_server._handle_webtransport_stream_data(
-            WebTransportStreamDataReceived(
+            event=WebTransportStreamDataReceived(
                 stream_id=5, data=initial_data, stream_ended=initial_ended, session_id=session_control_stream_id
             )
         )
-        event_result = await asyncio.wait_for(opened_future, 1)
+        event_result = await asyncio.wait_for(opened_future, timeout=1)
 
         assert event_result.data["direction"] == StreamDirection.BIDIRECTIONAL
         assert "initial_payload" in event_result.data
@@ -583,7 +593,7 @@ class TestWebTransportProtocolHandler:
         mock_quic_connection._state = state
 
         await handler_server._handle_webtransport_stream_data(
-            WebTransportStreamDataReceived(stream_id=5, data=b"", stream_ended=True, session_id=999)
+            event=WebTransportStreamDataReceived(stream_id=5, data=b"", stream_ended=True, session_id=999)
         )
 
         assert emit_spy.call_count == 0
@@ -596,10 +606,10 @@ class TestWebTransportProtocolHandler:
         async def handler(event: Event) -> None:
             received_future.set_result(event.data)
 
-        handler_client.on(EventType.DATAGRAM_RECEIVED, handler)
+        handler_client.on(event_type=EventType.DATAGRAM_RECEIVED, handler=handler)
 
         datagram_event = DatagramReceived(stream_id=stream_id, data=b"ping")
-        await handler_client._handle_datagram_received(datagram_event)
+        await handler_client._handle_datagram_received(event=datagram_event)
         event_data = await asyncio.wait_for(received_future, timeout=1)
 
         assert event_data["session_id"] == session_id
@@ -615,44 +625,48 @@ class TestWebTransportProtocolHandler:
         unhandled_event = UnknownEvent()
         handler_client._h3.handle_event.return_value = [unhandled_event]
 
-        await handler_client.handle_quic_event(StreamDataReceived(stream_id=0, data=b"", end_stream=False))
+        await handler_client.handle_quic_event(event=StreamDataReceived(stream_id=0, data=b"", end_stream=False))
 
         assert emit_spy.call_count == 0
 
     @pytest.mark.asyncio
     async def test_handle_data_for_unknown_session(self, handler_server: Any) -> None:
         await handler_server._handle_webtransport_stream_data(
-            WebTransportStreamDataReceived(stream_id=5, data=b"", stream_ended=True, session_id=999)
+            event=WebTransportStreamDataReceived(stream_id=5, data=b"", stream_ended=True, session_id=999)
         )
 
     @pytest.mark.asyncio
     async def test_handle_datagram_for_unknown_session(self, handler_server: Any) -> None:
-        await handler_server._handle_datagram_received(DatagramReceived(stream_id=999, data=b""))
+        await handler_server._handle_datagram_received(event=DatagramReceived(stream_id=999, data=b""))
 
     def test_stream_state_transitions_to_closed(self, handler_client: Any) -> None:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
-        stream_info = handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=session_info)
+        stream_info = handler_client._register_stream(
+            session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL
+        )
         stream_info.state = StreamState.OPEN
 
-        handler_client._update_stream_state_on_send_end(4)
+        handler_client._update_stream_state_on_send_end(stream_id=4)
         assert stream_info.state == StreamState.HALF_CLOSED_LOCAL
 
-        handler_client._update_stream_state_on_receive_end(4)
+        handler_client._update_stream_state_on_receive_end(stream_id=4)
         assert 4 not in handler_client._streams
 
-        stream_info = handler_client._register_stream("s1", 8, StreamDirection.BIDIRECTIONAL)
-        handler_client._update_stream_state_on_receive_end(8)
+        stream_info = handler_client._register_stream(
+            session_id="s1", stream_id=8, direction=StreamDirection.BIDIRECTIONAL
+        )
+        handler_client._update_stream_state_on_receive_end(stream_id=8)
         assert stream_info.state == StreamState.HALF_CLOSED_REMOTE
 
-        handler_client._update_stream_state_on_send_end(8)
+        handler_client._update_stream_state_on_send_end(stream_id=8)
         assert 8 not in handler_client._streams
 
     def test_update_stream_state_for_unknown_stream(self, handler_client: Any) -> None:
-        handler_client._update_stream_state_on_receive_end(999)
-        handler_client._update_stream_state_on_send_end(999)
+        handler_client._update_stream_state_on_receive_end(stream_id=999)
+        handler_client._update_stream_state_on_send_end(stream_id=999)
 
         assert 999 not in handler_client._streams
 
@@ -660,10 +674,10 @@ class TestWebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=0
         )
-        handler_client._register_session("s1", session_info)
-        handler_client._register_stream("s1", 4, StreamDirection.BIDIRECTIONAL)
+        handler_client._register_session(session_id="s1", session_info=session_info)
+        handler_client._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
         handler_client._data_stream_to_session.pop(4)
 
-        handler_client._cleanup_session("s1")
+        handler_client._cleanup_session(session_id="s1")
 
         assert "s1" not in handler_client._sessions

@@ -5,12 +5,11 @@ WebTransport Middleware Framework.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from typing import Any, Self
 
 from pywebtransport.exceptions import ServerError
 from pywebtransport.session import WebTransportSession
-from pywebtransport.types import Headers
+from pywebtransport.types import AuthHandlerProtocol, MiddlewareProtocol
 from pywebtransport.utils import get_logger, get_timestamp
 
 __all__ = [
@@ -22,7 +21,7 @@ __all__ = [
     "create_rate_limit_middleware",
 ]
 
-logger = get_logger("server.middleware")
+logger = get_logger(name="server.middleware")
 
 
 class MiddlewareManager:
@@ -30,9 +29,9 @@ class MiddlewareManager:
 
     def __init__(self) -> None:
         """Initialize the middleware manager."""
-        self._middleware: list[Callable[[WebTransportSession], Awaitable[bool]]] = []
+        self._middleware: list[MiddlewareProtocol] = []
 
-    def add_middleware(self, middleware: Callable[[WebTransportSession], Awaitable[bool]]) -> None:
+    def add_middleware(self, *, middleware: MiddlewareProtocol) -> None:
         """Add a middleware to the chain."""
         self._middleware.append(middleware)
 
@@ -40,18 +39,18 @@ class MiddlewareManager:
         """Get the number of registered middleware."""
         return len(self._middleware)
 
-    async def process_request(self, session: WebTransportSession) -> bool:
+    async def process_request(self, *, session: WebTransportSession) -> bool:
         """Process a request through the middleware chain."""
         for middleware in self._middleware:
             try:
-                if not await middleware(session):
+                if not await middleware(session=session):
                     return False
             except Exception as e:
-                logger.error(f"Middleware error: {e}", exc_info=e)
+                logger.error("Middleware error: %s", e, exc_info=True)
                 return False
         return True
 
-    def remove_middleware(self, middleware: Callable[[WebTransportSession], Awaitable[bool]]) -> None:
+    def remove_middleware(self, *, middleware: MiddlewareProtocol) -> None:
         """Remove a middleware from the chain."""
         if middleware in self._middleware:
             self._middleware.remove(middleware)
@@ -107,19 +106,24 @@ class RateLimiter:
                 for ip in stale_ips:
                     del self._requests[ip]
                 if stale_ips:
-                    logger.debug(f"Cleaned up {len(stale_ips)} stale IP entries from rate limiter.")
+                    logger.debug(
+                        "Cleaned up %d stale IP entries from rate limiter.",
+                        len(stale_ips),
+                    )
 
     def _start_cleanup_task(self) -> None:
         """Create and start the periodic cleanup task if not already running."""
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
-    async def __call__(self, session: WebTransportSession) -> bool:
+    async def __call__(self, *, session: WebTransportSession) -> bool:
         """Apply rate limiting to an incoming session."""
         if self._lock is None:
             raise ServerError(
-                "RateLimiter has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "RateLimiter has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         if not session.connection or not session.connection.remote_address:
             return True
@@ -133,7 +137,7 @@ class RateLimiter:
             valid_requests = [t for t in client_requests if t > cutoff_time]
 
             if len(valid_requests) >= self._max_requests:
-                logger.warning(f"Rate limit exceeded for {client_ip}")
+                logger.warning("Rate limit exceeded for %s", client_ip)
                 return False
 
             valid_requests.append(current_time)
@@ -142,15 +146,16 @@ class RateLimiter:
 
 
 def create_auth_middleware(
-    auth_handler: Callable[[Headers], Awaitable[bool]],
-) -> Callable[[WebTransportSession], Awaitable[bool]]:
+    *,
+    auth_handler: AuthHandlerProtocol,
+) -> MiddlewareProtocol:
     """Create an authentication middleware with a custom handler."""
 
-    async def middleware(session: WebTransportSession) -> bool:
+    async def middleware(*, session: WebTransportSession) -> bool:
         try:
-            return await auth_handler(session.headers)
+            return await auth_handler(headers=session.headers)
         except Exception as e:
-            logger.error(f"Authentication handler error: {e}")
+            logger.error("Authentication handler error: %s", e, exc_info=True)
             return False
 
     return middleware
@@ -159,11 +164,11 @@ def create_auth_middleware(
 def create_cors_middleware(
     *,
     allowed_origins: list[str],
-) -> Callable[[WebTransportSession], Awaitable[bool]]:
+) -> MiddlewareProtocol:
     """Create a CORS middleware to validate the Origin header."""
     allowed_set = set(allowed_origins)
 
-    async def cors_middleware(session: WebTransportSession) -> bool:
+    async def cors_middleware(*, session: WebTransportSession) -> bool:
         origin = session.headers.get("origin")
         if not origin:
             logger.warning("CORS check failed: 'Origin' header missing.")
@@ -172,20 +177,20 @@ def create_cors_middleware(
         if "*" in allowed_set or origin in allowed_set:
             return True
         else:
-            logger.warning(f"CORS check failed: Origin '{origin}' not in allowed list.")
+            logger.warning("CORS check failed: Origin '%s' not in allowed list.", origin)
             return False
 
     return cors_middleware
 
 
-def create_logging_middleware() -> Callable[[WebTransportSession], Awaitable[bool]]:
+def create_logging_middleware() -> MiddlewareProtocol:
     """Create a simple request logging middleware."""
 
-    async def middleware(session: WebTransportSession) -> bool:
+    async def middleware(*, session: WebTransportSession) -> bool:
         remote_address_str = "unknown"
         if session.connection and session.connection.remote_address:
             remote_address_str = f"{session.connection.remote_address[0]}:{session.connection.remote_address[1]}"
-        logger.info(f"Session request: path='{session.path}' from={remote_address_str}")
+        logger.info("Session request: path='%s' from=%s", session.path, remote_address_str)
         return True
 
     return middleware

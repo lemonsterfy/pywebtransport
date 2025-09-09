@@ -21,7 +21,7 @@ class H3Event:
     """Base class for all H3 protocol engine events."""
 
 
-@dataclass
+@dataclass(kw_only=True)
 class DataReceived(H3Event):
     """Fired when a generic H3 DATA frame is received."""
 
@@ -30,7 +30,7 @@ class DataReceived(H3Event):
     stream_ended: bool
 
 
-@dataclass
+@dataclass(kw_only=True)
 class DatagramReceived(H3Event):
     """Fired when a WebTransport datagram is received."""
 
@@ -38,7 +38,7 @@ class DatagramReceived(H3Event):
     stream_id: StreamId
 
 
-@dataclass
+@dataclass(kw_only=True)
 class HeadersReceived(H3Event):
     """Fired when a HEADERS frame is received on a stream."""
 
@@ -47,7 +47,7 @@ class HeadersReceived(H3Event):
     stream_ended: bool
 
 
-@dataclass
+@dataclass(kw_only=True)
 class WebTransportStreamDataReceived(H3Event):
     """Fired when raw data is received on an established WebTransport stream."""
 

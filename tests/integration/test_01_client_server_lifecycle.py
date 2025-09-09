@@ -19,7 +19,7 @@ async def test_successful_connection_and_session(
     url = f"https://{host}:{port}/"
     handler_called = asyncio.Event()
 
-    @server_app.route("/")
+    @server_app.route(path="/")
     async def basic_handler(session: WebTransportSession) -> None:
         handler_called.set()
         try:
@@ -29,7 +29,7 @@ async def test_successful_connection_and_session(
 
     session = None
     try:
-        session = await client.connect(url)
+        session = await client.connect(url=url)
         assert session.is_ready
         await asyncio.wait_for(handler_called.wait(), timeout=1.0)
     finally:
@@ -45,7 +45,7 @@ async def test_client_initiated_close(
     url = f"https://{host}:{port}/"
     server_entered = asyncio.Event()
 
-    @server_app.route("/")
+    @server_app.route(path="/")
     async def simple_handler(session: WebTransportSession) -> None:
         server_entered.set()
         try:
@@ -53,7 +53,7 @@ async def test_client_initiated_close(
         except asyncio.CancelledError:
             pass
 
-    session = await client.connect(url)
+    session = await client.connect(url=url)
     assert session.is_ready
     await asyncio.wait_for(server_entered.wait(), timeout=1.0)
 
@@ -70,11 +70,11 @@ async def test_server_initiated_close(
     host, port = server
     url = f"https://{host}:{port}/close-me"
 
-    @server_app.route("/close-me")
+    @server_app.route(path="/close-me")
     async def immediate_close_handler(session: WebTransportSession) -> None:
         await session.close(reason="Server closed immediately.")
 
-    session = await client.connect(url)
+    session = await client.connect(url=url)
     assert session.is_ready
 
     try:
@@ -94,7 +94,7 @@ async def test_connection_to_non_existent_route_fails(
     url = f"https://{host}:{port}/nonexistent"
 
     with pytest.raises(ClientError) as exc_info:
-        await client.connect(url)
+        await client.connect(url=url)
 
     error_message = str(exc_info.value).lower()
     assert "404" in error_message or "route not found" in error_message or "timeout" in error_message

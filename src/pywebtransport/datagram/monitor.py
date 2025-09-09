@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 __all__ = ["DatagramMonitor"]
 
-logger = get_logger("datagram.monitor")
+logger = get_logger(name="datagram.monitor")
 
 
 class DatagramMonitor:
@@ -47,12 +47,12 @@ class DatagramMonitor:
     @classmethod
     def create(
         cls,
-        datagram_stream: WebTransportDatagramDuplexStream,
         *,
+        datagram_stream: WebTransportDatagramDuplexStream,
         monitoring_interval: float = 5.0,
     ) -> Self:
         """Factory method to create a new datagram monitor for a stream."""
-        return cls(datagram_stream, monitoring_interval=monitoring_interval)
+        return cls(datagram_stream=datagram_stream, monitoring_interval=monitoring_interval)
 
     @property
     def is_monitoring(self) -> bool:
@@ -66,9 +66,15 @@ class DatagramMonitor:
 
         try:
             self._monitor_task = asyncio.create_task(self._monitor_loop())
-            logger.info(f"Datagram monitoring started for session {self._stream.session_id[:12]}...")
+            logger.info(
+                "Datagram monitoring started for session %s...",
+                self._stream.session_id[:12],
+            )
         except RuntimeError:
-            logger.error("Failed to start datagram monitor: No running event loop.")
+            logger.error(
+                "Failed to start datagram monitor: No running event loop.",
+                exc_info=True,
+            )
 
         return self
 
@@ -85,7 +91,10 @@ class DatagramMonitor:
                 await self._monitor_task
             except asyncio.CancelledError:
                 pass
-        logger.info(f"Datagram monitoring stopped for session {self._stream.session_id[:12]}...")
+        logger.info(
+            "Datagram monitoring stopped for session %s...",
+            self._stream.session_id[:12],
+        )
 
     def get_alerts(self) -> list[dict[str, Any]]:
         """Get a copy of the currently active alerts."""
@@ -98,7 +107,7 @@ class DatagramMonitor:
             return samples_list[-limit:]
         return samples_list
 
-    def _analyze_trend(self, values: list[float]) -> str:
+    def _analyze_trend(self, *, values: list[float]) -> str:
         """Perform a simple trend analysis on a series of values."""
         if len(values) < self._trend_analysis_window:
             return "stable"
@@ -124,7 +133,7 @@ class DatagramMonitor:
 
         return "stable"
 
-    async def _check_alerts(self, current_sample: dict[str, Any]) -> None:
+    async def _check_alerts(self, *, current_sample: dict[str, Any]) -> None:
         """Check the current sample against configured alert thresholds."""
         if current_sample["outgoing_queue_size"] > self._stream.outgoing_high_water_mark * self._queue_size_threshold:
             self._alerts.append(
@@ -146,7 +155,7 @@ class DatagramMonitor:
 
         if len(self._samples) >= self._trend_analysis_window:
             recent_send_times = [s["avg_send_time"] for s in self._samples]
-            trend = self._analyze_trend(recent_send_times)
+            trend = self._analyze_trend(values=recent_send_times)
             if trend == "increasing":
                 self._alerts.append(
                     {
@@ -174,9 +183,9 @@ class DatagramMonitor:
                 }
 
                 self._samples.append(sample)
-                await self._check_alerts(sample)
+                await self._check_alerts(current_sample=sample)
 
         except asyncio.CancelledError:
             logger.info("Datagram monitor loop cancelled.")
         except Exception as e:
-            logger.error(f"Monitor loop error: {e}", exc_info=e)
+            logger.error("Monitor loop error: %s", e, exc_info=e)

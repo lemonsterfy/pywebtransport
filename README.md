@@ -7,22 +7,25 @@
 [![Coverage](https://codecov.io/gh/lemonsterfy/pywebtransport/branch/main/graph/badge.svg)](https://codecov.io/gh/lemonsterfy/pywebtransport)
 [![Docs](https://readthedocs.org/projects/pywebtransport/badge/?version=latest)](https://pywebtransport.readthedocs.io/en/latest/)
 
-A high-performance, async-native WebTransport implementation for Python.
+The canonical, async-native WebTransport stack for Python.
 
 ## Features
 
-- Full WebTransport protocol implementation (bidirectional streams, unidirectional streams, datagrams).
-- High-performance async client and server application frameworks.
-- Production-ready components for connection pooling, management, and load balancing.
-- Comprehensive monitoring and debugging capabilities.
-- Type-safe API with complete type annotations.
-- Extensive test coverage (unit, integration, end-to-end).
+- **Full Async Support**: Built from the ground up on asyncio for high-performance, non-blocking I/O.
+- **High-Level Frameworks**: Includes a ServerApp with routing and middleware, and a versatile WebTransportClient with helpers for pooling, auto-reconnection, and proxying.
+- **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
+- **Structured Messaging**: Pluggable JSON, MsgPack, and Protobuf serializers for sending and receiving structured data objects over streams and datagrams.
+- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and monitoring.
+- **Event-Driven Architecture**: A powerful EventEmitter and EventBus system for decoupled, asynchronous communication between components.
+- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
 
 ## Installation
 
 ```bash
 pip install pywebtransport
 ```
+
+For more detailed instructions, including virtual environments and platform-specific notes, see the [Installation Guide](docs/installation.md).
 
 ## Quick Start
 
@@ -36,7 +39,7 @@ from pywebtransport import ServerApp, ServerConfig, WebTransportSession, WebTran
 from pywebtransport.exceptions import ConnectionError, SessionError
 from pywebtransport.utils import generate_self_signed_cert
 
-generate_self_signed_cert("localhost")
+generate_self_signed_cert(hostname="localhost")
 
 app = ServerApp(
     config=ServerConfig.create(
@@ -51,7 +54,7 @@ async def handle_datagrams(session: WebTransportSession) -> None:
         datagrams = await session.datagrams
         while True:
             data = await datagrams.receive()
-            await datagrams.send(b"ECHO: " + data)
+            await datagrams.send(data=b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
         pass
 
@@ -61,12 +64,12 @@ async def handle_streams(session: WebTransportSession) -> None:
         async for stream in session.incoming_streams():
             if isinstance(stream, WebTransportStream):
                 data = await stream.read_all()
-                await stream.write_all(b"ECHO: " + data)
+                await stream.write_all(data=b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
         pass
 
 
-@app.route("/")
+@app.route(path="/")
 async def echo_handler(session: WebTransportSession) -> None:
     datagram_task = asyncio.create_task(handle_datagrams(session))
     stream_task = asyncio.create_task(handle_streams(session))
@@ -95,18 +98,18 @@ from pywebtransport import ClientConfig, WebTransportClient
 async def main() -> None:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
 
-    async with WebTransportClient.create(config=config) as client:
-        session = await client.connect("https://127.0.0.1:4433/")
+    async with WebTransportClient(config=config) as client:
+        session = await client.connect(url="https://127.0.0.1:4433/")
 
         print("Connection established. Testing datagrams...")
         datagrams = await session.datagrams
-        await datagrams.send(b"Hello, Datagram!")
+        await datagrams.send(data=b"Hello, Datagram!")
         response = await datagrams.receive()
         print(f"Datagram echo: {response!r}\n")
 
         print("Testing streams...")
         stream = await session.create_bidirectional_stream()
-        await stream.write_all(b"Hello, Stream!")
+        await stream.write_all(data=b"Hello, Stream!")
         response = await stream.read_all()
         print(f"Stream echo: {response!r}")
 
@@ -123,13 +126,13 @@ if __name__ == "__main__":
 
 ## Documentation
 
-- **[Installation Guide](docs/installation.md)** - Setup and installation
-- **[Quick Start](docs/quickstart.md)** - 5-minute tutorial
-- **[API Reference](docs/api-reference/)** - Complete API documentation
+- **[Installation Guide](docs/installation.md)** - In-depth setup and installation guide.
+- **[Quick Start](docs/quickstart.md)** - A 5-minute tutorial to get started.
+- **[API Reference](docs/api-reference/)** - Complete API documentation.
 
 ## Requirements
 
-- Python 3.11+
+- **Python 3.11+**
 - asyncio support
 - TLS 1.3
 
@@ -140,7 +143,7 @@ if __name__ == "__main__":
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on the development setup, testing, and pull request process.
 
 **Development Setup:**
 
@@ -158,8 +161,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- [aioquic](https://github.com/aiortc/aioquic) for QUIC protocol implementation
-- [WebTransport Working Group](https://datatracker.ietf.org/wg/webtrans/) for protocol standardization
+- [aioquic](https://github.com/aiortc/aioquic) for the underlying QUIC protocol implementation.
+- [WebTransport Working Group](https://datatracker.ietf.org/wg/webtrans/) for standardizing the protocol.
 
 ## Support
 

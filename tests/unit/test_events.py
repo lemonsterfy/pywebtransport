@@ -44,19 +44,20 @@ class TestEvent:
         assert event.type == "custom_event"
 
     @pytest.mark.parametrize(
-        "factory_method, event_type",
+        "factory_method, event_type, data_key",
         [
-            ("for_connection", EventType.CONNECTION_ESTABLISHED),
-            ("for_datagram", EventType.DATAGRAM_RECEIVED),
-            ("for_session", EventType.SESSION_READY),
-            ("for_stream", EventType.STREAM_OPENED),
+            ("for_connection", EventType.CONNECTION_ESTABLISHED, "connection_info"),
+            ("for_datagram", EventType.DATAGRAM_RECEIVED, "datagram_info"),
+            ("for_session", EventType.SESSION_READY, "session_info"),
+            ("for_stream", EventType.STREAM_OPENED, "stream_info"),
         ],
     )
-    def test_factory_methods(self, factory_method: str, event_type: EventType) -> None:
+    def test_factory_methods(self, factory_method: str, event_type: EventType, data_key: str) -> None:
         data = {"key": "value"}
+        kwargs = {"event_type": event_type, data_key: data}
 
         method = getattr(Event, factory_method)
-        event = method(event_type, data)
+        event = method(**kwargs)
 
         assert event.type == event_type
         assert event.data == data
@@ -64,7 +65,7 @@ class TestEvent:
     def test_for_error_factory(self) -> None:
         error = ValueError("Something went wrong")
 
-        event = Event.for_error(error, source="test")
+        event = Event.for_error(error=error, source="test")
 
         assert event.type == EventType.PROTOCOL_ERROR
         assert event.source == "test"
@@ -79,7 +80,7 @@ class TestEvent:
                 return {"code": 123, "reason": "custom"}
 
         error = CustomError("A custom error occurred")
-        event = Event.for_error(error)
+        event = Event.for_error(error=error)
 
         assert event.data
         assert event.data["error_details"] == {"code": 123, "reason": "custom"}
@@ -133,7 +134,7 @@ class TestEvent:
             to_dict = "not a callable"
 
         error = BadError("Bad to_dict")
-        event = Event.for_error(error)
+        event = Event.for_error(error=error)
 
         assert event.data and event.data["error_details"] == {}
 
@@ -153,9 +154,9 @@ class TestEventEmitter:
     @pytest.mark.asyncio
     async def test_on_and_emit(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.AsyncMock()
-        emitter.on(EventType.SESSION_READY, handler)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler)
 
-        await emitter.emit(EventType.SESSION_READY, data={"test": 1})
+        await emitter.emit(event_type=EventType.SESSION_READY, data={"test": 1})
 
         handler.assert_awaited_once()
         call_arg = handler.call_args[0][0]
@@ -166,41 +167,41 @@ class TestEventEmitter:
     @pytest.mark.asyncio
     async def test_emit_with_sync_handler(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.Mock()
-        emitter.on(EventType.SESSION_READY, handler)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler)
 
-        await emitter.emit(EventType.SESSION_READY)
+        await emitter.emit(event_type=EventType.SESSION_READY)
 
         handler.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_once(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.AsyncMock()
-        emitter.once(EventType.STREAM_OPENED, handler)
-        assert emitter.listener_count(EventType.STREAM_OPENED) == 1
+        emitter.once(event_type=EventType.STREAM_OPENED, handler=handler)
+        assert emitter.listener_count(event_type=EventType.STREAM_OPENED) == 1
 
-        await emitter.emit(EventType.STREAM_OPENED)
-        await emitter.emit(EventType.STREAM_OPENED)
+        await emitter.emit(event_type=EventType.STREAM_OPENED)
+        await emitter.emit(event_type=EventType.STREAM_OPENED)
 
         handler.assert_awaited_once()
-        assert emitter.listener_count(EventType.STREAM_OPENED) == 0
+        assert emitter.listener_count(event_type=EventType.STREAM_OPENED) == 0
 
     @pytest.mark.asyncio
     async def test_off(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.Mock()
-        emitter.on(EventType.CONNECTION_LOST, handler)
+        emitter.on(event_type=EventType.CONNECTION_LOST, handler=handler)
 
-        emitter.off(EventType.CONNECTION_LOST, handler)
-        await emitter.emit(EventType.CONNECTION_LOST)
+        emitter.off(event_type=EventType.CONNECTION_LOST, handler=handler)
+        await emitter.emit(event_type=EventType.CONNECTION_LOST)
 
         handler.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_off_removes_once_handler(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.Mock()
-        emitter.once(EventType.CONNECTION_LOST, handler)
+        emitter.once(event_type=EventType.CONNECTION_LOST, handler=handler)
 
-        emitter.off(EventType.CONNECTION_LOST, handler)
-        await emitter.emit(EventType.CONNECTION_LOST)
+        emitter.off(event_type=EventType.CONNECTION_LOST, handler=handler)
+        await emitter.emit(event_type=EventType.CONNECTION_LOST)
 
         handler.assert_not_called()
 
@@ -208,42 +209,42 @@ class TestEventEmitter:
     async def test_off_all_handlers_for_event(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler1 = mocker.AsyncMock()
         handler2 = mocker.AsyncMock()
-        emitter.on(EventType.SESSION_READY, handler1)
-        emitter.on(EventType.SESSION_READY, handler2)
-        assert emitter.listener_count(EventType.SESSION_READY) == 2
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler1)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler2)
+        assert emitter.listener_count(event_type=EventType.SESSION_READY) == 2
 
-        emitter.off(EventType.SESSION_READY, handler=None)
+        emitter.off(event_type=EventType.SESSION_READY, handler=None)
 
-        assert emitter.listener_count(EventType.SESSION_READY) == 0
+        assert emitter.listener_count(event_type=EventType.SESSION_READY) == 0
 
     @pytest.mark.asyncio
     async def test_on_any_and_off_any(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         wildcard_handler = mocker.AsyncMock()
-        emitter.on_any(wildcard_handler)
+        emitter.on_any(handler=wildcard_handler)
 
-        await emitter.emit(EventType.CONNECTION_ESTABLISHED)
-        emitter.off_any(wildcard_handler)
-        await emitter.emit(EventType.DATAGRAM_RECEIVED)
+        await emitter.emit(event_type=EventType.CONNECTION_ESTABLISHED)
+        emitter.off_any(handler=wildcard_handler)
+        await emitter.emit(event_type=EventType.DATAGRAM_RECEIVED)
 
         wildcard_handler.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_on_any_duplicate_handler(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.Mock()
-        emitter.on_any(handler)
-        emitter.on_any(handler)
+        emitter.on_any(handler=handler)
+        emitter.on_any(handler=handler)
 
-        await emitter.emit("test")
+        await emitter.emit(event_type="test")
 
         handler.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_off_any_removes_all_wildcard_handlers(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.Mock()
-        emitter.on_any(handler)
+        emitter.on_any(handler=handler)
 
         emitter.off_any(handler=None)
-        await emitter.emit("test")
+        await emitter.emit(event_type="test")
 
         handler.assert_not_called()
 
@@ -251,10 +252,10 @@ class TestEventEmitter:
     async def test_pause_and_resume(self, emitter: EventEmitter, mocker: MockerFixture) -> None:
         handler = mocker.AsyncMock()
         mock_create_task = mocker.patch("pywebtransport.events.asyncio.create_task")
-        emitter.on(EventType.SESSION_READY, handler)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler)
 
         emitter.pause()
-        await emitter.emit(EventType.SESSION_READY)
+        await emitter.emit(event_type=EventType.SESSION_READY)
         handler.assert_not_awaited()
         task = emitter.resume()
 
@@ -268,7 +269,7 @@ class TestEventEmitter:
         real_task = asyncio.create_task(asyncio.sleep(10))
         cancel_spy = mocker.spy(real_task, "cancel")
         emitter._processing_task = real_task
-        emitter.on(EventType.SESSION_READY, mocker.Mock())
+        emitter.on(event_type=EventType.SESSION_READY, handler=mocker.Mock())
 
         await emitter.close()
 
@@ -278,10 +279,10 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_wait_for_success(self, emitter: EventEmitter) -> None:
-        wait_task = asyncio.create_task(emitter.wait_for(EventType.SESSION_READY))
+        wait_task = asyncio.create_task(emitter.wait_for(event_type=EventType.SESSION_READY))
         await asyncio.sleep(0.01)
 
-        await emitter.emit(EventType.SESSION_READY, data={"id": "abc"})
+        await emitter.emit(event_type=EventType.SESSION_READY, data={"id": "abc"})
         result = await asyncio.wait_for(wait_task, timeout=1)
 
         assert result.data == {"id": "abc"}
@@ -290,15 +291,15 @@ class TestEventEmitter:
     async def test_wait_for_condition(self, emitter: EventEmitter) -> None:
         wait_task = asyncio.create_task(
             emitter.wait_for(
-                EventType.STREAM_DATA_RECEIVED,
+                event_type=EventType.STREAM_DATA_RECEIVED,
                 condition=lambda e: bool(e.data and e.data["stream_id"] == 3),
             )
         )
         await asyncio.sleep(0.01)
 
-        await emitter.emit(EventType.STREAM_DATA_RECEIVED, data={"stream_id": 1})
+        await emitter.emit(event_type=EventType.STREAM_DATA_RECEIVED, data={"stream_id": 1})
         assert not wait_task.done()
-        await emitter.emit(EventType.STREAM_DATA_RECEIVED, data={"stream_id": 3})
+        await emitter.emit(event_type=EventType.STREAM_DATA_RECEIVED, data={"stream_id": 3})
         result = await asyncio.wait_for(wait_task, timeout=1)
 
         assert result.data
@@ -308,9 +309,9 @@ class TestEventEmitter:
     async def test_event_history_and_filtering(self, emitter: EventEmitter) -> None:
         emitter._max_history = 2
 
-        await emitter.emit("event1")
-        await emitter.emit("event2")
-        await emitter.emit("event3")
+        await emitter.emit(event_type="event1")
+        await emitter.emit(event_type="event2")
+        await emitter.emit(event_type="event3")
 
         history = emitter.get_event_history()
         assert len(history) == 2
@@ -325,7 +326,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_clear_history(self, emitter: EventEmitter) -> None:
-        await emitter.emit("event1")
+        await emitter.emit(event_type="event1")
         assert len(emitter.get_event_history()) == 1
 
         emitter.clear_history()
@@ -335,7 +336,7 @@ class TestEventEmitter:
     @pytest.mark.asyncio
     async def test_wait_for_timeout(self, emitter: EventEmitter) -> None:
         with pytest.raises(asyncio.TimeoutError):
-            await emitter.wait_for(EventType.SESSION_READY, timeout=0.01)
+            await emitter.wait_for(event_type=EventType.SESSION_READY, timeout=0.01)
 
     @pytest.mark.asyncio
     async def test_wait_for_condition_raises_exception(self, emitter: EventEmitter) -> None:
@@ -345,10 +346,12 @@ class TestEventEmitter:
         def faulty_condition(event: Event) -> bool:
             raise ConditionError("Condition failed")
 
-        wait_task = asyncio.create_task(emitter.wait_for(EventType.SESSION_READY, condition=faulty_condition))
+        wait_task = asyncio.create_task(
+            emitter.wait_for(event_type=EventType.SESSION_READY, condition=faulty_condition)
+        )
         await asyncio.sleep(0.01)
 
-        await emitter.emit(EventType.SESSION_READY)
+        await emitter.emit(event_type=EventType.SESSION_READY)
 
         with pytest.raises(ConditionError):
             await wait_task
@@ -382,10 +385,10 @@ class TestEventEmitter:
     ) -> None:
         handler1 = mocker.AsyncMock(side_effect=ValueError("Handler failed"))
         handler2 = mocker.AsyncMock()
-        emitter.on(EventType.SESSION_READY, handler1)
-        emitter.on(EventType.SESSION_READY, handler2)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler1)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler2)
 
-        await emitter.emit(EventType.SESSION_READY)
+        await emitter.emit(event_type=EventType.SESSION_READY)
 
         mock_logger.error.assert_called_once()
         handler1.assert_awaited_once()
@@ -393,10 +396,10 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_max_listeners_warning(self, emitter: EventEmitter, mocker: MockerFixture, mock_logger: Any) -> None:
-        emitter.set_max_listeners(1)
-        emitter.on(EventType.SESSION_READY, mocker.AsyncMock())
+        emitter.set_max_listeners(max_listeners=1)
+        emitter.on(event_type=EventType.SESSION_READY, handler=mocker.AsyncMock())
 
-        emitter.on(EventType.SESSION_READY, mocker.AsyncMock())
+        emitter.on(event_type=EventType.SESSION_READY, handler=mocker.AsyncMock())
 
         mock_logger.warning.assert_called_once()
 
@@ -406,10 +409,10 @@ class TestEventEmitter:
     ) -> None:
         handler = mocker.AsyncMock()
 
-        emitter.on(EventType.SESSION_READY, handler)
-        emitter.on(EventType.SESSION_READY, handler)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler)
+        emitter.on(event_type=EventType.SESSION_READY, handler=handler)
 
-        assert emitter.listener_count(EventType.SESSION_READY) == 1
+        assert emitter.listener_count(event_type=EventType.SESSION_READY) == 1
         mock_logger.warning.assert_called_once()
 
 
@@ -430,7 +433,7 @@ class TestEventBusAndHelpers:
         assert emitter1 is not emitter2
 
     def test_event_handler_decorator(self) -> None:
-        @event_handler(EventType.CONNECTION_LOST)
+        @event_handler(event_type=EventType.CONNECTION_LOST)
         def my_handler(event: Event) -> None:
             pass
 
@@ -449,10 +452,10 @@ class TestEventBusAndHelpers:
     async def test_publish(self, mocker: MockerFixture) -> None:
         bus = await create_event_bus()
         handler = mocker.AsyncMock()
-        bus.subscribe(EventType.SESSION_READY, handler)
+        bus.subscribe(event_type=EventType.SESSION_READY, handler=handler)
         event = Event(type=EventType.SESSION_READY, data={"id": 123})
 
-        await bus.publish(event)
+        await bus.publish(event=event)
 
         handler.assert_awaited_once()
         call_arg = handler.call_args[0][0]
@@ -464,14 +467,14 @@ class TestEventBusAndHelpers:
         bus = await create_event_bus()
         handler = mocker.AsyncMock()
 
-        sub_id = bus.subscribe(EventType.SESSION_READY, handler)
+        sub_id = bus.subscribe(event_type=EventType.SESSION_READY, handler=handler)
         assert bus.get_subscription_count() == 1
-        await bus.emit(EventType.SESSION_READY)
+        await bus.emit(event_type=EventType.SESSION_READY)
         handler.assert_awaited_once()
-        bus.unsubscribe(sub_id)
+        bus.unsubscribe(subscription_id=sub_id)
 
         assert bus.get_subscription_count() == 0
-        await bus.emit(EventType.SESSION_READY)
+        await bus.emit(event_type=EventType.SESSION_READY)
         handler.assert_awaited_once()
         await bus.close()
 
@@ -479,10 +482,10 @@ class TestEventBusAndHelpers:
     async def test_subscribe_once(self, mocker: MockerFixture) -> None:
         bus = await create_event_bus()
         handler = mocker.AsyncMock()
-        bus.subscribe(EventType.SESSION_READY, handler, once=True)
+        bus.subscribe(event_type=EventType.SESSION_READY, handler=handler, once=True)
 
-        await bus.emit(EventType.SESSION_READY)
-        await bus.emit(EventType.SESSION_READY)
+        await bus.emit(event_type=EventType.SESSION_READY)
+        await bus.emit(event_type=EventType.SESSION_READY)
 
         handler.assert_awaited_once()
         await bus.close()
@@ -490,7 +493,7 @@ class TestEventBusAndHelpers:
     @pytest.mark.asyncio
     async def test_clear_all_subscriptions(self, mocker: MockerFixture) -> None:
         bus = await create_event_bus()
-        bus.subscribe(EventType.SESSION_READY, mocker.Mock())
+        bus.subscribe(event_type=EventType.SESSION_READY, handler=mocker.Mock())
         assert bus.get_subscription_count() == 1
 
         bus.clear_all_subscriptions()
@@ -502,7 +505,7 @@ class TestEventBusAndHelpers:
     async def test_unsubscribe_nonexistent_id(self, mock_logger: Any) -> None:
         bus = await create_event_bus()
 
-        bus.unsubscribe("sub_fake_id")
+        bus.unsubscribe(subscription_id="sub_fake_id")
 
         mock_logger.warning.assert_called_once()
         await bus.close()

@@ -35,15 +35,15 @@ async def test_server_reachability() -> bool:
         sock.settimeout(2.0)
         try:
             sock.sendto(b"ping", (SERVER_HOST, SERVER_PORT))
-            logger.info(f"Server port {SERVER_PORT} (UDP) is reachable.")
+            logger.info("Server port %s (UDP) is reachable.", SERVER_PORT)
             return True
         except socket.error as e:
-            logger.warning(f"UDP probe failed: {e}. This might be normal.")
+            logger.warning("UDP probe failed: %s. This might be normal.", e)
             return True
         finally:
             sock.close()
     except Exception as e:
-        logger.error(f"Reachability pre-check failed unexpectedly: {e}")
+        logger.error("Reachability pre-check failed unexpectedly: %s", e)
         return False
 
 
@@ -57,21 +57,21 @@ async def test_basic_connection() -> bool:
         connect_timeout=15.0,
         headers={"user-agent": "pywebtransport-e2e-test/1.0"},
     )
-    logger.info(f"Target server: {SERVER_URL}")
-    logger.info(f"Config: timeout={config.connect_timeout}s, verify_ssl=False")
+    logger.info("Target server: %s", SERVER_URL)
+    logger.info("Config: timeout=%ss, verify_ssl=False", config.connect_timeout)
 
     try:
-        async with WebTransportClient.create(config=config) as client:
+        async with WebTransportClient(config=config) as client:
             logger.info("Client activated, attempting connection...")
             start_time = time.time()
-            session = await client.connect(SERVER_URL)
+            session = await client.connect(url=SERVER_URL)
             connect_time = time.time() - start_time
 
             logger.info("Connection established!")
-            logger.info(f"   - Connection time: {connect_time:.3f}s")
-            logger.info(f"   - Session ID: {session.session_id}")
-            logger.info(f"   - Session state: {session.state.value}")
-            logger.info(f"   - Session ready: {session.is_ready}")
+            logger.info("   - Connection time: %.3fs", connect_time)
+            logger.info("   - Session ID: %s", session.session_id)
+            logger.info("   - Session state: %s", session.state.value)
+            logger.info("   - Session ready: %s", session.is_ready)
 
             if not session.is_ready:
                 logger.error("FAILED: Session not ready after connection")
@@ -79,7 +79,7 @@ async def test_basic_connection() -> bool:
 
             logger.info("SUCCESS: Session is ready for communication!")
             if session.connection:
-                logger.info(f"   - Remote address: {session.connection.remote_address}")
+                logger.info("   - Remote address: %s", session.connection.remote_address)
 
             logger.info("Closing session...")
             await session.close()
@@ -87,14 +87,14 @@ async def test_basic_connection() -> bool:
             return True
 
     except (TimeoutError, ConnectionError) as e:
-        logger.error(f"FAILED: Connection error - {e}")
+        logger.error("FAILED: Connection error - %s", e)
         logger.error("Possible issues:")
         logger.error("   - Server not running")
         logger.error("   - Wrong server address/port")
         logger.error("   - Network connectivity problems")
         return False
     except Exception as e:
-        logger.error(f"FAILED: Unexpected error - {e}", exc_info=True)
+        logger.error("FAILED: Unexpected error - %s", e, exc_info=True)
         logger.error("This might be a bug in the WebTransport implementation")
         return False
 
@@ -132,6 +132,6 @@ if __name__ == "__main__":
         logger.warning("\nTest interrupted by user.")
         exit_code = 130
     except Exception as e:
-        logger.critical(f"Test suite crashed with an unhandled exception: {e}", exc_info=True)
+        logger.critical("Test suite crashed with an unhandled exception: %s", e, exc_info=True)
     finally:
         sys.exit(exit_code)

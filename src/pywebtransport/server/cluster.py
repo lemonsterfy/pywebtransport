@@ -15,13 +15,13 @@ from pywebtransport.utils import get_logger
 
 __all__ = ["ServerCluster"]
 
-logger = get_logger("server.cluster")
+logger = get_logger(name="server.cluster")
 
 
 class ServerCluster:
     """Manages the lifecycle of multiple WebTransport server instances."""
 
-    def __init__(self, configs: list[ServerConfig]):
+    def __init__(self, *, configs: list[ServerConfig]):
         """Initialize the server cluster."""
         self._configs = configs
         self._servers: list[WebTransportServer] = []
@@ -66,25 +66,32 @@ class ServerCluster:
         try:
             async with asyncio.TaskGroup() as tg:
                 for config in initial_configs:
-                    tasks.append(tg.create_task(self._create_and_start_server(config)))
+                    tasks.append(tg.create_task(self._create_and_start_server(config=config)))
             started_servers = [task.result() for task in tasks]
         except* Exception as eg:
-            logger.error(f"Failed to start server cluster: {eg.exceptions}")
+            logger.error("Failed to start server cluster: %s", eg.exceptions, exc_info=True)
             successful_servers = [task.result() for task in tasks if task.done() and not task.exception()]
             if successful_servers:
-                logger.info(f"Cleaning up {len(successful_servers)} successfully started servers...")
+                logger.info(
+                    "Cleaning up %d successfully started servers...",
+                    len(successful_servers),
+                )
                 try:
                     async with asyncio.TaskGroup() as cleanup_tg:
                         for server in successful_servers:
                             cleanup_tg.create_task(server.close())
                 except* Exception as cleanup_eg:
-                    logger.error(f"Errors during cluster startup cleanup: {cleanup_eg.exceptions}")
+                    logger.error(
+                        "Errors during cluster startup cleanup: %s",
+                        cleanup_eg.exceptions,
+                        exc_info=True,
+                    )
             raise eg.exceptions[0]
 
         async with self._lock:
             self._servers = started_servers
             self._running = True
-            logger.info(f"Started cluster with {len(self._servers)} servers")
+            logger.info("Started cluster with %d servers", len(self._servers))
 
     async def stop_all(self) -> None:
         """Stop all servers in the cluster concurrently."""
@@ -108,11 +115,15 @@ class ServerCluster:
                     for server in servers_to_stop:
                         tg.create_task(server.close())
             except* Exception as eg:
-                logger.error(f"Errors occurred while stopping server cluster: {eg.exceptions}")
+                logger.error(
+                    "Errors occurred while stopping server cluster: %s",
+                    eg.exceptions,
+                    exc_info=True,
+                )
                 raise eg
-        logger.info("Stopped server cluster")
+            logger.info("Stopped server cluster")
 
-    async def add_server(self, config: ServerConfig) -> WebTransportServer | None:
+    async def add_server(self, *, config: ServerConfig) -> WebTransportServer | None:
         """Add and start a new server in the running cluster."""
         if self._lock is None:
             raise ServerError(
@@ -129,17 +140,17 @@ class ServerCluster:
                 return None
 
         try:
-            server = await self._create_and_start_server(config)
+            server = await self._create_and_start_server(config=config)
             async with self._lock:
                 if not self._running:
                     await server.close()
                     logger.warning("Cluster was stopped while new server was starting. New server has been shut down.")
                     return None
                 self._servers.append(server)
-                logger.info(f"Added server to cluster: {server.local_address}")
+                logger.info("Added server to cluster: %s", server.local_address)
             return server
         except Exception as e:
-            logger.error(f"Failed to add server to cluster: {e}", exc_info=True)
+            logger.error("Failed to add server to cluster: %s", e, exc_info=True)
             return None
 
     async def remove_server(self, *, host: str, port: int) -> bool:
@@ -160,11 +171,11 @@ class ServerCluster:
             if server_to_remove:
                 self._servers.remove(server_to_remove)
             else:
-                logger.warning(f"Server at {host}:{port} not found in cluster.")
+                logger.warning("Server at %s:%s not found in cluster.", host, port)
                 return False
 
         await server_to_remove.close()
-        logger.info(f"Removed server from cluster: {host}:{port}")
+        logger.info("Removed server from cluster: %s:%s", host, port)
         return True
 
     async def get_cluster_stats(self) -> dict[str, Any]:
@@ -187,7 +198,11 @@ class ServerCluster:
                 for s in servers_snapshot:
                     tasks.append(tg.create_task(s.get_server_stats()))
         except* Exception as eg:
-            logger.error(f"Failed to fetch stats from some servers: {eg.exceptions}")
+            logger.error(
+                "Failed to fetch stats from some servers: %s",
+                eg.exceptions,
+                exc_info=True,
+            )
             raise eg
 
         stats_list = [task.result() for task in tasks if task.done() and not task.exception()]
@@ -229,7 +244,7 @@ class ServerCluster:
         async with self._lock:
             return self._servers.copy()
 
-    async def _create_and_start_server(self, config: ServerConfig) -> WebTransportServer:
+    async def _create_and_start_server(self, *, config: ServerConfig) -> WebTransportServer:
         """Create, activate, and start a single server instance."""
         server = WebTransportServer(config=config)
         await server.__aenter__()

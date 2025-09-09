@@ -58,14 +58,18 @@ from .test_07_advanced_features import (
     test_session_statistics as run_07_session_statistics,
     test_stream_management as run_07_stream_management,
 )
+from .test_08_structured_messaging import (
+    test_json_messaging as run_08_json_messaging,
+    test_msgpack_messaging as run_08_msgpack_messaging,
+)
 
 
 async def _is_server_ready() -> bool:
     config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=1.0)
     for _ in range(20):
         try:
-            async with WebTransportClient.create(config=config) as client:
-                session = await client.connect("https://127.0.0.1:4433/health")
+            async with WebTransportClient(config=config) as client:
+                session = await client.connect(url="https://127.0.0.1:4433/health")
                 await session.close()
                 return True
         except (ClientError, asyncio.TimeoutError):
@@ -223,3 +227,9 @@ class TestE2eSuite:
 
     async def test_07_session_lifecycle_events(self) -> None:
         assert await run_07_session_lifecycle_events() is True, "Session lifecycle events tracking failed"
+
+    async def test_08_json_messaging(self) -> None:
+        assert await run_08_json_messaging() is True, "Structured JSON messaging test failed"
+
+    async def test_08_msgpack_messaging(self) -> None:
+        assert await run_08_msgpack_messaging() is True, "Structured MsgPack messaging test failed"

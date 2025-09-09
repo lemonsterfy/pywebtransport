@@ -47,19 +47,22 @@ class TestStreamConcurrency:
         payload = b"d" * DATA_PER_STREAM
         expected_response = b"ECHO: " + payload
 
-        async def stream_worker(session: WebTransportSession, semaphore: asyncio.Semaphore) -> None:
+        async def stream_worker(*, session: WebTransportSession, semaphore: asyncio.Semaphore) -> None:
             async with semaphore:
                 stream = await session.create_bidirectional_stream()
-                await stream.write_all(payload)
+                await stream.write_all(data=payload)
                 response = await stream.read_all()
                 assert response == expected_response
 
         async def run_concurrency_cycle() -> None:
-            async with WebTransportClient.create(config=client_config) as client:
-                session = await client.connect(f"{SERVER_URL}{ECHO_ENDPOINT}")
+            async with WebTransportClient(config=client_config) as client:
+                session = await client.connect(url=f"{SERVER_URL}{ECHO_ENDPOINT}")
                 semaphore = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
 
-                tasks = [asyncio.create_task(stream_worker(session, semaphore)) for _ in range(stream_count)]
+                tasks = [
+                    asyncio.create_task(stream_worker(session=session, semaphore=semaphore))
+                    for _ in range(stream_count)
+                ]
                 await asyncio.gather(*tasks)
 
         benchmark(lambda: asyncio.run(run_concurrency_cycle()))
@@ -73,6 +76,8 @@ class TestStreamConcurrency:
         benchmark.extra_info["aggregate_throughput_mbps"] = f"{aggregate_throughput_mbps:.2f}"
 
         logger.info(
-            f"Workload: {stream_count} streams (limit {MAX_CONCURRENT_STREAMS}) | "
-            f"Throughput: {aggregate_throughput_mbps:.2f} MB/s"
+            "Workload: %s streams (limit %s) | Throughput: %.2f MB/s",
+            stream_count,
+            MAX_CONCURRENT_STREAMS,
+            aggregate_throughput_mbps,
         )

@@ -28,7 +28,7 @@ class TestDatagramUtils:
         ],
     )
     def test_is_heartbeat_datagram(self, data: bytes, expected: bool) -> None:
-        assert is_heartbeat_datagram(data) is expected
+        assert is_heartbeat_datagram(data=data) is expected
 
     @pytest.mark.asyncio
     async def test_datagram_throughput_test_successful_run(self, mocker: MockerFixture) -> None:
@@ -51,7 +51,7 @@ class TestDatagramUtils:
         ]
         expected_duration = 0.06
 
-        results = await datagram_throughput_test(mock_stream, duration=duration, datagram_size=1000)
+        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=duration, datagram_size=1000)
 
         assert mock_stream.try_send.call_count == 5
         assert results["datagrams_sent"] == 5
@@ -68,7 +68,7 @@ class TestDatagramUtils:
         mock_stream.max_datagram_size = 500
 
         with pytest.raises(ValueError, match="datagram_size 1000 exceeds max size 500"):
-            await datagram_throughput_test(mock_stream, datagram_size=1000)
+            await datagram_throughput_test(datagram_stream=mock_stream, datagram_size=1000)
 
     @pytest.mark.asyncio
     async def test_datagram_throughput_test_with_backpressure(self, mocker: MockerFixture) -> None:
@@ -90,7 +90,7 @@ class TestDatagramUtils:
             start_time + 0.06,
         ]
 
-        results = await datagram_throughput_test(mock_stream, duration=duration)
+        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=duration)
 
         assert mock_stream.try_send.call_count == 5
         assert results["datagrams_sent"] == 5
@@ -118,7 +118,7 @@ class TestDatagramUtils:
             start_time + 0.06,
         ]
 
-        results = await datagram_throughput_test(mock_stream, duration=duration)
+        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=duration)
 
         assert mock_stream.try_send.call_count == 5
         assert results["datagrams_sent"] == 4
@@ -135,7 +135,7 @@ class TestDatagramUtils:
         start_time = 1000.0
         mock_time.side_effect = [start_time, start_time + 0.1, start_time + 0.1]
 
-        results = await datagram_throughput_test(mock_stream, duration=0)
+        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=0)
 
         assert results["datagrams_sent"] == 0
         assert results["errors"] == 0

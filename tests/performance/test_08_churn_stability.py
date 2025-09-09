@@ -29,25 +29,28 @@ RESOURCE_USAGE_ENDPOINT: Final[str] = "/resource_usage"
 logger = logging.getLogger("test_08_connection_churn_stability")
 
 
-async def get_server_resources(client: WebTransportClient) -> dict[str, Any]:
+async def get_server_resources(*, client: WebTransportClient) -> dict[str, Any]:
     """Retrieve resource usage statistics from the test server using a persistent client."""
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            session = await client.connect(f"{SERVER_URL}{RESOURCE_USAGE_ENDPOINT}")
+            session = await client.connect(url=f"{SERVER_URL}{RESOURCE_USAGE_ENDPOINT}")
             async with session:
                 stream = await session.create_bidirectional_stream()
-                await stream.write_all(b"GET")
+                await stream.write_all(data=b"GET")
                 response_bytes = await stream.read_all()
                 return cast(dict[str, Any], json.loads(response_bytes))
         except Exception as e:
             if attempt < max_retries - 1:
                 logger.warning(
-                    f"Failed to get server resources on attempt {attempt + 1}/{max_retries}: {e}. Retrying..."
+                    "Failed to get server resources on attempt %s/%s: %s. Retrying...",
+                    attempt + 1,
+                    max_retries,
+                    e,
                 )
                 await asyncio.sleep(2.0)
             else:
-                logger.error(f"Failed to get server resources after {max_retries} attempts: {e}")
+                logger.error("Failed to get server resources after %s attempts: %s", max_retries, e)
                 pytest.fail("Could not retrieve server resource statistics.")
     return {}
 
@@ -63,16 +66,16 @@ class MemoryMonitor:
     async def get_current_memory_kb(self) -> float:
         """Get the current RSS memory of the server in kilobytes via remote query."""
         try:
-            resources = await get_server_resources(self._measurement_client)
+            resources = await get_server_resources(client=self._measurement_client)
             rss_bytes = resources["memory_rss_bytes"]
             return cast(float, rss_bytes / 1024)
         except Exception:
             pytest.fail("Failed to query server memory.")
 
-    async def record_baseline(self, round_num: int) -> None:
+    async def record_baseline(self, *, round_num: int) -> None:
         """Record a stable memory baseline by averaging multiple samples."""
         samples = []
-        logger.info(f"Sampling for baseline after Round {round_num} ({BASELINE_SAMPLING_COUNT} samples)...")
+        logger.info("Sampling for baseline after Round %s (%s samples)...", round_num, BASELINE_SAMPLING_COUNT)
         for i in range(BASELINE_SAMPLING_COUNT):
             samples.append(await self.get_current_memory_kb())
             if i < BASELINE_SAMPLING_COUNT - 1:
@@ -81,7 +84,10 @@ class MemoryMonitor:
         baseline_kb = sum(samples) / len(samples)
         self._baselines_kb.append(baseline_kb)
         logger.info(
-            f"End of Round {round_num} stable memory baseline: {baseline_kb:,.2f} KB (avg of {len(samples)} samples)"
+            "End of Round %s stable memory baseline: %,.2f KB (avg of %s samples)",
+            round_num,
+            baseline_kb,
+            len(samples),
         )
 
     def analyze(self) -> None:
@@ -97,10 +103,10 @@ class MemoryMonitor:
             growth_abs = current_baseline - prev_baseline
             growth_rel = growth_abs / prev_baseline if prev_baseline > 0 else 0
 
-            logger.info(f"Analyzing growth from Round {i} to Round {i+1}:")
-            logger.info(f"  - Baseline after Round {i}:   {prev_baseline:,.2f} KB")
-            logger.info(f"  - Baseline after Round {i+1}: {current_baseline:,.2f} KB")
-            logger.info(f"  - Irreversible Growth: {growth_abs:,.2f} KB ({growth_rel:.2%})")
+            logger.info("Analyzing growth from Round %s to Round %s:", i, i + 1)
+            logger.info("  - Baseline after Round %s:   %,.2f KB", i, prev_baseline)
+            logger.info("  - Baseline after Round %s: %,.2f KB", i + 1, current_baseline)
+            logger.info("  - Irreversible Growth: %,.2f KB (%.2f%%)", growth_abs, growth_rel * 100)
 
             assert growth_abs < MEMORY_LEAK_THRESHOLD_ABSOLUTE_KB, (
                 f"Absolute memory leak detected! Growth of {growth_abs:,.2f} KB "
@@ -131,7 +137,7 @@ class TestConnectionChurnStability:
     @pytest.fixture(scope="class")
     async def measurement_client(self, client_config: ClientConfig) -> AsyncGenerator[WebTransportClient, None]:
         """Provide a single, long-lived client for all measurement tasks."""
-        client = WebTransportClient.create(config=client_config)
+        client = WebTransportClient(config=client_config)
         async with client:
             yield client
 
@@ -147,34 +153,34 @@ class TestConnectionChurnStability:
         for i in range(STABILITY_TEST_ROUNDS):
             round_num = i + 1
             if round_num == 1:
-                logger.info(f"\n--- Starting Definitive Warmup Round (Round {round_num}) ---")
+                logger.info("\n--- Starting Definitive Warmup Round (Round %s) ---", round_num)
             else:
-                logger.info(f"\n--- Starting Churn Test Round {round_num}/{STABILITY_TEST_ROUNDS} ---")
+                logger.info("\n--- Starting Churn Test Round %s/%s ---", round_num, STABILITY_TEST_ROUNDS)
 
-            logger.info(f"[{round_num}] Starting {CHURN_CLIENT_COUNT} churn connections...")
+            logger.info("[%s] Starting %s churn connections...", round_num, CHURN_CLIENT_COUNT)
             churn_semaphore = asyncio.Semaphore(CHURN_CLIENT_CONCURRENCY)
 
             async def churn_task_wrapper() -> None:
                 async with churn_semaphore:
-                    await self._churn_worker(client_config)
+                    await self._churn_worker(config=client_config)
 
             churn_tasks = [asyncio.create_task(churn_task_wrapper()) for _ in range(CHURN_CLIENT_COUNT)]
             await asyncio.gather(*churn_tasks)
-            logger.info(f"[{round_num}] All churn connections completed.")
+            logger.info("[%s] All churn connections completed.", round_num)
 
-            logger.info(f"[{round_num}] Starting cooldown and GC period ({COOLDOWN_SECONDS}s)...")
+            logger.info("[%s] Starting cooldown and GC period (%ss)...", round_num, COOLDOWN_SECONDS)
             await asyncio.sleep(COOLDOWN_SECONDS)
-            await monitor.record_baseline(round_num)
+            await monitor.record_baseline(round_num=round_num)
 
         monitor.analyze()
 
-    async def _churn_worker(self, config: ClientConfig) -> None:
+    async def _churn_worker(self, *, config: ClientConfig) -> None:
         """A short-lived worker that connects, echoes, and disconnects."""
         try:
-            async with WebTransportClient.create(config=config) as client:
-                async with await client.connect(f"{SERVER_URL}{CHURN_ECHO_ENDPOINT}") as session:
+            async with WebTransportClient(config=config) as client:
+                async with await client.connect(url=f"{SERVER_URL}{CHURN_ECHO_ENDPOINT}") as session:
                     stream = await session.create_bidirectional_stream()
-                    await stream.write_all(b"churn_test")
+                    await stream.write_all(data=b"churn_test")
                     await stream.read_all()
         except Exception:
             pass

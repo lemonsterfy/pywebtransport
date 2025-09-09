@@ -86,5 +86,5 @@ async def server(
 @pytest_asyncio.fixture
 async def client(client_config: ClientConfig) -> AsyncGenerator[WebTransportClient, None]:
     """Provide a WebTransportClient instance for the duration of a test."""
-    async with WebTransportClient.create(config=client_config) as wt_client:
+    async with WebTransportClient(config=client_config) as wt_client:
         yield wt_client

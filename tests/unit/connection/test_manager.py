@@ -69,23 +69,26 @@ class TestConnectionManagerInitialization:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "method_name, args",
+        "method_name, kwargs",
         [
-            ("add_connection", (Mock(),)),
-            ("remove_connection", ("conn-id",)),
-            ("get_connection", ("conn-id",)),
-            ("get_all_connections", ()),
-            ("get_stats", ()),
-            ("close_all_connections", ()),
-            ("cleanup_closed_connections", ()),
+            ("add_connection", {"connection": Mock()}),
+            ("remove_connection", {"connection_id": "conn-id"}),
+            ("get_connection", {"connection_id": "conn-id"}),
+            ("get_all_connections", {}),
+            ("get_stats", {}),
+            ("close_all_connections", {}),
+            ("cleanup_closed_connections", {}),
         ],
     )
-    async def test_methods_fail_if_not_activated(self, method_name: str, args: tuple) -> None:
+    async def test_methods_fail_if_not_activated(self, method_name: str, kwargs: dict[str, Any]) -> None:
         manager = ConnectionManager()
         method = getattr(manager, method_name)
 
         with pytest.raises(ConnectionError, match="ConnectionManager has not been activated"):
-            await method(*args)
+            if asyncio.iscoroutinefunction(method):
+                await method(**kwargs)
+            else:
+                method(**kwargs)
 
 
 class TestConnectionLifecycle:
@@ -96,28 +99,30 @@ class TestConnectionLifecycle:
         mock_connection: WebTransportConnection,
         mocker: MockerFixture,
     ) -> None:
-        conn_id = await manager.add_connection(mock_connection)
+        conn_id = await manager.add_connection(connection=mock_connection)
 
         assert conn_id == mock_connection.connection_id
         assert manager.get_connection_count() == 1
-        assert await manager.get_connection(conn_id) is mock_connection
+        assert await manager.get_connection(connection_id=conn_id) is mock_connection
         stats = await manager.get_stats()
         assert stats["total_created"] == 1
         assert stats["current_count"] == 1
         assert stats["max_concurrent"] == 1
-        cast(Mock, mock_connection.once).assert_called_once_with(EventType.CONNECTION_CLOSED, mocker.ANY)
+        cast(Mock, mock_connection.once).assert_called_once_with(
+            event_type=EventType.CONNECTION_CLOSED, handler=mocker.ANY
+        )
 
     @pytest.mark.asyncio
     async def test_add_connection_exceeds_limit(
         self, mocker: MockerFixture, mock_connection: WebTransportConnection
     ) -> None:
         async with ConnectionManager(max_connections=1) as manager:
-            await manager.add_connection(mock_connection)
+            await manager.add_connection(connection=mock_connection)
             another_mock_connection = mocker.create_autospec(WebTransportConnection, instance=True)
             another_mock_connection.connection_id = ConnectionId("another-id")
 
             with pytest.raises(ConnectionError, match=r"Maximum connections \(1\) exceeded"):
-                await manager.add_connection(another_mock_connection)
+                await manager.add_connection(connection=another_mock_connection)
 
             assert manager.get_connection_count() == 1
 
@@ -125,14 +130,14 @@ class TestConnectionLifecycle:
     async def test_remove_connection_success(
         self, manager: ConnectionManager, mock_connection: WebTransportConnection
     ) -> None:
-        conn_id = await manager.add_connection(mock_connection)
+        conn_id = await manager.add_connection(connection=mock_connection)
         assert manager.get_connection_count() == 1
 
-        removed_conn = await manager.remove_connection(conn_id)
+        removed_conn = await manager.remove_connection(connection_id=conn_id)
 
         assert removed_conn is mock_connection
         assert manager.get_connection_count() == 0
-        assert await manager.get_connection(conn_id) is None
+        assert await manager.get_connection(connection_id=conn_id) is None
         stats = await manager.get_stats()
         assert stats["total_created"] == 1
         assert stats["total_closed"] == 1
@@ -142,7 +147,7 @@ class TestConnectionLifecycle:
     async def test_remove_nonexistent_connection(self, manager: ConnectionManager) -> None:
         non_existent_id = ConnectionId("non-existent-id")
 
-        removed_conn = await manager.remove_connection(non_existent_id)
+        removed_conn = await manager.remove_connection(connection_id=non_existent_id)
 
         assert removed_conn is None
         assert manager.get_connection_count() == 0
@@ -151,9 +156,9 @@ class TestConnectionLifecycle:
     async def test_get_connection_success(
         self, manager: ConnectionManager, mock_connection: WebTransportConnection
     ) -> None:
-        conn_id = await manager.add_connection(mock_connection)
+        conn_id = await manager.add_connection(connection=mock_connection)
 
-        retrieved_conn = await manager.get_connection(conn_id)
+        retrieved_conn = await manager.get_connection(connection_id=conn_id)
 
         assert retrieved_conn is mock_connection
 
@@ -161,7 +166,7 @@ class TestConnectionLifecycle:
     async def test_get_nonexistent_connection(self, manager: ConnectionManager) -> None:
         non_existent_id = ConnectionId("non-existent-id")
 
-        retrieved_conn = await manager.get_connection(non_existent_id)
+        retrieved_conn = await manager.get_connection(connection_id=non_existent_id)
 
         assert retrieved_conn is None
 
@@ -169,8 +174,8 @@ class TestConnectionLifecycle:
     async def test_on_close_callback_invalid_event_data(
         self, manager: ConnectionManager, mock_connection: WebTransportConnection
     ) -> None:
-        await manager.add_connection(mock_connection)
-        on_close_callback = cast(Mock, mock_connection.once).call_args.args[1]
+        await manager.add_connection(connection=mock_connection)
+        on_close_callback = cast(Mock, mock_connection.once).call_args.kwargs["handler"]
 
         await on_close_callback(Event(type=EventType.CONNECTION_CLOSED, data="invalid_data"))
 
@@ -187,8 +192,8 @@ class TestBulkOperationsAndQueries:
         conn2 = mocker.create_autospec(WebTransportConnection, instance=True)
         conn2.connection_id = ConnectionId("conn2-id")
         conn2.once = mocker.Mock()
-        await manager.add_connection(conn1)
-        await manager.add_connection(conn2)
+        await manager.add_connection(connection=conn1)
+        await manager.add_connection(connection=conn2)
 
         all_conns = await manager.get_all_connections()
 
@@ -202,10 +207,10 @@ class TestBulkOperationsAndQueries:
     ) -> None:
         assert manager.get_connection_count() == 0
 
-        await manager.add_connection(mock_connection)
+        await manager.add_connection(connection=mock_connection)
         assert manager.get_connection_count() == 1
 
-        await manager.remove_connection(mock_connection.connection_id)
+        await manager.remove_connection(connection_id=mock_connection.connection_id)
         assert manager.get_connection_count() == 0
 
     @pytest.mark.asyncio
@@ -222,8 +227,8 @@ class TestBulkOperationsAndQueries:
         conn2.connection_id = ConnectionId("conn2-id")
         conn2.state = ConnectionState.CONNECTING
         conn2.once = mocker.Mock()
-        await manager.add_connection(conn1)
-        await manager.add_connection(conn2)
+        await manager.add_connection(connection=conn1)
+        await manager.add_connection(connection=conn2)
         stats_after_add = await manager.get_stats()
 
         assert stats_after_add["active"] == 2
@@ -239,8 +244,8 @@ class TestBulkOperationsAndQueries:
         conn2.connection_id = ConnectionId("conn2-id")
         conn2.close = mocker.AsyncMock()
         conn2.once = mocker.Mock()
-        await manager.add_connection(conn1)
-        await manager.add_connection(conn2)
+        await manager.add_connection(connection=conn1)
+        await manager.add_connection(connection=conn2)
 
         await manager.close_all_connections()
 
@@ -262,12 +267,12 @@ class TestBulkOperationsAndQueries:
         conn1.connection_id = ConnectionId("conn1-id")
         conn1.close = mocker.AsyncMock(side_effect=RuntimeError("Close failed"))
         conn1.once = mocker.Mock()
-        await manager.add_connection(conn1)
+        await manager.add_connection(connection=conn1)
 
         await manager.close_all_connections()
 
         mock_logger.error.assert_called_once()
-        assert "Errors occurred while closing connections" in mock_logger.error.call_args[0][0]
+        assert "Errors occurred while closing connections" in mock_logger.error.call_args.args[0]
 
 
 class TestManagerLifecycleAndCleanup:
@@ -322,22 +327,22 @@ class TestManagerLifecycleAndCleanup:
         conn_closed.connection_id = ConnectionId("closed-conn")
         type(conn_closed).is_closed = mocker.PropertyMock(return_value=True)
         conn_closed.once = mocker.Mock()
-        await manager.add_connection(conn_open)
-        await manager.add_connection(conn_closed)
+        await manager.add_connection(connection=conn_open)
+        await manager.add_connection(connection=conn_closed)
         assert manager.get_connection_count() == 2
 
         cleaned_count = await manager.cleanup_closed_connections()
 
         assert cleaned_count == 1
         assert manager.get_connection_count() == 1
-        assert await manager.get_connection(conn_open.connection_id) is conn_open
-        assert await manager.get_connection(conn_closed.connection_id) is None
+        assert await manager.get_connection(connection_id=conn_open.connection_id) is conn_open
+        assert await manager.get_connection(connection_id=conn_closed.connection_id) is None
 
     @pytest.mark.asyncio
     async def test_cleanup_with_no_closed_connections(
         self, manager: ConnectionManager, mock_connection: WebTransportConnection
     ) -> None:
-        await manager.add_connection(mock_connection)
+        await manager.add_connection(connection=mock_connection)
 
         cleaned_count = await manager.cleanup_closed_connections()
 
@@ -362,7 +367,8 @@ class TestManagerLifecycleAndCleanup:
             await asyncio.sleep(0.05)
         mock_cleanup.assert_awaited()
         mock_logger.error.assert_called_with(
-            f"Connection cleanup cycle failed: {test_exception}",
+            "Connection cleanup cycle failed: %s",
+            test_exception,
             exc_info=test_exception,
         )
 
@@ -380,7 +386,7 @@ class TestIdleConnectionManagement:
             conn_idle.close = mocker.AsyncMock()
             conn_idle.once = mocker.Mock()
 
-            await manager.add_connection(conn_idle)
+            await manager.add_connection(connection=conn_idle)
             await asyncio.sleep(0.05)
 
             conn_idle.close.assert_awaited_once_with(reason="Idle timeout")
@@ -397,7 +403,7 @@ class TestIdleConnectionManagement:
             conn_active.close = mocker.AsyncMock()
             conn_active.once = mocker.Mock()
 
-            await manager.add_connection(conn_active)
+            await manager.add_connection(connection=conn_active)
             await asyncio.sleep(0.05)
 
             conn_active.close.assert_not_awaited()
@@ -414,7 +420,7 @@ class TestIdleConnectionManagement:
             conn_closing.close = mocker.AsyncMock()
             conn_closing.once = mocker.Mock()
 
-            await manager.add_connection(conn_closing)
+            await manager.add_connection(connection=conn_closing)
             await asyncio.sleep(0.05)
 
             conn_closing.close.assert_not_awaited()
@@ -426,14 +432,15 @@ class TestIdleConnectionManagement:
         async with ConnectionManager(connection_idle_check_interval=0.01) as _:
             await asyncio.sleep(0.05)
         mock_logger.error.assert_called_with(
-            f"Idle connection check cycle failed: {test_exception}",
+            "Idle connection check cycle failed: %s",
+            test_exception,
             exc_info=test_exception,
         )
 
     @pytest.mark.asyncio
     async def test_idle_check_close_error_handling(self, mocker: MockerFixture, mock_logger: Any) -> None:
         mocker.patch("pywebtransport.connection.manager.get_timestamp", return_value=2000.0)
-        async with ConnectionManager(connection_idle_timeout=500.0, connection_idle_check_interval=0.01) as _:
+        async with ConnectionManager(connection_idle_timeout=500.0, connection_idle_check_interval=0.01) as manager:
             conn_idle = mocker.create_autospec(WebTransportConnection, instance=True)
             conn_idle.connection_id = ConnectionId("idle-conn")
             type(conn_idle).is_closed = mocker.PropertyMock(return_value=False)
@@ -441,8 +448,8 @@ class TestIdleConnectionManagement:
             conn_idle.last_activity_time = 1000.0
             conn_idle.close = mocker.AsyncMock(side_effect=RuntimeError("Close failed"))
             conn_idle.once = mocker.Mock()
-            await _.add_connection(conn_idle)
+            await manager.add_connection(connection=conn_idle)
             await asyncio.sleep(0.05)
 
             mock_logger.error.assert_called()
-            assert "Errors occurred while closing idle connections" in mock_logger.error.call_args[0][0]
+            assert "Errors occurred while closing idle connections" in mock_logger.error.call_args.args[0]

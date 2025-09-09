@@ -36,29 +36,29 @@ async def test_max_connections_limit_rejection(
     server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig
 ) -> None:
     """Verify the server rejects a new connection when its connection limit is reached."""
-    server_app.route("/")(idle_handler)
+    server_app.route(path="/")(idle_handler)
     host, port = server
     url = f"https://{host}:{port}/"
 
     async with WebTransportClient(config=client_config) as client1:
-        async with await client1.connect(url) as session1:
+        async with await client1.connect(url=url) as session1:
             assert session1.is_ready, "First client should connect successfully."
 
             async with WebTransportClient(config=client_config) as client2:
                 with pytest.raises((ClientError, ConnectionError, asyncio.TimeoutError)):
-                    await client2.connect(url)
+                    await client2.connect(url=url)
 
 
 @pytest.mark.parametrize("server_app", [{"max_streams_per_connection": 2}], indirect=True)
 async def test_max_streams_limit(server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig) -> None:
     """Verify the client correctly enforces the stream limit received from the server."""
-    server_app.route("/")(idle_handler)
+    server_app.route(path="/")(idle_handler)
     host, port = server
     url = f"https://{host}:{port}/"
 
     client_with_limit_config = client_config.update(max_streams=2)
     async with WebTransportClient(config=client_with_limit_config) as client:
-        async with await client.connect(url) as session:
+        async with await client.connect(url=url) as session:
             _ = await session.create_bidirectional_stream()
             _ = await session.create_bidirectional_stream()
 
@@ -71,7 +71,7 @@ async def test_server_cleans_up_closed_connection(
     server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig
 ) -> None:
     """Verify the server's ConnectionManager removes a connection after the client closes it."""
-    server_app.route("/")(idle_handler)
+    server_app.route(path="/")(idle_handler)
     host, port = server
     url = f"https://{host}:{port}/"
     connection_manager = server_app.server._connection_manager
@@ -79,7 +79,7 @@ async def test_server_cleans_up_closed_connection(
     assert connection_manager.get_connection_count() == 0
 
     async with WebTransportClient(config=client_config) as client:
-        async with await client.connect(url) as session:
+        async with await client.connect(url=url) as session:
             assert session.is_ready
 
             timeout_at = asyncio.get_running_loop().time() + 1.0

@@ -18,16 +18,16 @@ from pywebtransport.utils import get_logger
 
 __all__ = ["WebTransportProxy"]
 
-logger = get_logger("client.proxy")
+logger = get_logger(name="client.proxy")
 
 
 class WebTransportProxy:
     """Tunnels WebTransport connections through an HTTP CONNECT proxy."""
 
-    def __init__(self, *, proxy_url: URL, config: ClientConfig | None = None):
+    def __init__(self, *, proxy_url: URL, config: ClientConfig | None = None) -> None:
         """Initialize the WebTransport proxy client."""
         self._proxy_url = proxy_url
-        self._client = WebTransportClient.create(config=config)
+        self._client = WebTransportClient(config=config)
         self._proxy_session: WebTransportSession | None = None
         self._proxy_connect_lock: asyncio.Lock | None = None
 
@@ -67,8 +67,8 @@ class WebTransportProxy:
 
     async def connect_through_proxy(
         self,
-        target_url: URL,
         *,
+        target_url: URL,
         proxy_headers: Headers | None = None,
         timeout: float = 10.0,
     ) -> WebTransportStream:
@@ -84,23 +84,28 @@ class WebTransportProxy:
         if self._proxy_session is None:
             raise SessionError("Proxy session is not available after connection attempt.")
 
-        logger.info(f"Creating tunnel to {target_url} via proxy at {self._proxy_url}")
+        logger.info("Creating tunnel to %s via proxy at %s", target_url, self._proxy_url)
         tunnel_stream = await self._proxy_session.create_bidirectional_stream()
 
         try:
-            connect_request = f"CONNECT {target_url} HTTP/1.1\r\nHost: {target_url.split('//')[1]}\r\n\r\n".encode()
-            await tunnel_stream.write(connect_request)
+            connect_request = (
+                f"CONNECT {target_url} HTTP/1.1\r\n" f"Host: {target_url.split('//')[1]}\r\n\r\n"
+            ).encode()
+            await tunnel_stream.write(data=connect_request)
 
-            response_bytes = await asyncio.wait_for(tunnel_stream.read(size=4096), timeout=timeout)
+            response_bytes: bytes = await asyncio.wait_for(tunnel_stream.read(size=4096), timeout=timeout)
             response_str = response_bytes.decode(errors="ignore")
 
             if "200 OK" not in response_str and "200 Connection established" not in response_str:
-                raise ClientError(f"Proxy error for target {target_url}: {response_str}", target_url=target_url)
+                raise ClientError(
+                    message=f"Proxy error for target {target_url}: {response_str}",
+                    target_url=target_url,
+                )
 
-            logger.info(f"Tunnel to {target_url} established successfully.")
+            logger.info("Tunnel to %s established successfully.", target_url)
             return tunnel_stream
         except Exception as e:
-            logger.error(f"Failed to establish tunnel to {target_url}: {e}")
+            logger.error("Failed to establish tunnel to %s: %s", target_url, e, exc_info=True)
             if not tunnel_stream.is_closed:
                 await tunnel_stream.close()
 
@@ -108,7 +113,7 @@ class WebTransportProxy:
                 raise TimeoutError("Timeout while establishing tunnel via proxy.") from e
             raise
 
-    async def _ensure_proxy_session(self, headers: Headers | None, timeout: float) -> None:
+    async def _ensure_proxy_session(self, *, headers: Headers | None, timeout: float) -> None:
         """Ensure the connection to the proxy server is established, using a lock."""
         if self._proxy_session and self._proxy_session.is_ready:
             return
@@ -123,9 +128,9 @@ class WebTransportProxy:
             if self._proxy_session and self._proxy_session.is_ready:
                 return
 
-            logger.info(f"Establishing connection to proxy server at {self._proxy_url}")
+            logger.info("Establishing connection to proxy server at %s", self._proxy_url)
             try:
-                self._proxy_session = await self._client.connect(self._proxy_url, headers=headers, timeout=timeout)
+                self._proxy_session = await self._client.connect(url=self._proxy_url, headers=headers, timeout=timeout)
             except Exception as e:
-                logger.error(f"Failed to connect to the proxy server: {e}", exc_info=True)
+                logger.error("Failed to connect to the proxy server: %s", e, exc_info=True)
                 raise ConnectionError("Failed to establish proxy session") from e

@@ -33,7 +33,7 @@ async def bidirectional_stream(mock_session: Any) -> AsyncGenerator[WebTransport
 
 @pytest.fixture
 async def buffer() -> AsyncGenerator[StreamBuffer, None]:
-    buf = StreamBuffer()
+    buf = StreamBuffer(max_size=DEFAULT_BUFFER_SIZE)
     await buf.initialize()
     yield buf
 
@@ -107,7 +107,7 @@ class TestStreamBuffer:
 
     @pytest.mark.asyncio
     async def test_feed_and_read_data(self, buffer: StreamBuffer) -> None:
-        await buffer.feed_data(b"hello")
+        await buffer.feed_data(data=b"hello")
 
         data, eof = await buffer.read(size=5)
 
@@ -120,7 +120,7 @@ class TestStreamBuffer:
         await asyncio.sleep(0.01)
         assert not read_task.done()
 
-        await buffer.feed_data(b"test")
+        await buffer.feed_data(data=b"test")
         result, eof = await read_task
 
         assert result == b"test"
@@ -128,7 +128,7 @@ class TestStreamBuffer:
 
     @pytest.mark.asyncio
     async def test_read_partial(self, buffer: StreamBuffer) -> None:
-        await buffer.feed_data(b"hello world")
+        await buffer.feed_data(data=b"hello world")
 
         data, eof1 = await buffer.read(size=5)
         assert data == b"hello"
@@ -140,8 +140,8 @@ class TestStreamBuffer:
 
     @pytest.mark.asyncio
     async def test_read_all_with_size_minus_one(self, buffer: StreamBuffer) -> None:
-        await buffer.feed_data(b"part1")
-        await buffer.feed_data(b"part2")
+        await buffer.feed_data(data=b"part1")
+        await buffer.feed_data(data=b"part2")
 
         data, eof = await buffer.read(size=-1)
 
@@ -150,7 +150,7 @@ class TestStreamBuffer:
 
     @pytest.mark.asyncio
     async def test_read_zero_size(self, buffer: StreamBuffer) -> None:
-        await buffer.feed_data(b"hello")
+        await buffer.feed_data(data=b"hello")
 
         result, eof = await buffer.read(size=0)
 
@@ -160,7 +160,7 @@ class TestStreamBuffer:
 
     @pytest.mark.asyncio
     async def test_eof_handling(self, buffer: StreamBuffer) -> None:
-        await buffer.feed_data(b"final data", eof=True)
+        await buffer.feed_data(data=b"final data", eof=True)
 
         data, eof = await buffer.read(size=10)
         assert data == b"final data"
@@ -173,9 +173,9 @@ class TestStreamBuffer:
 
     @pytest.mark.asyncio
     async def test_feed_data_after_eof(self, buffer: StreamBuffer) -> None:
-        await buffer.feed_data(b"some", eof=True)
+        await buffer.feed_data(data=b"some", eof=True)
 
-        await buffer.feed_data(b"more")
+        await buffer.feed_data(data=b"more")
         content, eof = await buffer.read(size=-1)
 
         assert content == b"some"
@@ -183,7 +183,7 @@ class TestStreamBuffer:
 
     @pytest.mark.asyncio
     async def test_feed_empty_data_with_eof(self, buffer: StreamBuffer) -> None:
-        await buffer.feed_data(b"", eof=True)
+        await buffer.feed_data(data=b"", eof=True)
 
         assert buffer.at_eof
         data, eof = await buffer.read()
@@ -219,8 +219,8 @@ class TestWebTransportReceiveStream:
 
         assert stream.stream_id == TEST_STREAM_ID
         expected_calls = [
-            mocker.call(f"stream_data_received:{TEST_STREAM_ID}", stream._on_data_received),
-            mocker.call(f"stream_closed:{TEST_STREAM_ID}", stream._on_stream_closed),
+            mocker.call(event_type=f"stream_data_received:{TEST_STREAM_ID}", handler=stream._on_data_received),
+            mocker.call(event_type=f"stream_closed:{TEST_STREAM_ID}", handler=stream._on_stream_closed),
         ]
         mock_session.protocol_handler.on.assert_has_calls(expected_calls, any_order=True)
 
@@ -263,7 +263,7 @@ class TestWebTransportReceiveStream:
         mocker.patch("pywebtransport.stream.stream.get_timestamp", return_value=100.0)
         mocker.patch("time.time", side_effect=[100.5, 101.0])
         assert receive_stream._buffer is not None
-        await receive_stream._buffer.feed_data(b"some data")
+        await receive_stream._buffer.feed_data(data=b"some data")
 
         data = await receive_stream.read(size=9)
 
@@ -273,11 +273,11 @@ class TestWebTransportReceiveStream:
     @pytest.mark.asyncio
     async def test_helper_read_methods(self, receive_stream: WebTransportReceiveStream) -> None:
         assert receive_stream._buffer is not None
-        await receive_stream._buffer.feed_data(b"line1\nline2\nand more", eof=True)
+        await receive_stream._buffer.feed_data(data=b"line1\nline2\nand more", eof=True)
 
         assert await receive_stream.readline() == b"line1\n"
-        assert await receive_stream.readuntil(b"2") == b"line2"
-        assert await receive_stream.readexactly(3) == b"\nan"
+        assert await receive_stream.readuntil(separator=b"2") == b"line2"
+        assert await receive_stream.readexactly(n=3) == b"\nan"
         assert await receive_stream.read_all() == b"d more"
 
     def test_get_and_debug_summary(self, mock_session: Any) -> None:
@@ -319,7 +319,7 @@ class TestWebTransportReceiveStream:
     @pytest.mark.asyncio
     async def test_read_all_exceeds_max_size(self, receive_stream: WebTransportReceiveStream) -> None:
         assert receive_stream._buffer is not None
-        await receive_stream._buffer.feed_data(b"1234567890", eof=True)
+        await receive_stream._buffer.feed_data(data=b"1234567890", eof=True)
 
         with pytest.raises(StreamError, match="Stream size exceeds maximum"):
             await receive_stream.read_all(max_size=5)
@@ -349,15 +349,15 @@ class TestWebTransportReceiveStream:
     @pytest.mark.asyncio
     async def test_readexactly_incomplete_read(self, receive_stream: WebTransportReceiveStream) -> None:
         assert receive_stream._buffer is not None
-        await receive_stream._buffer.feed_data(b"short", eof=True)
+        await receive_stream._buffer.feed_data(data=b"short", eof=True)
 
         with pytest.raises(asyncio.IncompleteReadError):
-            await receive_stream.readexactly(10)
+            await receive_stream.readexactly(n=10)
 
     @pytest.mark.asyncio
     async def test_readexactly_negative_n_raises_value_error(self, receive_stream: WebTransportReceiveStream) -> None:
         with pytest.raises(ValueError):
-            await receive_stream.readexactly(-1)
+            await receive_stream.readexactly(n=-1)
 
     @pytest.mark.asyncio
     async def test_readuntil_not_readable(self, receive_stream: WebTransportReceiveStream) -> None:
@@ -369,15 +369,15 @@ class TestWebTransportReceiveStream:
     @pytest.mark.asyncio
     async def test_readuntil_no_separator(self, receive_stream: WebTransportReceiveStream) -> None:
         assert receive_stream._buffer is not None
-        await receive_stream._buffer.feed_data(b"no separator", eof=True)
+        await receive_stream._buffer.feed_data(data=b"no separator", eof=True)
 
-        result = await receive_stream.readuntil(b"Z")
+        result = await receive_stream.readuntil(separator=b"Z")
 
         assert result == b"no separator"
 
     @pytest.mark.asyncio
     async def test_read_when_not_readable_raises(self, receive_stream: WebTransportReceiveStream) -> None:
-        receive_stream._set_state(StreamState.IDLE)
+        receive_stream._set_state(new_state=StreamState.IDLE)
         assert not receive_stream.is_readable
         assert not receive_stream.is_closed
 
@@ -386,7 +386,7 @@ class TestWebTransportReceiveStream:
 
     @pytest.mark.asyncio
     async def test_read_when_closed_returns_empty(self, receive_stream: WebTransportReceiveStream) -> None:
-        receive_stream._set_state(StreamState.RESET_SENT)
+        receive_stream._set_state(new_state=StreamState.RESET_SENT)
 
         result = await receive_stream.read()
 
@@ -396,20 +396,20 @@ class TestWebTransportReceiveStream:
     async def test_on_data_received_no_buffer(self, receive_stream: WebTransportReceiveStream) -> None:
         receive_stream._buffer = None
 
-        await receive_stream._on_data_received(Event("test", data={"data": b"foo"}))
+        await receive_stream._on_data_received(Event(type="test", data={"data": b"foo"}))
 
     @pytest.mark.asyncio
     async def test_on_data_received_empty_data(self, receive_stream: WebTransportReceiveStream) -> None:
         assert receive_stream._buffer is not None
-        await receive_stream._buffer.feed_data(b"original")
+        await receive_stream._buffer.feed_data(data=b"original")
 
-        await receive_stream._on_data_received(Event("test", data={}))
+        await receive_stream._on_data_received(Event(type="test", data={}))
 
         assert receive_stream._buffer.size == 8
 
     @pytest.mark.asyncio
     async def test_on_stream_closed_handler(self, receive_stream: WebTransportReceiveStream) -> None:
-        await receive_stream._on_stream_closed(Event("test", data={}))
+        await receive_stream._on_stream_closed(Event(type="test", data={}))
 
         assert receive_stream.state == StreamState.CLOSED
 
@@ -424,7 +424,7 @@ class TestWebTransportReceiveStream:
         stream = WebTransportReceiveStream(stream_id=TEST_STREAM_ID, session=mock_session)
         mock_teardown = mocker.patch.object(stream, "_teardown")
 
-        stream._set_state(StreamState.OPEN)
+        stream._set_state(new_state=StreamState.OPEN)
 
         mock_teardown.assert_not_called()
 
@@ -432,13 +432,13 @@ class TestWebTransportReceiveStream:
     async def test_teardown(
         self, receive_stream: WebTransportReceiveStream, mock_session: Any, mocker: MockerFixture
     ) -> None:
-        receive_stream._set_state(StreamState.CLOSED)
+        receive_stream._set_state(new_state=StreamState.CLOSED)
 
         await receive_stream.wait_closed()
 
         expected_calls = [
-            mocker.call(f"stream_data_received:{TEST_STREAM_ID}", receive_stream._on_data_received),
-            mocker.call(f"stream_closed:{TEST_STREAM_ID}", receive_stream._on_stream_closed),
+            mocker.call(event_type=f"stream_data_received:{TEST_STREAM_ID}", handler=receive_stream._on_data_received),
+            mocker.call(event_type=f"stream_closed:{TEST_STREAM_ID}", handler=receive_stream._on_stream_closed),
         ]
         mock_session.protocol_handler.off.assert_has_calls(expected_calls, any_order=True)
 
@@ -464,7 +464,7 @@ class TestWebTransportSendStream:
     async def test_write_success(self, send_stream: WebTransportSendStream) -> None:
         assert send_stream._writer_task is not None
         send_stream._writer_task.cancel()
-        completion_future = asyncio.create_task(send_stream.write(b"some payload"))
+        completion_future = asyncio.create_task(send_stream.write(data=b"some payload"))
         await asyncio.sleep(0)
 
         assert len(send_stream._write_buffer) == 1
@@ -476,7 +476,7 @@ class TestWebTransportSendStream:
 
     @pytest.mark.asyncio
     async def test_write_no_wait(self, send_stream: WebTransportSendStream) -> None:
-        await send_stream.write(b"fire and forget", wait_flush=False)
+        await send_stream.write(data=b"fire and forget", wait_flush=False)
 
         assert len(send_stream._write_buffer) == 1
         assert send_stream._write_buffer[0]["data"] == b"fire and forget"
@@ -488,7 +488,7 @@ class TestWebTransportSendStream:
         send_stream._writer_task.cancel()
         send_stream._WRITE_CHUNK_SIZE = 10
 
-        write_task = asyncio.create_task(send_stream.write(b"a" * 25, end_stream=True))
+        write_task = asyncio.create_task(send_stream.write(data=b"a" * 25, end_stream=True))
         await asyncio.sleep(0)
 
         assert len(send_stream._write_buffer) == 3
@@ -502,14 +502,14 @@ class TestWebTransportSendStream:
         mock_flush = mocker.patch.object(send_stream, "flush", new_callable=mocker.AsyncMock)
         mock_close = mocker.patch.object(send_stream, "close", new_callable=mocker.AsyncMock)
 
-        await send_stream.write_all(b"all the data", chunk_size=5)
+        await send_stream.write_all(data=b"all the data", chunk_size=5)
 
         assert mock_write.call_count == 3
         mock_write.assert_has_calls(
             [
-                mocker.call(b"all t", wait_flush=False),
-                mocker.call(b"he da", wait_flush=False),
-                mocker.call(b"ta", wait_flush=False),
+                mocker.call(data=b"all t", wait_flush=False),
+                mocker.call(data=b"he da", wait_flush=False),
+                mocker.call(data=b"ta", wait_flush=False),
             ]
         )
         mock_flush.assert_awaited_once()
@@ -535,7 +535,7 @@ class TestWebTransportSendStream:
         mock_abort = mocker.patch.object(send_stream, "abort", new_callable=mocker.AsyncMock)
 
         with pytest.raises(StreamError):
-            await send_stream.write_all(b"some data")
+            await send_stream.write_all(data=b"some data")
 
         mock_abort.assert_called_once_with(code=1)
 
@@ -549,18 +549,18 @@ class TestWebTransportSendStream:
         )
 
         with pytest.raises(TimeoutError, match="Write timeout due to backpressure"):
-            await send_stream._wait_for_buffer_space(1)
+            await send_stream._wait_for_buffer_space(size=1)
 
     @pytest.mark.asyncio
     async def test_write_not_writable(self, send_stream: WebTransportSendStream) -> None:
-        send_stream._set_state(StreamState.CLOSED)
+        send_stream._set_state(new_state=StreamState.CLOSED)
 
         with pytest.raises(StreamError):
-            await send_stream.write(b"data")
+            await send_stream.write(data=b"data")
 
     @pytest.mark.asyncio
     async def test_write_empty_data_no_end_stream(self, send_stream: WebTransportSendStream) -> None:
-        await send_stream.write(b"", end_stream=False)
+        await send_stream.write(data=b"", end_stream=False)
 
         assert len(send_stream._write_buffer) == 0
 
@@ -568,7 +568,7 @@ class TestWebTransportSendStream:
     async def test_write_empty_data_with_end_stream(self, send_stream: WebTransportSendStream) -> None:
         assert send_stream._writer_task is not None
         send_stream._writer_task.cancel()
-        write_task = asyncio.create_task(send_stream.write(b"", end_stream=True))
+        write_task = asyncio.create_task(send_stream.write(data=b"", end_stream=True))
         await asyncio.sleep(0)
 
         assert len(send_stream._write_buffer) == 1
@@ -605,7 +605,7 @@ class TestWebTransportSendStream:
         stream = WebTransportSendStream(stream_id=TEST_STREAM_ID, session=mock_session)
         await stream.initialize()
 
-        asyncio.create_task(stream.write(b"data"))
+        asyncio.create_task(stream.write(data=b"data"))
         try:
             await asyncio.wait_for(send_called_event.wait(), timeout=1.0)
         except asyncio.TimeoutError:
@@ -623,7 +623,7 @@ class TestWebTransportSendStream:
     ) -> None:
         mock_session.protocol_handler.send_webtransport_stream_data.side_effect = ValueError("send failed")
 
-        write_task = asyncio.create_task(send_stream.write(b"data"))
+        write_task = asyncio.create_task(send_stream.write(data=b"data"))
 
         with pytest.raises(ValueError):
             await write_task
@@ -640,11 +640,11 @@ class TestWebTransportSendStream:
 
         async def sleep_side_effect(delay: float) -> None:
             sleep_called.set()
-            await original_sleep(0)
+            await original_sleep(delay=delay)
 
         mocker.patch("pywebtransport.stream.stream.asyncio.sleep", side_effect=sleep_side_effect)
 
-        asyncio.create_task(stream.write(b"test", wait_flush=False))
+        asyncio.create_task(stream.write(data=b"test", wait_flush=False))
         try:
             await asyncio.wait_for(sleep_called.wait(), timeout=1.0)
         except asyncio.TimeoutError:
@@ -694,7 +694,7 @@ class TestWebTransportStream:
     async def test_bidirectional_stream_read_and_write(self, bidirectional_stream: WebTransportStream) -> None:
         assert bidirectional_stream._writer_task is not None
         bidirectional_stream._writer_task.cancel()
-        write_task = asyncio.create_task(bidirectional_stream.write(b"data to send"))
+        write_task = asyncio.create_task(bidirectional_stream.write(data=b"data to send"))
         await asyncio.sleep(0)
         assert len(bidirectional_stream._write_buffer) == 1
         write_task.cancel()
@@ -702,7 +702,7 @@ class TestWebTransportStream:
             await write_task
 
         assert bidirectional_stream._buffer is not None
-        await bidirectional_stream._buffer.feed_data(b"data to receive")
+        await bidirectional_stream._buffer.feed_data(data=b"data to receive")
         read_data = await bidirectional_stream.read(size=100)
         assert read_data == b"data to receive"
 
@@ -714,13 +714,13 @@ class TestWebTransportStream:
 
         await bidirectional_stream.close()
 
-        mock_send_close.assert_called_once_with(bidirectional_stream)
+        mock_send_close.assert_called_once_with(self=bidirectional_stream)
 
     def test_bidirectional_stream_closes_correctly(self, mock_session: Any) -> None:
         stream = WebTransportStream(stream_id=TEST_STREAM_ID, session=mock_session)
         stream._state = StreamState.HALF_CLOSED_LOCAL
 
-        stream._set_state(StreamState.CLOSED)
+        stream._set_state(new_state=StreamState.CLOSED)
 
         assert stream.state == StreamState.CLOSED
 
@@ -734,7 +734,7 @@ class TestWebTransportStream:
         await asyncio.sleep(0.05)
 
         mock_logger_warning.assert_called()
-        bidirectional_stream._set_state(StreamState.CLOSED)
+        bidirectional_stream._set_state(new_state=StreamState.CLOSED)
         monitor_task.cancel()
 
     @pytest.mark.asyncio
@@ -742,11 +742,12 @@ class TestWebTransportStream:
         self, bidirectional_stream: WebTransportStream, mocker: MockerFixture
     ) -> None:
         mock_logger_error = mocker.patch("pywebtransport.stream.stream.logger.error")
-        mocker.patch("asyncio.sleep", side_effect=ValueError("test error"))
+        error = ValueError("test error")
+        mocker.patch("asyncio.sleep", side_effect=error)
 
         await bidirectional_stream.monitor_health()
 
-        mock_logger_error.assert_called_with("Stream health monitoring error: test error")
+        mock_logger_error.assert_called_with("Stream health monitoring error: %s", error, exc_info=True)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -806,7 +807,7 @@ class TestStreamUninitialized:
 
         if hasattr(stream, "write"):
             with pytest.raises(StreamError, match="is not initialized"):
-                await stream.write(b"data")
+                await stream.write(data=b"data")
 
         if hasattr(stream, "flush"):
             with pytest.raises(StreamError, match="is not initialized"):
@@ -820,6 +821,6 @@ class TestStreamUninitialized:
         with pytest.raises(StreamError, match="StreamBuffer has not been initialized"):
             coro = getattr(buffer, method_name)
             if method_name == "feed_data":
-                await coro(b"data")
+                await coro(data=b"data")
             else:
                 await coro()

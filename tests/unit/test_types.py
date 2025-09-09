@@ -1,15 +1,25 @@
 """Unit tests for the pywebtransport.types module."""
 
 import ssl
+from typing import Any, Type
 
 import pytest
 
-from pywebtransport import ConnectionState, EventType, SessionState, StreamDirection, StreamState
+from pywebtransport import (
+    ConnectionState,
+    EventType,
+    Headers,
+    Serializer,
+    SessionState,
+    StreamDirection,
+    StreamState,
+)
 from pywebtransport.types import (
+    AuthHandlerProtocol,
     BidirectionalStreamProtocol,
     ClientConfigProtocol,
     Data,
-    Headers,
+    MiddlewareProtocol,
     ReadableStreamProtocol,
     ServerConfigProtocol,
     WritableStreamProtocol,
@@ -90,40 +100,56 @@ class TestEnumerations:
 
 
 class TestRuntimeCheckableProtocols:
+    class GoodAuthHandler:
+        async def __call__(self, *, headers: Headers) -> bool:
+            return True
+
+    class BadAuthHandler:
+        async def handle(self, *, headers: Headers) -> bool:
+            return True
+
+    class GoodMiddleware:
+        async def __call__(self, *, session: Any) -> bool:
+            return True
+
+    class BadMiddleware:
+        async def process_session(self, *, session: Any) -> Any:
+            return session
+
     class GoodReadableStream:
-        async def read(self, size: int = -1) -> bytes:
+        async def read(self, *, size: int = -1) -> bytes:
             return b""
 
-        async def readline(self, separator: bytes = b"\n") -> bytes:
+        async def readline(self, *, separator: bytes = b"\n") -> bytes:
             return b""
 
-        async def readexactly(self, n: int) -> bytes:
+        async def readexactly(self, *, n: int) -> bytes:
             return b""
 
-        async def readuntil(self, separator: bytes = b"\n") -> bytes:
+        async def readuntil(self, *, separator: bytes = b"\n") -> bytes:
             return b""
 
         def at_eof(self) -> bool:
             return False
 
     class BadReadableStream:
-        async def read(self, size: int = -1) -> bytes:
+        async def read(self, *, size: int = -1) -> bytes:
             return b""
 
-        async def readline(self, separator: bytes = b"\n") -> bytes:
+        async def readline(self, *, separator: bytes = b"\n") -> bytes:
             return b""
 
-        async def readexactly(self, n: int) -> bytes:
+        async def readexactly(self, *, n: int) -> bytes:
             return b""
 
-        async def readuntil(self, separator: bytes = b"\n") -> bytes:
+        async def readuntil(self, *, separator: bytes = b"\n") -> bytes:
             return b""
 
     class GoodWritableStream:
-        async def write(self, data: Data) -> None:
+        async def write(self, *, data: Data) -> None:
             pass
 
-        async def writelines(self, lines: list[Data]) -> None:
+        async def writelines(self, *, lines: list[Data]) -> None:
             pass
 
         async def flush(self) -> None:
@@ -139,71 +165,137 @@ class TestRuntimeCheckableProtocols:
         pass
 
     class GoodClientConfig:
-        connect_timeout: float = 5.0
-        read_timeout: float | None = 5.0
-        write_timeout: float | None = 5.0
-        close_timeout: float = 2.0
-        max_streams: int = 100
-        stream_buffer_size: int = 65536
-        verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+        alpn_protocols: list[str] = ["h3"]
         ca_certs: str | None = None
         certfile: str | None = None
-        keyfile: str | None = None
-        check_hostname: bool = True
-        alpn_protocols: list[str] = ["h3"]
-        http_version: str = "HTTP/3"
-        user_agent: str = "pywebtransport"
+        close_timeout: float = 2.0
+        congestion_control_algorithm: str = "cubic"
+        connect_timeout: float = 5.0
+        connection_cleanup_interval: float = 30.0
+        connection_idle_check_interval: float = 5.0
+        connection_idle_timeout: float = 60.0
+        connection_keepalive_timeout: float = 30.0
+        debug: bool = False
         headers: Headers = {}
+        keep_alive: bool = True
+        keyfile: str | None = None
+        log_level: str = "INFO"
+        max_connections: int = 100
+        max_datagram_size: int = 65535
+        max_incoming_streams: int = 100
+        max_retries: int = 3
+        max_retry_delay: float = 30.0
+        max_stream_buffer_size: int = 1024 * 1024
+        max_streams: int = 100
+        read_timeout: float | None = 5.0
+        retry_backoff: float = 2.0
+        retry_delay: float = 1.0
+        stream_buffer_size: int = 65536
+        stream_cleanup_interval: float = 15.0
+        stream_creation_timeout: float = 10.0
+        user_agent: str = "pywebtransport"
+        verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+        write_timeout: float | None = 5.0
 
     class BadClientConfig:
-        connect_timeout: float = 5.0
-        read_timeout: float | None = 5.0
-        write_timeout: float | None = 5.0
-        close_timeout: float = 2.0
-        max_streams: int = 100
-        stream_buffer_size: int = 65536
-        verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+        alpn_protocols: list[str] = ["h3"]
         ca_certs: str | None = None
         certfile: str | None = None
-        keyfile: str | None = None
-        check_hostname: bool = True
-        alpn_protocols: list[str] = ["h3"]
-        http_version: str = "HTTP/3"
+        close_timeout: float = 2.0
+        congestion_control_algorithm: str = "cubic"
+        connect_timeout: float = 5.0
+        connection_cleanup_interval: float = 30.0
+        connection_idle_check_interval: float = 5.0
+        connection_idle_timeout: float = 60.0
+        connection_keepalive_timeout: float = 30.0
         headers: Headers = {}
+        keyfile: str | None = None
+        max_connections: int = 100
+        max_datagram_size: int = 65535
+        max_incoming_streams: int = 100
+        max_streams: int = 100
+        read_timeout: float | None = 5.0
+        stream_buffer_size: int = 65536
+        stream_cleanup_interval: float = 15.0
+        stream_creation_timeout: float = 10.0
+        user_agent: str = "pywebtransport"
+        verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
+        write_timeout: float | None = 5.0
 
     class GoodServerConfig:
+        access_log: bool = True
+        alpn_protocols: list[str] = ["h3"]
         bind_host: str = "localhost"
         bind_port: int = 4433
-        certfile: str = "cert.pem"
-        keyfile: str = "key.pem"
         ca_certs: str | None = None
-        verify_mode: ssl.VerifyMode = ssl.CERT_NONE
-        max_connections: int = 1000
-        max_streams_per_connection: int = 100
-        connection_timeout: float = 60.0
-        read_timeout: float | None = 30.0
-        write_timeout: float | None = 30.0
-        alpn_protocols: list[str] = ["h3"]
-        http_version: str = "HTTP/3"
-        backlog: int = 100
-        reuse_port: bool = False
+        certfile: str = "cert.pem"
+        congestion_control_algorithm: str = "cubic"
+        connection_cleanup_interval: float = 30.0
+        connection_idle_check_interval: float = 5.0
+        connection_idle_timeout: float = 60.0
+        connection_keepalive_timeout: float = 30.0
+        debug: bool = False
         keep_alive: bool = True
+        keyfile: str = "key.pem"
+        log_level: str = "INFO"
+        max_connections: int = 1000
+        max_datagram_size: int = 65535
+        max_incoming_streams: int = 100
+        max_sessions: int = 10000
+        max_stream_buffer_size: int = 1024 * 1024
+        max_streams_per_connection: int = 100
+        middleware: list = []
+        read_timeout: float | None = 30.0
+        session_cleanup_interval: float = 60.0
+        stream_buffer_size: int = 65536
+        stream_cleanup_interval: float = 15.0
+        verify_mode: ssl.VerifyMode = ssl.CERT_NONE
+        write_timeout: float | None = 30.0
 
     class BadServerConfig:
+        alpn_protocols: list[str] = ["h3"]
         bind_host: str = "localhost"
         bind_port: int = 4433
         ca_certs: str | None = None
-        verify_mode: ssl.VerifyMode = ssl.CERT_NONE
-        max_connections: int = 1000
-        max_streams_per_connection: int = 100
-        connection_timeout: float = 60.0
-        read_timeout: float | None = 30.0
-        write_timeout: float | None = 30.0
-        alpn_protocols: list[str] = ["h3"]
-        http_version: str = "HTTP/3"
-        backlog: int = 100
-        reuse_port: bool = False
+        congestion_control_algorithm: str = "cubic"
+        connection_cleanup_interval: float = 30.0
+        connection_idle_check_interval: float = 5.0
+        connection_idle_timeout: float = 60.0
+        connection_keepalive_timeout: float = 30.0
         keep_alive: bool = True
+        max_connections: int = 1000
+        max_datagram_size: int = 65535
+        max_incoming_streams: int = 100
+        max_sessions: int = 10000
+        max_streams_per_connection: int = 100
+        read_timeout: float | None = 30.0
+        session_cleanup_interval: float = 60.0
+        stream_cleanup_interval: float = 15.0
+        verify_mode: ssl.VerifyMode = ssl.CERT_NONE
+        write_timeout: float | None = 30.0
+
+    class GoodSerializer:
+        def serialize(self, *, obj: Any) -> bytes:
+            return b"serialized"
+
+        def deserialize(self, *, data: bytes, obj_type: Type[Any] | None = None) -> Any:
+            return "deserialized"
+
+    class BadSerializer:
+        def serialize(self, *, obj: Any) -> bytes:
+            return b"serialized"
+
+    def test_auth_handler_protocol_conformance(self) -> None:
+        assert isinstance(self.GoodAuthHandler(), AuthHandlerProtocol)
+
+    def test_auth_handler_protocol_non_conformance(self) -> None:
+        assert not isinstance(self.BadAuthHandler(), AuthHandlerProtocol)
+
+    def test_middleware_protocol_conformance(self) -> None:
+        assert isinstance(self.GoodMiddleware(), MiddlewareProtocol)
+
+    def test_middleware_protocol_non_conformance(self) -> None:
+        assert not isinstance(self.BadMiddleware(), MiddlewareProtocol)
 
     def test_readable_stream_protocol_conformance(self) -> None:
         assert isinstance(self.GoodReadableStream(), ReadableStreamProtocol)
@@ -232,3 +324,9 @@ class TestRuntimeCheckableProtocols:
 
     def test_server_config_protocol_non_conformance(self) -> None:
         assert not isinstance(self.BadServerConfig(), ServerConfigProtocol)
+
+    def test_serializer_protocol_conformance(self) -> None:
+        assert isinstance(self.GoodSerializer(), Serializer)
+
+    def test_serializer_protocol_non_conformance(self) -> None:
+        assert not isinstance(self.BadSerializer(), Serializer)

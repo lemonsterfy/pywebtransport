@@ -20,6 +20,7 @@ __all__ = [
     "AsyncContextManager",
     "AsyncGenerator",
     "AsyncIterator",
+    "AuthHandlerProtocol",
     "BidirectionalStreamProtocol",
     "Buffer",
     "BufferSize",
@@ -49,6 +50,7 @@ __all__ = [
     "RoutePattern",
     "Routes",
     "SSLContext",
+    "Serializer",
     "ServerConfigProtocol",
     "SessionHandler",
     "SessionId",
@@ -189,21 +191,44 @@ Routes: TypeAlias = dict[RoutePattern, RouteHandler]
 class ClientConfigProtocol(Protocol):
     """A protocol defining the structure of a client configuration object."""
 
-    connect_timeout: float
-    read_timeout: float | None
-    write_timeout: float | None
-    close_timeout: float
-    max_streams: int
-    stream_buffer_size: int
-    verify_mode: ssl.VerifyMode | None
+    alpn_protocols: list[str]
     ca_certs: str | None
     certfile: str | None
-    keyfile: str | None
-    check_hostname: bool
-    alpn_protocols: list[str]
-    http_version: str
-    user_agent: str
+    close_timeout: float
+    congestion_control_algorithm: str
+    connect_timeout: float
+    connection_cleanup_interval: float
+    connection_idle_check_interval: float
+    connection_idle_timeout: float
+    connection_keepalive_timeout: float
+    debug: bool
     headers: Headers
+    keep_alive: bool
+    keyfile: str | None
+    log_level: str
+    max_connections: int
+    max_datagram_size: int
+    max_incoming_streams: int
+    max_retries: int
+    max_retry_delay: float
+    max_stream_buffer_size: int
+    max_streams: int
+    read_timeout: float | None
+    retry_backoff: float
+    retry_delay: float
+    stream_buffer_size: int
+    stream_cleanup_interval: float
+    stream_creation_timeout: float
+    user_agent: str
+    verify_mode: ssl.VerifyMode | None
+    write_timeout: float | None
+
+
+@runtime_checkable
+class AuthHandlerProtocol(Protocol):
+    """A protocol for auth handlers."""
+
+    async def __call__(self, *, headers: Headers) -> bool: ...
 
 
 @runtime_checkable
@@ -225,15 +250,15 @@ class ConnectionInfoProtocol(Protocol):
 class EventEmitterProtocol(Protocol):
     """A protocol for an event emitter."""
 
-    async def emit(self, event_type: EventType, *, data: EventData | None = None) -> None:
+    async def emit(self, *, event_type: EventType, data: EventData | None = None) -> None:
         """Emit an event."""
         ...
 
-    def off(self, event_type: EventType, *, handler: EventHandler | None = None) -> None:
+    def off(self, *, event_type: EventType, handler: EventHandler | None = None) -> None:
         """Unregister an event handler."""
         ...
 
-    def on(self, event_type: EventType, handler: EventHandler) -> None:
+    def on(self, *, event_type: EventType, handler: EventHandler) -> None:
         """Register an event handler."""
         ...
 
@@ -242,9 +267,7 @@ class EventEmitterProtocol(Protocol):
 class MiddlewareProtocol(Protocol):
     """A protocol for a middleware object."""
 
-    async def process_session(self, session: WebTransportSession) -> WebTransportSession:
-        """Process a session through the middleware."""
-        ...
+    async def __call__(self, *, session: WebTransportSession) -> bool: ...
 
 
 @runtime_checkable
@@ -255,20 +278,33 @@ class ReadableStreamProtocol(Protocol):
         """Check if the end of the stream has been reached."""
         ...
 
-    async def read(self, size: int = -1) -> bytes:
+    async def read(self, *, size: int = -1) -> bytes:
         """Read data from the stream."""
         ...
 
-    async def readline(self, separator: bytes = b"\n") -> bytes:
+    async def readline(self, *, separator: bytes = b"\n") -> bytes:
         """Read a line from the stream."""
         ...
 
-    async def readexactly(self, n: int) -> bytes:
+    async def readexactly(self, *, n: int) -> bytes:
         """Read exactly n bytes from the stream."""
         ...
 
-    async def readuntil(self, separator: bytes = b"\n") -> bytes:
+    async def readuntil(self, *, separator: bytes = b"\n") -> bytes:
         """Read from the stream until a separator is found."""
+        ...
+
+
+@runtime_checkable
+class Serializer(Protocol):
+    """A protocol for serializing and deserializing structured data."""
+
+    def serialize(self, *, obj: Any) -> bytes:
+        """Serialize an object into bytes."""
+        ...
+
+    def deserialize(self, *, data: bytes, obj_type: Any = None) -> Any:
+        """Deserialize bytes into an object."""
         ...
 
 
@@ -288,11 +324,11 @@ class WritableStreamProtocol(Protocol):
         """Check if the stream is in the process of closing."""
         ...
 
-    async def write(self, data: Data) -> None:
+    async def write(self, *, data: Data) -> None:
         """Write data to the stream."""
         ...
 
-    async def writelines(self, lines: list[Data]) -> None:
+    async def writelines(self, *, lines: list[Data]) -> None:
         """Write multiple lines to the stream."""
         ...
 
@@ -308,22 +344,34 @@ class BidirectionalStreamProtocol(ReadableStreamProtocol, WritableStreamProtocol
 class ServerConfigProtocol(Protocol):
     """A protocol defining the structure of a server configuration object."""
 
+    access_log: bool
+    alpn_protocols: list[str]
     bind_host: str
     bind_port: int
-    certfile: str
-    keyfile: str
     ca_certs: str | None
-    verify_mode: ssl.VerifyMode
-    max_connections: int
-    max_streams_per_connection: int
-    connection_timeout: float
-    read_timeout: float | None
-    write_timeout: float | None
-    alpn_protocols: list[str]
-    http_version: str
-    backlog: int
-    reuse_port: bool
+    certfile: str
+    congestion_control_algorithm: str
+    connection_cleanup_interval: float
+    connection_idle_check_interval: float
+    connection_idle_timeout: float
+    connection_keepalive_timeout: float
+    debug: bool
     keep_alive: bool
+    keyfile: str
+    log_level: str
+    max_connections: int
+    max_datagram_size: int
+    max_incoming_streams: int
+    max_sessions: int
+    max_stream_buffer_size: int
+    max_streams_per_connection: int
+    middleware: list[Any]
+    read_timeout: float | None
+    session_cleanup_interval: float
+    stream_buffer_size: int
+    stream_cleanup_interval: float
+    verify_mode: ssl.VerifyMode
+    write_timeout: float | None
 
 
 @runtime_checkable

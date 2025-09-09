@@ -17,7 +17,7 @@ from pywebtransport.utils import get_logger
 
 __all__ = ["ConnectionPool"]
 
-logger = get_logger("connection.pool")
+logger = get_logger(name="connection.pool")
 
 
 class ConnectionPool:
@@ -86,7 +86,11 @@ class ConnectionPool:
                     for conn in connections_to_close:
                         tg.create_task(conn.close())
             except* Exception as eg:
-                logger.error(f"Errors occurred while closing pooled connections: {eg.exceptions}")
+                logger.error(
+                    "Errors occurred while closing pooled connections: %s",
+                    eg.exceptions,
+                    exc_info=eg,
+                )
 
     async def get_connection(
         self,
@@ -103,7 +107,7 @@ class ConnectionPool:
                 "asynchronous context manager (`async with ...`)."
             )
 
-        pool_key = self._get_pool_key(host, port)
+        pool_key = self._get_pool_key(host=host, port=port)
         condition = self._conditions[pool_key]
 
         async with condition:
@@ -112,22 +116,22 @@ class ConnectionPool:
                 while pool:
                     connection, _ = pool.pop(0)
                     if connection.is_connected:
-                        logger.debug(f"Reusing pooled connection to {host}:{port}")
+                        logger.debug("Reusing pooled connection to %s:%s", host, port)
                         return connection
                     else:
-                        logger.debug(f"Discarding stale connection to {host}:{port}")
+                        logger.debug("Discarding stale connection to %s:%s", host, port)
                         self._total_connections[pool_key] -= 1
 
                 if self._total_connections[pool_key] < self._max_size:
                     self._total_connections[pool_key] += 1
                     break
 
-                logger.debug(f"Pool for {pool_key} is full. Waiting for a connection.")
+                logger.debug("Pool for %s is full. Waiting for a connection.", pool_key)
                 await condition.wait()
 
         try:
-            logger.debug(f"Creating new connection to {host}:{port}")
-            connection = WebTransportConnection(config)
+            logger.debug("Creating new connection to %s:%s", host, port)
+            connection = WebTransportConnection(config=config)
             await connection.connect(host=host, port=port, path=path)
             return connection
         except Exception:
@@ -136,7 +140,7 @@ class ConnectionPool:
                 condition.notify()
             raise
 
-    async def return_connection(self, connection: WebTransportConnection) -> None:
+    async def return_connection(self, *, connection: WebTransportConnection) -> None:
         """Return a connection to the pool for potential reuse."""
         if self._conditions is None:
             raise ConnectionError(
@@ -148,7 +152,7 @@ class ConnectionPool:
             await connection.close()
             return
 
-        pool_key = self._get_pool_key(remote_addr[0], remote_addr[1])
+        pool_key = self._get_pool_key(host=remote_addr[0], port=remote_addr[1])
         condition = self._conditions[pool_key]
         should_close = not connection.is_connected
 
@@ -158,7 +162,7 @@ class ConnectionPool:
                     should_close = True
                 else:
                     self._pool[pool_key].append((connection, time.time()))
-                    logger.debug(f"Returned connection to pool for {pool_key}")
+                    logger.debug("Returned connection to pool for %s", pool_key)
                     condition.notify()
 
         if should_close:
@@ -216,19 +220,23 @@ class ConnectionPool:
                                 condition.notify()
 
                 if connections_to_close:
-                    logger.debug(f"Closing {len(connections_to_close)} idle connections")
+                    logger.debug("Closing %d idle connections", len(connections_to_close))
                     try:
                         async with asyncio.TaskGroup() as tg:
                             for conn in connections_to_close:
                                 tg.create_task(conn.close())
                     except* Exception as eg:
-                        logger.warning(f"Errors closing idle connections: {eg.exceptions}")
+                        logger.warning(
+                            "Errors closing idle connections: %s",
+                            eg.exceptions,
+                            exc_info=eg,
+                        )
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Pool cleanup task error: {e}", exc_info=e)
+            logger.error("Pool cleanup task error: %s", e, exc_info=e)
 
-    def _get_pool_key(self, host: str, port: int) -> str:
+    def _get_pool_key(self, *, host: str, port: int) -> str:
         """Generate a unique key for a given host and port."""
         return f"{host}:{port}"
 

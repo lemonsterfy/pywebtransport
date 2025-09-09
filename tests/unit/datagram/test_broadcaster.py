@@ -36,23 +36,23 @@ class TestDatagramBroadcaster:
     async def test_add_stream(self, broadcaster: DatagramBroadcaster, mock_stream: Any) -> None:
         assert await broadcaster.get_stream_count() == 0
 
-        await broadcaster.add_stream(mock_stream)
+        await broadcaster.add_stream(stream=mock_stream)
 
         assert await broadcaster.get_stream_count() == 1
 
     @pytest.mark.asyncio
     async def test_add_stream_idempotent(self, broadcaster: DatagramBroadcaster, mock_stream: Any) -> None:
-        await broadcaster.add_stream(mock_stream)
-        await broadcaster.add_stream(mock_stream)
+        await broadcaster.add_stream(stream=mock_stream)
+        await broadcaster.add_stream(stream=mock_stream)
 
         assert await broadcaster.get_stream_count() == 1
 
     @pytest.mark.asyncio
     async def test_remove_stream(self, broadcaster: DatagramBroadcaster, mock_stream: Any) -> None:
-        await broadcaster.add_stream(mock_stream)
+        await broadcaster.add_stream(stream=mock_stream)
         assert await broadcaster.get_stream_count() == 1
 
-        await broadcaster.remove_stream(mock_stream)
+        await broadcaster.remove_stream(stream=mock_stream)
 
         assert await broadcaster.get_stream_count() == 0
 
@@ -60,7 +60,7 @@ class TestDatagramBroadcaster:
     async def test_remove_nonexistent_stream(self, broadcaster: DatagramBroadcaster, mock_stream: Any) -> None:
         assert await broadcaster.get_stream_count() == 0
 
-        await broadcaster.remove_stream(mock_stream)
+        await broadcaster.remove_stream(stream=mock_stream)
 
         assert await broadcaster.get_stream_count() == 0
 
@@ -72,19 +72,19 @@ class TestDatagramBroadcaster:
         stream2 = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
         stream2.send = mocker.AsyncMock()
         type(stream2).is_closed = mocker.PropertyMock(return_value=False)
-        await broadcaster.add_stream(stream1)
-        await broadcaster.add_stream(stream2)
+        await broadcaster.add_stream(stream=stream1)
+        await broadcaster.add_stream(stream=stream2)
 
-        sent_count = await broadcaster.broadcast(b"ping", priority=1, ttl=10.0)
+        sent_count = await broadcaster.broadcast(data=b"ping", priority=1, ttl=10.0)
 
         assert sent_count == 2
-        cast(mock.AsyncMock, stream1.send).assert_awaited_once_with(b"ping", priority=1, ttl=10.0)
-        cast(mock.AsyncMock, stream2.send).assert_awaited_once_with(b"ping", priority=1, ttl=10.0)
+        cast(mock.AsyncMock, stream1.send).assert_awaited_once_with(data=b"ping", priority=1, ttl=10.0)
+        cast(mock.AsyncMock, stream2.send).assert_awaited_once_with(data=b"ping", priority=1, ttl=10.0)
         assert await broadcaster.get_stream_count() == 2
 
     @pytest.mark.asyncio
     async def test_broadcast_empty(self, broadcaster: DatagramBroadcaster) -> None:
-        sent_count = await broadcaster.broadcast(b"data")
+        sent_count = await broadcaster.broadcast(data=b"data")
 
         assert sent_count == 0
 
@@ -96,14 +96,14 @@ class TestDatagramBroadcaster:
         closed_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
         closed_stream.send = mocker.AsyncMock()
         type(closed_stream).is_closed = mocker.PropertyMock(return_value=True)
-        await broadcaster.add_stream(healthy_stream)
-        await broadcaster.add_stream(closed_stream)
+        await broadcaster.add_stream(stream=healthy_stream)
+        await broadcaster.add_stream(stream=closed_stream)
         assert await broadcaster.get_stream_count() == 2
 
-        sent_count = await broadcaster.broadcast(b"data")
+        sent_count = await broadcaster.broadcast(data=b"data")
 
         assert sent_count == 1
-        cast(mock.AsyncMock, healthy_stream.send).assert_awaited_once_with(b"data", priority=0, ttl=None)
+        cast(mock.AsyncMock, healthy_stream.send).assert_awaited_once_with(data=b"data", priority=0, ttl=None)
         cast(mock.AsyncMock, closed_stream.send).assert_not_awaited()
         assert await broadcaster.get_stream_count() == 1
 
@@ -119,11 +119,11 @@ class TestDatagramBroadcaster:
         failing_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
         failing_stream.send = mocker.AsyncMock(side_effect=ConnectionError("Send failed"))
         type(failing_stream).is_closed = mocker.PropertyMock(return_value=False)
-        await broadcaster.add_stream(healthy_stream)
-        await broadcaster.add_stream(failing_stream)
+        await broadcaster.add_stream(stream=healthy_stream)
+        await broadcaster.add_stream(stream=failing_stream)
         assert await broadcaster.get_stream_count() == 2
 
-        sent_count = await broadcaster.broadcast(b"data")
+        sent_count = await broadcaster.broadcast(data=b"data")
 
         assert sent_count == 1
         cast(mock.AsyncMock, healthy_stream.send).assert_awaited_once()
@@ -140,11 +140,11 @@ class TestDatagramBroadcaster:
         stream1.send.side_effect = Exception("Failure 1")
         stream2 = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
         type(stream2).is_closed = mocker.PropertyMock(return_value=True)
-        await broadcaster.add_stream(stream1)
-        await broadcaster.add_stream(stream2)
+        await broadcaster.add_stream(stream=stream1)
+        await broadcaster.add_stream(stream=stream2)
         assert await broadcaster.get_stream_count() == 2
 
-        sent_count = await broadcaster.broadcast(b"data")
+        sent_count = await broadcaster.broadcast(data=b"data")
 
         assert sent_count == 0
         assert await broadcaster.get_stream_count() == 0
@@ -155,37 +155,37 @@ class TestDatagramBroadcaster:
     ) -> None:
         stream_to_remove = mock_stream
         stream_to_remove.send.side_effect = Exception("Send failed")
-        await broadcaster.add_stream(stream_to_remove)
+        await broadcaster.add_stream(stream=stream_to_remove)
         assert await broadcaster.get_stream_count() == 1
         original_gather = asyncio.gather
 
         async def gather_side_effect(*tasks: Any, **kwargs: Any) -> list[Any]:
-            await broadcaster.remove_stream(stream_to_remove)
+            await broadcaster.remove_stream(stream=stream_to_remove)
             return cast(list[Any], await original_gather(*tasks, **kwargs))
 
         mocker.patch("pywebtransport.datagram.broadcaster.asyncio.gather", side_effect=gather_side_effect)
 
-        sent_count = await broadcaster.broadcast(b"data")
+        sent_count = await broadcaster.broadcast(data=b"data")
 
         assert sent_count == 0
         assert await broadcaster.get_stream_count() == 0
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "method_name, args",
+        "method_name, kwargs",
         [
-            ("add_stream", [mock.MagicMock()]),
-            ("remove_stream", [mock.MagicMock()]),
-            ("broadcast", [b"data"]),
-            ("get_stream_count", []),
+            ("add_stream", {"stream": mock.MagicMock()}),
+            ("remove_stream", {"stream": mock.MagicMock()}),
+            ("broadcast", {"data": b"data"}),
+            ("get_stream_count", {}),
         ],
     )
-    async def test_methods_on_uninitialized_raises_error(self, method_name: str, args: list[Any]) -> None:
+    async def test_methods_on_uninitialized_raises_error(self, method_name: str, kwargs: dict[str, Any]) -> None:
         broadcaster = DatagramBroadcaster.create()
         method = getattr(broadcaster, method_name)
 
         with pytest.raises(DatagramError, match="has not been activated"):
-            await method(*args)
+            await method(**kwargs)
 
     @pytest.mark.asyncio
     async def test_aexit_uninitialized(self) -> None:
