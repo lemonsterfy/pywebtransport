@@ -95,7 +95,6 @@ extend-exclude = '''
 profile = "black"
 line_length = 120
 known_first_party = ["pywebtransport"]
-skip_glob = ["**/__init__.py"]
 
 [tool.mypy]
 mypy_path = "src"
@@ -121,7 +120,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 minversion = "8.4"
-addopts = "-ra -q --strict-markers --strict-config --ignore-glob='tests/e2e/test_0*.py'"
+addopts = "-ra -q --strict-markers --strict-config --ignore-glob='tests/e2e/test_[0-9][0-9]_*.py'"
 testpaths = ["tests"]
 norecursedirs = "tests/performance"
 asyncio_mode = "auto"

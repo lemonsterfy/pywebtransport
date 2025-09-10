@@ -9,10 +9,7 @@ from .pool import ClientPool
 from .pooled import PooledClient
 from .proxy import WebTransportProxy
 from .reconnecting import ReconnectingClient
-from .utils import (
-    benchmark_client_performance,
-    test_client_connectivity,
-)
+from .utils import benchmark_client_performance, test_client_connectivity
 
 __all__ = [
     "ClientMonitor",

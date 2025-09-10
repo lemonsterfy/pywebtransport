@@ -27,6 +27,7 @@ from .server import ServerApp, create_development_server
 from .session import WebTransportSession
 from .stream import StructuredStream, WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
 from .types import (
+    URL,
     Address,
     ConnectionState,
     EventType,
@@ -37,7 +38,6 @@ from .types import (
     StreamDirection,
     StreamId,
     StreamState,
-    URL,
 )
 from .version import __version__
 

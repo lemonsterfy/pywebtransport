@@ -372,7 +372,7 @@ def parse_webtransport_url(*, url: URL) -> URLParts:
 async def resolve_address(*, host: str, port: int, family: int = socket.AF_UNSPEC) -> Address:
     """Resolve a hostname to an IP address asynchronously."""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.getaddrinfo(host=host, port=port, family=family, type=socket.SOCK_DGRAM)
         if not result:
             raise OSError(f"No address found for {host}:{port}")

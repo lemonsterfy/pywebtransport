@@ -319,7 +319,7 @@ class WebTransportConnection(EventEmitter):
         if info.error_count > 10:
             issues.append(f"High error count: {info.error_count}")
             recommendations.append("Check for protocol errors or network issues")
-        if info.last_activity and (asyncio.get_event_loop().time() - info.last_activity) > 300:
+        if info.last_activity and (asyncio.get_running_loop().time() - info.last_activity) > 300:
             issues.append("Connection appears stale (no activity in 5+ minutes)")
             recommendations.append("Consider reconnecting or enabling keep-alive")
         if info.packets_sent > 1000 and info.packets_received == 0:
@@ -568,7 +568,7 @@ class WebTransportConnection(EventEmitter):
             self._timer_handle.cancel()
         if self._state != ConnectionState.CLOSED and self._quic_connection:
             if timer_at := self._quic_connection.get_timer():
-                self._timer_handle = asyncio.get_event_loop().call_at(when=timer_at, callback=self._transmit)
+                self._timer_handle = asyncio.get_running_loop().call_at(when=timer_at, callback=self._transmit)
 
     def _set_state(self, *, new_state: ConnectionState) -> None:
         """Set a new state for the connection and log the change."""
@@ -587,7 +587,7 @@ class WebTransportConnection(EventEmitter):
     def _transmit(self) -> None:
         """Send all pending datagrams from the QUIC connection."""
         if self._quic_connection and self._transport and not self._transport.is_closing():
-            for data, addr in self._quic_connection.datagrams_to_send(now=asyncio.get_event_loop().time()):
+            for data, addr in self._quic_connection.datagrams_to_send(now=asyncio.get_running_loop().time()):
                 try:
                     self._transport.sendto(data=data, addr=addr)
                 except Exception:
