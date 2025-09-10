@@ -224,7 +224,7 @@ class TestUrlAndAddressUtils:
 
     @pytest.mark.asyncio
     async def test_resolve_address(self, mocker: MockerFixture) -> None:
-        mock_getaddrinfo = mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
+        mock_getaddrinfo = mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
         mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_DGRAM, 0, "", ("192.0.2.1", 1234))]
 
         result = await resolve_address(host="example.com", port=1234)
@@ -236,7 +236,7 @@ class TestUrlAndAddressUtils:
 
     @pytest.mark.asyncio
     async def test_resolve_address_no_result(self, mocker: MockerFixture) -> None:
-        mock_getaddrinfo = mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
+        mock_getaddrinfo = mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
         mock_getaddrinfo.return_value = []
 
         with pytest.raises(ConfigurationError, match="No address found"):
@@ -244,7 +244,7 @@ class TestUrlAndAddressUtils:
 
     @pytest.mark.asyncio
     async def test_resolve_address_failure(self, mocker: MockerFixture) -> None:
-        mock_getaddrinfo = mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
+        mock_getaddrinfo = mocker.patch.object(asyncio.get_running_loop(), "getaddrinfo", new_callable=mocker.AsyncMock)
         mock_getaddrinfo.side_effect = OSError("Resolution failed")
 
         with pytest.raises(ConfigurationError, match="Failed to resolve address"):

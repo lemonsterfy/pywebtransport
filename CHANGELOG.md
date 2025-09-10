@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.5.1] - 2025-09-11
+
+This is a maintenance and quality-focused release that enhances the library's internal robustness and aligns the codebase with modern Python 3.11+ best practices. The primary enhancement is a comprehensive refactoring of `asyncio` event loop handling to use the more reliable `get_running_loop()` API, improving stability for production use cases.
+
+### Changed
+
+- **Modernized Asyncio Usage**: Systematically replaced all internal calls to the legacy `asyncio.get_event_loop()` with the modern `asyncio.get_running_loop()`. This change spans core components (`connection`, `utils`) and the test suite, hardening the library against potential concurrency issues and providing fail-fast behavior.
+- **Improved Tooling and CI Configuration**:
+  - Refined the `pytest` configuration in `pyproject.toml` to correctly execute the main E2E test suite while excluding individual, numbered test case files.
+  - Removed the `isort` exclusion for `__init__.py` files to enforce a uniform import sorting style across the entire project.
+  - Updated the Python 3.13 patch version in `.python-version` to align the CI environment with the latest security and bug fixes.
+
 ## [0.5.0] - 2025-09-10
 
 This is a major feature release that significantly enhances the library's usability, performance, and resilience. It introduces three major new capabilities: a pluggable structured message layer for transmitting typed Python objects, a configurable client-side auto-reconnect strategy with exponential backoff, and selectable congestion control algorithms for performance tuning. This release also includes a comprehensive API standardization to enforce keyword-only arguments across the entire library, improving robustness and developer experience.
@@ -259,7 +271,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.3.1...v0.4.0

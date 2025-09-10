@@ -139,8 +139,8 @@ class TestResourceUsage:
                 perf_logger.info("Started %s load tasks. Running for %ss...", len(load_tasks), LOAD_TEST_DURATION)
 
                 cpu_samples = []
-                end_time = asyncio.get_event_loop().time() + LOAD_TEST_DURATION
-                while asyncio.get_event_loop().time() < end_time:
+                end_time = asyncio.get_running_loop().time() + LOAD_TEST_DURATION
+                while asyncio.get_running_loop().time() < end_time:
                     resources = await get_server_resources(config=client_config)
                     cpu_samples.append(resources["cpu_percent"])
                     await asyncio.sleep(2)
