@@ -84,10 +84,10 @@ async def test_datagram_echo(server: tuple[str, int], client: WebTransportClient
     @server_app.route(path="/datagram")
     async def datagram_echo_handler(session: WebTransportSession) -> None:
         """Echo any received datagram."""
-        datagrams = await session.datagrams
+        datagram_transport = await session.datagrams
         try:
-            data = await datagrams.receive(timeout=2.0)
-            await datagrams.send(data=data)
+            data = await datagram_transport.receive(timeout=2.0)
+            await datagram_transport.send(data=data)
         except asyncio.CancelledError:
             pass
         finally:
@@ -95,10 +95,10 @@ async def test_datagram_echo(server: tuple[str, int], client: WebTransportClient
 
     session = await client.connect(url=f"https://{host}:{port}/datagram")
     async with session:
-        datagrams = await session.datagrams
+        datagram_transport = await session.datagrams
         test_message = b"Hello, datagram world!"
-        await datagrams.send(data=test_message)
-        response = await datagrams.receive(timeout=2.0)
+        await datagram_transport.send(data=test_message)
+        response = await datagram_transport.receive(timeout=2.0)
         assert response == test_message
 
     await asyncio.wait_for(server_handler_finished.wait(), timeout=1.0)
@@ -125,11 +125,11 @@ async def test_concurrent_streams_and_datagrams(
                 pass
 
         async def _handle_datagrams() -> None:
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
             while not session.is_closed:
                 try:
-                    data = await datagrams.receive(timeout=0.1)
-                    await datagrams.send(data=data)
+                    data = await datagram_transport.receive(timeout=0.1)
+                    await datagram_transport.send(data=data)
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:
@@ -151,10 +151,10 @@ async def test_concurrent_streams_and_datagrams(
         return response == msg
 
     async def _datagram_worker(*, session: WebTransportSession, i: int) -> bool:
-        datagrams = await session.datagrams
+        datagram_transport = await session.datagrams
         msg = f"Datagram worker {i}".encode()
-        await datagrams.send(data=msg)
-        response = await datagrams.receive(timeout=2.0)
+        await datagram_transport.send(data=msg)
+        response = await datagram_transport.receive(timeout=2.0)
         return response == msg
 
     session = await client.connect(url=f"https://{host}:{port}/concurrent")

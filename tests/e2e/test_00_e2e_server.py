@@ -236,14 +236,14 @@ async def handle_datagrams(*, session: WebTransportSession) -> None:
     logger.debug("Starting datagram handler for session %s", session_id)
 
     try:
-        datagrams = await session.datagrams
+        datagram_transport = await session.datagrams
         while not session.is_closed:
             try:
-                data = await asyncio.wait_for(datagrams.receive(), timeout=1.0)
+                data = await asyncio.wait_for(datagram_transport.receive(), timeout=1.0)
                 server_stats.record_datagram()
                 server_stats.record_bytes(byte_count=len(data))
                 echo_data = b"ECHO: " + data
-                await datagrams.send(data=echo_data)
+                await datagram_transport.send(data=echo_data)
                 server_stats.record_bytes(byte_count=len(echo_data))
             except asyncio.TimeoutError:
                 continue
@@ -302,12 +302,14 @@ async def handle_structured_datagram(*, session: WebTransportSession, serializer
     logger.debug("Starting structured datagram handler for session %s", session_id)
 
     try:
-        s_datagram = await session.create_structured_datagram_stream(serializer=serializer, registry=MESSAGE_REGISTRY)
+        structured_transport = await session.create_structured_datagram_transport(
+            serializer=serializer, registry=MESSAGE_REGISTRY
+        )
         while not session.is_closed:
             try:
-                obj = await asyncio.wait_for(s_datagram.receive_obj(), timeout=1.0)
+                obj = await asyncio.wait_for(structured_transport.receive_obj(), timeout=1.0)
                 server_stats.record_datagram()
-                await s_datagram.send_obj(obj=obj)
+                await structured_transport.send_obj(obj=obj)
             except asyncio.TimeoutError:
                 continue
     except (asyncio.CancelledError, ConnectionError):
@@ -348,8 +350,8 @@ async def health_handler(session: WebTransportSession) -> None:
             "active_sessions": len(server_stats.active_sessions),
             "active_streams": len(server_stats.active_streams),
         }
-        datagrams = await session.datagrams
-        await datagrams.send_json(data=health_data)
+        datagram_transport = await session.datagrams
+        await datagram_transport.send_json(data=health_data)
         logger.info("Sent health status: %s", health_data["status"])
     except Exception as e:
         logger.error("Health handler error: %s", e)
@@ -400,6 +402,13 @@ async def main() -> None:
         keyfile=str(KEY_PATH),
         debug=DEBUG_MODE,
         log_level="DEBUG" if DEBUG_MODE else "INFO",
+        initial_max_data=16 * 1024,
+        initial_max_streams_bidi=5,
+        initial_max_streams_uni=5,
+        flow_control_window_size=65536,
+        flow_control_window_auto_scale=False,
+        stream_flow_control_increment_bidi=5,
+        stream_flow_control_increment_uni=5,
     )
     app = E2EServerApp(config=config)
 

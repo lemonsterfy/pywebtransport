@@ -5,8 +5,8 @@ WebTransport Datagram Subpackage.
 from .broadcaster import DatagramBroadcaster
 from .monitor import DatagramMonitor
 from .reliability import DatagramReliabilityLayer
-from .structured import StructuredDatagramStream
-from .transport import DatagramMessage, DatagramQueue, DatagramStats, WebTransportDatagramDuplexStream
+from .structured import StructuredDatagramTransport
+from .transport import DatagramMessage, DatagramQueue, DatagramStats, WebTransportDatagramTransport
 
 __all__ = [
     "DatagramBroadcaster",
@@ -15,6 +15,6 @@ __all__ = [
     "DatagramQueue",
     "DatagramReliabilityLayer",
     "DatagramStats",
-    "StructuredDatagramStream",
-    "WebTransportDatagramDuplexStream",
+    "StructuredDatagramTransport",
+    "WebTransportDatagramTransport",
 ]

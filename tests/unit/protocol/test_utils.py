@@ -8,6 +8,7 @@ from pywebtransport.constants import (
     DEFAULT_ALPN_PROTOCOLS,
     DEFAULT_CONGESTION_CONTROL_ALGORITHM,
     DEFAULT_MAX_DATAGRAM_SIZE,
+    ErrorCodes,
 )
 from pywebtransport.protocol import utils as protocol_utils
 
@@ -156,3 +157,38 @@ def test_get_stream_direction_from_id(
 
     mock_validate.assert_called_once_with(stream_id=stream_id)
     assert direction == expected_direction
+
+
+def test_get_stream_direction_from_id_unreachable(mocker: MockerFixture) -> None:
+    mocker.patch("pywebtransport.protocol.utils.validate_stream_id")
+    mocker.patch("pywebtransport.protocol.utils.is_bidirectional_stream", return_value=None)
+
+    with pytest.raises(AssertionError, match="Unreachable code: Invalid stream direction logic"):
+        protocol_utils.get_stream_direction_from_id(stream_id=0, is_client=True)
+
+
+@pytest.mark.parametrize(
+    "app_error_code, expected_http_code",
+    [
+        (0, ErrorCodes.WT_APPLICATION_ERROR_FIRST + 0),
+        (29, ErrorCodes.WT_APPLICATION_ERROR_FIRST + 29),
+        (30, ErrorCodes.WT_APPLICATION_ERROR_FIRST + 30 + 1),
+        (12345, ErrorCodes.WT_APPLICATION_ERROR_FIRST + 12345 + (12345 // 30)),
+        (0xFFFFFFFF, ErrorCodes.WT_APPLICATION_ERROR_FIRST + 0xFFFFFFFF + (0xFFFFFFFF // 30)),
+    ],
+)
+def test_webtransport_code_to_http_code(app_error_code: int, expected_http_code: int) -> None:
+    result = protocol_utils.webtransport_code_to_http_code(app_error_code)
+    assert result == expected_http_code
+
+
+@pytest.mark.parametrize(
+    "invalid_code",
+    [
+        -1,
+        0xFFFFFFFF + 1,
+    ],
+)
+def test_webtransport_code_to_http_code_invalid_input(invalid_code: int) -> None:
+    with pytest.raises(ValueError, match="Application error code must be a 32-bit unsigned integer."):
+        protocol_utils.webtransport_code_to_http_code(invalid_code)

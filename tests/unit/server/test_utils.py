@@ -7,18 +7,12 @@ from typing import Any, cast
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import (
-    ConnectionError,
-    ServerConfig,
-    WebTransportSession,
-    WebTransportStream,
-    create_development_server,
-)
+from pywebtransport import ConnectionError, ServerConfig, WebTransportStream, create_development_server
 from pywebtransport.server import create_echo_server_app, create_simple_app, echo_handler, health_check_handler
 from pywebtransport.server.utils import _echo_datagrams, _echo_single_stream, _echo_streams
 
 
-class FakeDatagramStream:
+class FakeDatagramTransport:
     def __init__(self, *, mocker: MockerFixture):
         self._mocker = mocker
         self.send_mock = self._mocker.AsyncMock()
@@ -32,10 +26,10 @@ class FakeDatagramStream:
         return cast(bytes, result)
 
 
-class FakeWebTransportSession(WebTransportSession):
+class FakeWebTransportSession:
     def __init__(self, *, mocker: MockerFixture):
         self._mocker = mocker
-        self._datagram_stream = FakeDatagramStream(mocker=self._mocker)
+        self._datagram_transport = FakeDatagramTransport(mocker=self._mocker)
         self._fake_incoming_streams: list[WebTransportStream] = []
         self.streams_iterator_error: type[BaseException] | None = None
         self.close_call_count = 0
@@ -52,7 +46,7 @@ class FakeWebTransportSession(WebTransportSession):
     @property
     async def datagrams(self) -> Any:
         await asyncio.sleep(0)
-        return self._datagram_stream
+        return self._datagram_transport
 
     async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None:
         self.close_call_count += 1
@@ -69,7 +63,7 @@ class FakeWebTransportSession(WebTransportSession):
 
 
 @pytest.fixture
-def mock_session(mocker: MockerFixture) -> WebTransportSession:
+def mock_session(mocker: MockerFixture) -> Any:
     return FakeWebTransportSession(mocker=mocker)
 
 
@@ -142,31 +136,29 @@ class TestAppFactories:
 
 class TestHandlers:
     @pytest.mark.asyncio
-    async def test_health_check_handler_success(self, mock_session: WebTransportSession) -> None:
+    async def test_health_check_handler_success(self, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
 
         await health_check_handler(session=mock_session)
 
-        fake_session._datagram_stream.send_mock.assert_awaited_once_with(data=b'{"status": "healthy"}')
+        fake_session._datagram_transport.send_mock.assert_awaited_once_with(data=b'{"status": "healthy"}')
         assert fake_session.close_call_count == 1
 
     @pytest.mark.asyncio
-    async def test_health_check_handler_send_fails(
-        self, mocker: MockerFixture, mock_session: WebTransportSession
-    ) -> None:
+    async def test_health_check_handler_send_fails(self, mocker: MockerFixture, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
         mock_logger = mocker.patch("pywebtransport.server.utils.logger")
         error = ConnectionError("Send failed")
-        fake_session._datagram_stream.send_mock.side_effect = error
+        fake_session._datagram_transport.send_mock.side_effect = error
 
         await health_check_handler(session=mock_session)
 
-        fake_session._datagram_stream.send_mock.assert_awaited_once()
+        fake_session._datagram_transport.send_mock.assert_awaited_once()
         mock_logger.error.assert_called_once_with("Health check datagram send failed: %s", error, exc_info=True)
         assert fake_session.close_call_count == 1
 
     @pytest.mark.asyncio
-    async def test_echo_handler_creates_tasks(self, mocker: MockerFixture, mock_session: WebTransportSession) -> None:
+    async def test_echo_handler_creates_tasks(self, mocker: MockerFixture, mock_session: Any) -> None:
         mock_echo_datagrams = mocker.patch("pywebtransport.server.utils._echo_datagrams", new_callable=mocker.AsyncMock)
         mock_echo_streams = mocker.patch("pywebtransport.server.utils._echo_streams", new_callable=mocker.AsyncMock)
 
@@ -176,7 +168,7 @@ class TestHandlers:
         mock_echo_streams.assert_awaited_once_with(session=mock_session)
 
     @pytest.mark.asyncio
-    async def test_echo_handler_exception(self, mocker: MockerFixture, mock_session: WebTransportSession) -> None:
+    async def test_echo_handler_exception(self, mocker: MockerFixture, mock_session: Any) -> None:
         mock_logger = mocker.patch("pywebtransport.server.utils.logger")
         test_error = ValueError("Test Error")
         mocker.patch("pywebtransport.server.utils._echo_datagrams", side_effect=test_error)
@@ -193,49 +185,47 @@ class TestHandlers:
 
 class TestEchoHelpers:
     @pytest.mark.asyncio
-    async def test_echo_datagrams(self, mocker: MockerFixture, mock_session: WebTransportSession) -> None:
+    async def test_echo_datagrams(self, mocker: MockerFixture, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
         received_data = [b"hello", b"world"]
-        fake_session._datagram_stream.receive_mock.side_effect = received_data + [asyncio.CancelledError]
+        fake_session._datagram_transport.receive_mock.side_effect = received_data + [asyncio.CancelledError]
 
         await _echo_datagrams(session=mock_session)
 
         calls = [mocker.call(data=b"ECHO: " + d) for d in received_data]
-        fake_session._datagram_stream.send_mock.assert_has_awaits(calls)
-        assert fake_session._datagram_stream.receive_mock.await_count == len(received_data) + 1
+        fake_session._datagram_transport.send_mock.assert_has_awaits(calls)
+        assert fake_session._datagram_transport.receive_mock.await_count == len(received_data) + 1
 
     @pytest.mark.asyncio
-    async def test_echo_datagrams_handles_cancellation(self, mock_session: WebTransportSession) -> None:
+    async def test_echo_datagrams_handles_cancellation(self, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
-        fake_session._datagram_stream.receive_mock.side_effect = asyncio.CancelledError
+        fake_session._datagram_transport.receive_mock.side_effect = asyncio.CancelledError
 
         await _echo_datagrams(session=mock_session)
 
-        fake_session._datagram_stream.send_mock.assert_not_awaited()
+        fake_session._datagram_transport.send_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_echo_datagrams_handles_general_exception(self, mock_session: WebTransportSession) -> None:
+    async def test_echo_datagrams_handles_general_exception(self, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
-        fake_session._datagram_stream.receive_mock.side_effect = ValueError("Receive failed")
+        fake_session._datagram_transport.receive_mock.side_effect = ValueError("Receive failed")
 
         await _echo_datagrams(session=mock_session)
 
-        fake_session._datagram_stream.send_mock.assert_not_awaited()
+        fake_session._datagram_transport.send_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_echo_datagrams_handles_empty_data(self, mock_session: WebTransportSession) -> None:
+    async def test_echo_datagrams_handles_empty_data(self, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
-        fake_session._datagram_stream.receive_mock.side_effect = [b"", asyncio.CancelledError]
+        fake_session._datagram_transport.receive_mock.side_effect = [b"", asyncio.CancelledError]
 
         await _echo_datagrams(session=mock_session)
 
-        fake_session._datagram_stream.send_mock.assert_not_awaited()
-        assert fake_session._datagram_stream.receive_mock.await_count == 2
+        fake_session._datagram_transport.send_mock.assert_not_awaited()
+        assert fake_session._datagram_transport.receive_mock.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_echo_streams(
-        self, mocker: MockerFixture, mock_session: WebTransportSession, mock_stream: Any
-    ) -> None:
+    async def test_echo_streams(self, mocker: MockerFixture, mock_session: Any, mock_stream: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
         mock_create_task = mocker.patch("asyncio.create_task")
         mock_echo_single_stream = mocker.patch(
@@ -251,9 +241,7 @@ class TestEchoHelpers:
         mock_create_task.assert_called_with(mock_echo_single_stream.return_value)
 
     @pytest.mark.asyncio
-    async def test_echo_streams_handles_cancellation(
-        self, mocker: MockerFixture, mock_session: WebTransportSession
-    ) -> None:
+    async def test_echo_streams_handles_cancellation(self, mocker: MockerFixture, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
         mock_create_task = mocker.patch("asyncio.create_task")
         fake_session.streams_iterator_error = asyncio.CancelledError
@@ -263,9 +251,7 @@ class TestEchoHelpers:
         mock_create_task.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_echo_streams_ignores_wrong_type(
-        self, mocker: MockerFixture, mock_session: WebTransportSession
-    ) -> None:
+    async def test_echo_streams_ignores_wrong_type(self, mocker: MockerFixture, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
         mock_create_task = mocker.patch("asyncio.create_task")
         wrong_type_object = mocker.MagicMock()

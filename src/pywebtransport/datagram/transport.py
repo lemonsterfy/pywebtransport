@@ -1,5 +1,5 @@
 """
-WebTransport Datagram Stream.
+WebTransport Datagram Transport.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ __all__ = [
     "DatagramMessage",
     "DatagramQueue",
     "DatagramStats",
-    "WebTransportDatagramDuplexStream",
+    "WebTransportDatagramTransport",
 ]
 
 logger = get_logger(name="datagram.transport")
@@ -355,8 +355,8 @@ class DatagramQueue:
                 self._cleanup_task = None
 
 
-class WebTransportDatagramDuplexStream(EventEmitter):
-    """A duplex stream for sending and receiving WebTransport datagrams."""
+class WebTransportDatagramTransport(EventEmitter):
+    """A duplex transport for sending and receiving WebTransport datagrams."""
 
     def __init__(
         self,
@@ -365,7 +365,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         high_water_mark: int = 100,
         sender_get_timeout: float = 1.0,
     ):
-        """Initialize the datagram duplex stream."""
+        """Initialize the datagram duplex transport."""
         super().__init__()
         self._session = weakref.ref(session)
         self._session_id = session.session_id
@@ -385,17 +385,17 @@ class WebTransportDatagramDuplexStream(EventEmitter):
 
     @property
     def is_closed(self) -> bool:
-        """Check if the stream is closed."""
+        """Check if the transport is closed."""
         return self._closed
 
     @property
     def is_readable(self) -> bool:
-        """Check if the readable side of the stream is open."""
+        """Check if the readable side of the transport is open."""
         return not self._closed
 
     @property
     def is_writable(self) -> bool:
-        """Check if the writable side of the stream is open."""
+        """Check if the writable side of the transport is open."""
         return not self._closed
 
     @property
@@ -405,7 +405,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
 
     @property
     def session_id(self) -> SessionId:
-        """Get the session ID associated with this stream."""
+        """Get the session ID associated with this transport."""
         return self._session_id
 
     @property
@@ -470,7 +470,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         return self._stats.to_dict()
 
     async def __aenter__(self) -> Self:
-        """Enter the async context for the stream."""
+        """Enter the async context for the transport."""
         return self
 
     async def __aexit__(
@@ -479,11 +479,11 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        """Exit the async context, closing the stream."""
+        """Exit the async context, closing the transport."""
         await self.close()
 
     async def initialize(self) -> None:
-        """Initialize the stream, preparing it for use."""
+        """Initialize the transport, preparing it for use."""
         if self._is_initialized:
             return
 
@@ -500,7 +500,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         self._is_initialized = True
 
     async def close(self) -> None:
-        """Close the datagram stream and clean up resources."""
+        """Close the datagram transport and clean up resources."""
         if self._closed:
             return
 
@@ -518,19 +518,19 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         if self._incoming_queue:
             await self._incoming_queue.close()
 
-        logger.debug("Datagram stream closed for session %s", self._session_id)
+        logger.debug("Datagram transport closed for session %s", self._session_id)
 
     async def receive(self, *, timeout: float | None = None) -> bytes:
         """Receive a single datagram."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         if self.is_closed:
-            raise DatagramError("Datagram stream is closed.")
+            raise DatagramError("Datagram transport is closed.")
         if self._incoming_queue is None:
-            raise DatagramError("Internal state error: queue is None despite stream being initialized.")
+            raise DatagramError("Internal state error: queue is None despite transport being initialized.")
 
         start_time = time.time()
         datagram = await self._incoming_queue.get(timeout=timeout)
@@ -580,13 +580,13 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         """Receive a datagram along with its metadata."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         if self.is_closed:
-            raise DatagramError("Datagram stream is closed.")
+            raise DatagramError("Datagram transport is closed.")
         if self._incoming_queue is None:
-            raise DatagramError("Internal state error: queue is None despite stream being initialized.")
+            raise DatagramError("Internal state error: queue is None despite transport being initialized.")
 
         start_time = time.time()
         datagram = await self._incoming_queue.get(timeout=timeout)
@@ -602,13 +602,13 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         """Send a datagram with a given priority and TTL."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         if self.is_closed:
-            raise DatagramError("Datagram stream is closed.")
+            raise DatagramError("Datagram transport is closed.")
         if self._sequence_lock is None or self._outgoing_queue is None:
-            raise DatagramError("Internal state error: lock or queue is None despite stream being initialized.")
+            raise DatagramError("Internal state error: lock or queue is None despite transport being initialized.")
 
         data_bytes = ensure_bytes(data=data)
         if len(data_bytes) > self.max_datagram_size:
@@ -655,8 +655,8 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         """Clear the receive buffer and return the number of cleared datagrams."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         if self._incoming_queue is None:
             return 0
@@ -669,8 +669,8 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         """Clear the send buffer and return the number of cleared datagrams."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         if self._outgoing_queue is None:
             return 0
@@ -680,12 +680,12 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         return count
 
     def debug_state(self) -> dict[str, Any]:
-        """Get a detailed snapshot of the datagram stream's state."""
+        """Get a detailed snapshot of the datagram transport's state."""
         stats = self.stats
         queue_stats = self.get_queue_stats()
 
         return {
-            "stream": {
+            "transport": {
                 "session_id": self.session_id,
                 "is_readable": self.is_readable,
                 "is_writable": self.is_writable,
@@ -706,7 +706,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         }
 
     async def diagnose_issues(self) -> list[str]:
-        """Analyze stream statistics to identify potential issues."""
+        """Analyze transport statistics to identify potential issues."""
         issues = []
         stats = self.stats
         queue_stats = self.get_queue_stats()
@@ -735,7 +735,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
             issues.append(f"High send latency: {stats['avg_send_time'] * 1000:.1f}ms")
 
         if self.is_closed:
-            issues.append("Datagram stream is closed")
+            issues.append("Datagram transport is closed")
 
         if not (session := self.session) or not session.is_ready:
             issues.append("Session not available or not ready")
@@ -761,8 +761,8 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         """Run a task that sends periodic heartbeat datagrams."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         return asyncio.create_task(self._heartbeat_loop(interval=interval))
 
@@ -770,8 +770,8 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         """Try to receive a datagram without blocking."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         if self.is_closed or self._incoming_queue is None:
             return None
@@ -786,8 +786,8 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         """Try to send a datagram without blocking."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramDuplexStream is not initialized. Its factory "
-                "should call 'await stream.initialize()' before use."
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
             )
         if self.is_closed:
             return False
@@ -928,7 +928,7 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         await self.send(data=frame, priority=priority, ttl=ttl)
 
     def _start_background_tasks(self) -> None:
-        """Start all background tasks for the stream."""
+        """Start all background tasks for the transport."""
         if self._outgoing_queue is None or self._incoming_queue is None:
             return
 
@@ -956,11 +956,11 @@ class WebTransportDatagramDuplexStream(EventEmitter):
         self._stats.max_send_time = max(self._stats.max_send_time, send_time)
 
     def __str__(self) -> str:
-        """Format a concise summary of datagram stream info for logging."""
+        """Format a concise summary of datagram transport info for logging."""
         stats = self.stats
 
         return (
-            f"DatagramStream({self.session_id[:12]}..., "
+            f"DatagramTransport({self.session_id[:12]}..., "
             f"sent={stats['datagrams_sent']}, "
             f"received={stats['datagrams_received']}, "
             f"success_rate={stats['send_success_rate']:.2%}, "

@@ -8,40 +8,40 @@ import pytest
 from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
-from pywebtransport import WebTransportDatagramDuplexStream
+from pywebtransport import WebTransportDatagramTransport
 from pywebtransport.datagram import DatagramMonitor
 
 
 class TestDatagramMonitor:
     @pytest.fixture
-    def monitor(self, mock_stream: Any) -> DatagramMonitor:
-        return DatagramMonitor(datagram_stream=mock_stream)
+    def monitor(self, mock_transport: Any) -> DatagramMonitor:
+        return DatagramMonitor(datagram_transport=mock_transport)
 
     @pytest.fixture
-    def mock_stream(self, mocker: MockerFixture) -> Any:
-        stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
-        stream.session_id = "test-session-id-12345678"
-        stream.outgoing_high_water_mark = 100
+    def mock_transport(self, mocker: MockerFixture) -> Any:
+        transport = mocker.create_autospec(WebTransportDatagramTransport, instance=True)
+        transport.session_id = "test-session-id-12345678"
+        transport.outgoing_high_water_mark = 100
         stats_dict = {
             "datagrams_sent": 100,
             "datagrams_received": 95,
             "send_success_rate": 0.99,
             "avg_send_time": 0.01,
         }
-        stream.stats.get.side_effect = lambda key, default=None: stats_dict.get(key, default)
-        stream.get_queue_stats = mocker.MagicMock(return_value={"outgoing": {"size": 10}, "incoming": {"size": 5}})
-        return stream
+        transport.stats.get.side_effect = lambda key, default=None: stats_dict.get(key, default)
+        transport.get_queue_stats = mocker.MagicMock(return_value={"outgoing": {"size": 10}, "incoming": {"size": 5}})
+        return transport
 
-    def test_initialization(self, mock_stream: Any) -> None:
-        mon = DatagramMonitor(datagram_stream=mock_stream)
+    def test_initialization(self, mock_transport: Any) -> None:
+        mon = DatagramMonitor(datagram_transport=mock_transport)
 
-        assert mon._stream is mock_stream
+        assert mon._transport is mock_transport
         assert mon._interval == 5.0
         assert mon._samples.maxlen == 100
         assert mon._alerts.maxlen == 50
 
-    def test_create_factory(self, mock_stream: Any) -> None:
-        mon = DatagramMonitor.create(datagram_stream=mock_stream, monitoring_interval=10.0)
+    def test_create_factory(self, mock_transport: Any) -> None:
+        mon = DatagramMonitor.create(datagram_transport=mock_transport, monitoring_interval=10.0)
 
         assert isinstance(mon, DatagramMonitor)
         assert mon._interval == 10.0
@@ -134,8 +134,8 @@ class TestDatagramMonitor:
         assert "Monitor loop error: Test Exception" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_check_alerts_high_queue_size(self, monitor: DatagramMonitor, mock_stream: Any) -> None:
-        mock_stream.get_queue_stats.return_value = {"outgoing": {"size": 95}}
+    async def test_check_alerts_high_queue_size(self, monitor: DatagramMonitor, mock_transport: Any) -> None:
+        mock_transport.get_queue_stats.return_value = {"outgoing": {"size": 95}}
         sample: dict[str, Any] = {
             "outgoing_queue_size": 95,
             "send_success_rate": 1.0,

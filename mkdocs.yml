@@ -1,3 +1,5 @@
+# PyWebTransport MkDocs Configuration
+
 site_name: PyWebTransport
 site_description: The canonical, async-native WebTransport stack for Python.
 site_url: https://pywebtransport.readthedocs.io

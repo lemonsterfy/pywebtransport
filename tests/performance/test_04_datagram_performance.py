@@ -31,6 +31,9 @@ def client_config() -> ClientConfig:
         verify_mode=ssl.CERT_NONE,
         connect_timeout=15.0,
         read_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
     )
 
 
@@ -43,14 +46,14 @@ class TestDatagramPerformance:
         async def run_rtt_cycle() -> None:
             async with WebTransportClient(config=client_config) as client:
                 session = await client.connect(url=f"{SERVER_URL}{ECHO_ENDPOINT}")
-                datagrams = await session.datagrams
+                datagram_transport = await session.datagrams
                 payload = uuid.uuid4().bytes
 
                 async def send_and_wait_for_echo() -> None:
                     expected_response = b"ECHO: " + payload
-                    await datagrams.send(data=payload)
+                    await datagram_transport.send(data=payload)
                     while True:
-                        response = await datagrams.receive()
+                        response = await datagram_transport.receive()
                         if response == expected_response:
                             return
 
@@ -71,11 +74,11 @@ class TestDatagramPerformance:
         async def run_pps_cycle() -> None:
             async with WebTransportClient(config=client_config) as client:
                 session = await client.connect(url=f"{SERVER_URL}{DISCARD_ENDPOINT}")
-                datagrams = await session.datagrams
+                datagram_transport = await session.datagrams
 
                 tasks = []
                 for _ in range(PPS_BURST_COUNT):
-                    tasks.append(asyncio.create_task(datagrams.send(data=payload)))
+                    tasks.append(asyncio.create_task(datagram_transport.send(data=payload)))
                     await asyncio.sleep(DATAGRAM_PACING_DELAY)
 
                 await asyncio.gather(*tasks)

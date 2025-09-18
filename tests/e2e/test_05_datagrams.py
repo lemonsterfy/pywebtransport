@@ -29,22 +29,29 @@ logger = logging.getLogger("test_datagrams")
 async def test_basic_datagram() -> bool:
     """Tests sending a single datagram and receiving its echo."""
     logger.info("--- Test 05A: Basic Datagram Echo ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        read_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
-            logger.info("Datagram stream ready (Max size: %s bytes).", datagrams.max_datagram_size)
+            datagram_transport = await session.datagrams
+            logger.info("Datagram transport ready (Max size: %s bytes).", datagram_transport.max_datagram_size)
 
             test_message = b"Hello, Datagram!"
             expected_response = b"ECHO: " + test_message
 
             logger.info("Sending datagram: %r", test_message)
-            await datagrams.send(data=test_message)
+            await datagram_transport.send(data=test_message)
 
             logger.info("Waiting for echo...")
-            response = await datagrams.receive()
+            response = await datagram_transport.receive()
 
             if response == expected_response:
                 logger.info("SUCCESS: Received correct datagram echo.")
@@ -64,18 +71,24 @@ async def test_multiple_datagrams() -> bool:
     """Tests sending multiple datagrams sequentially."""
     logger.info("--- Test 05B: Multiple Datagrams ---")
     num_datagrams = 10
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
 
             logger.info("Sending %d datagrams sequentially...", num_datagrams)
             for i in range(num_datagrams):
-                await datagrams.send(data=f"Datagram message {i + 1}".encode())
+                await datagram_transport.send(data=f"Datagram message {i + 1}".encode())
 
-            stats = datagrams.stats
+            stats = datagram_transport.stats
             if stats.get("datagrams_sent", 0) >= num_datagrams:
                 logger.info("SUCCESS: %s datagrams sent.", stats.get("datagrams_sent", 0))
                 return True
@@ -92,19 +105,25 @@ async def test_multiple_datagrams() -> bool:
 async def test_datagram_sizes() -> bool:
     """Tests sending datagrams of various sizes, including oversized ones."""
     logger.info("--- Test 05C: Datagram Size Limits ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
-            max_size = datagrams.max_datagram_size
+            datagram_transport = await session.datagrams
+            max_size = datagram_transport.max_datagram_size
             logger.info("Max datagram size: %s bytes.", max_size)
 
             logger.info("Testing oversized datagram...")
             try:
                 oversized_data = b"X" * (max_size + 1)
-                await datagrams.send(data=oversized_data)
+                await datagram_transport.send(data=oversized_data)
                 logger.error("FAILURE: Sending oversized datagram should have raised an exception.")
                 return False
             except DatagramError:
@@ -121,17 +140,23 @@ async def test_datagram_sizes() -> bool:
 async def test_datagram_priority() -> bool:
     """Tests sending datagrams with different priority levels (conceptual)."""
     logger.info("--- Test 05D: Datagram Priority ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
 
             logger.info("Sending datagrams with different priorities...")
-            await datagrams.send(data=b"Priority 0", priority=0)
-            await datagrams.send(data=b"Priority 1", priority=1)
-            await datagrams.send(data=b"Priority 2", priority=2)
+            await datagram_transport.send(data=b"Priority 0", priority=0)
+            await datagram_transport.send(data=b"Priority 1", priority=1)
+            await datagram_transport.send(data=b"Priority 2", priority=2)
 
             logger.info("SUCCESS: Datagrams sent with priority parameter.")
             return True
@@ -143,16 +168,22 @@ async def test_datagram_priority() -> bool:
 async def test_datagram_ttl() -> bool:
     """Tests sending datagrams with a Time-To-Live (TTL) (conceptual)."""
     logger.info("--- Test 05E: Datagram TTL ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
 
             logger.info("Sending datagrams with different TTLs...")
-            await datagrams.send(data=b"TTL 1.0s", ttl=1.0)
-            await datagrams.send(data=b"TTL 5.0s", ttl=5.0)
+            await datagram_transport.send(data=b"TTL 1.0s", ttl=1.0)
+            await datagram_transport.send(data=b"TTL 5.0s", ttl=5.0)
 
             logger.info("SUCCESS: Datagrams sent with TTL parameter.")
             return True
@@ -164,20 +195,26 @@ async def test_datagram_ttl() -> bool:
 async def test_json_datagrams() -> bool:
     """Tests sending datagrams with JSON-formatted payloads."""
     logger.info("--- Test 05F: JSON Datagrams ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
             json_payload = {"type": "greeting", "message": "Hello, JSON!"}
 
             logger.info("Sending JSON payload: %s", json_payload)
-            await datagrams.send_json(data=json_payload)
+            await datagram_transport.send_json(data=json_payload)
 
             await asyncio.sleep(0.1)
 
-            stats = datagrams.stats
+            stats = datagram_transport.stats
             if stats.get("datagrams_sent", 0) >= 1:
                 logger.info("SUCCESS: JSON datagram sent successfully.")
                 return True
@@ -193,16 +230,22 @@ async def test_datagram_burst() -> bool:
     """Tests a burst of datagrams sent concurrently."""
     logger.info("--- Test 05G: Datagram Burst ---")
     burst_size = 50
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
             logger.info("Starting burst of %d datagrams...", burst_size)
             start_time = time.time()
 
-            tasks = [datagrams.send(data=f"Burst {i}".encode()) for i in range(burst_size)]
+            tasks = [datagram_transport.send(data=f"Burst {i}".encode()) for i in range(burst_size)]
             await asyncio.gather(*tasks)
             duration = time.time() - start_time
             rate = burst_size / duration if duration > 0 else float("inf")
@@ -217,19 +260,25 @@ async def test_datagram_burst() -> bool:
 async def test_datagram_queue_behavior() -> bool:
     """Tests the inspection of datagram send/receive queues."""
     logger.info("--- Test 05H: Datagram Queue Behavior ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
 
-            logger.info("Initial send buffer size: %s", datagrams.get_send_buffer_size())
-            await datagrams.send(data=b"Queue test")
-            logger.info("Send buffer size after sending: %s", datagrams.get_send_buffer_size())
+            logger.info("Initial send buffer size: %s", datagram_transport.get_send_buffer_size())
+            await datagram_transport.send(data=b"Queue test")
+            logger.info("Send buffer size after sending: %s", datagram_transport.get_send_buffer_size())
 
             await asyncio.sleep(0.1)
-            logger.info("Send buffer size after delay: %s", datagrams.get_send_buffer_size())
+            logger.info("Send buffer size after delay: %s", datagram_transport.get_send_buffer_size())
 
             logger.info("SUCCESS: Datagram queue inspection methods are available.")
             return True

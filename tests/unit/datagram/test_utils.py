@@ -3,7 +3,7 @@
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import WebTransportDatagramDuplexStream
+from pywebtransport import WebTransportDatagramTransport
 from pywebtransport.datagram.utils import create_heartbeat_datagram, datagram_throughput_test, is_heartbeat_datagram
 
 
@@ -32,9 +32,9 @@ class TestDatagramUtils:
 
     @pytest.mark.asyncio
     async def test_datagram_throughput_test_successful_run(self, mocker: MockerFixture) -> None:
-        mock_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
-        mock_stream.max_datagram_size = 1200
-        mock_stream.try_send = mocker.AsyncMock(return_value=True)
+        mock_transport = mocker.create_autospec(WebTransportDatagramTransport, instance=True)
+        mock_transport.max_datagram_size = 1200
+        mock_transport.try_send = mocker.AsyncMock(return_value=True)
         mocker.patch("pywebtransport.datagram.utils.asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_time = mocker.patch("pywebtransport.datagram.utils.get_timestamp")
         start_time = 1000.0
@@ -51,9 +51,11 @@ class TestDatagramUtils:
         ]
         expected_duration = 0.06
 
-        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=duration, datagram_size=1000)
+        results = await datagram_throughput_test(
+            datagram_transport=mock_transport, duration=duration, datagram_size=1000
+        )
 
-        assert mock_stream.try_send.call_count == 5
+        assert mock_transport.try_send.call_count == 5
         assert results["datagrams_sent"] == 5
         assert results["errors"] == 0
         assert results["error_rate"] == 0.0
@@ -64,17 +66,17 @@ class TestDatagramUtils:
 
     @pytest.mark.asyncio
     async def test_datagram_throughput_test_size_exceeds_max(self, mocker: MockerFixture) -> None:
-        mock_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
-        mock_stream.max_datagram_size = 500
+        mock_transport = mocker.create_autospec(WebTransportDatagramTransport, instance=True)
+        mock_transport.max_datagram_size = 500
 
         with pytest.raises(ValueError, match="datagram_size 1000 exceeds max size 500"):
-            await datagram_throughput_test(datagram_stream=mock_stream, datagram_size=1000)
+            await datagram_throughput_test(datagram_transport=mock_transport, datagram_size=1000)
 
     @pytest.mark.asyncio
     async def test_datagram_throughput_test_with_backpressure(self, mocker: MockerFixture) -> None:
-        mock_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
-        mock_stream.max_datagram_size = 1200
-        mock_stream.try_send = mocker.AsyncMock(side_effect=[True, False, True, False, True])
+        mock_transport = mocker.create_autospec(WebTransportDatagramTransport, instance=True)
+        mock_transport.max_datagram_size = 1200
+        mock_transport.try_send = mocker.AsyncMock(side_effect=[True, False, True, False, True])
         mock_sleep = mocker.patch("pywebtransport.datagram.utils.asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_time = mocker.patch("pywebtransport.datagram.utils.get_timestamp")
         start_time = 1000.0
@@ -90,9 +92,9 @@ class TestDatagramUtils:
             start_time + 0.06,
         ]
 
-        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=duration)
+        results = await datagram_throughput_test(datagram_transport=mock_transport, duration=duration)
 
-        assert mock_stream.try_send.call_count == 5
+        assert mock_transport.try_send.call_count == 5
         assert results["datagrams_sent"] == 5
         assert results["errors"] == 0
         assert mock_sleep.call_args_list.count(mocker.call(0.01)) == 2
@@ -100,9 +102,9 @@ class TestDatagramUtils:
 
     @pytest.mark.asyncio
     async def test_datagram_throughput_test_with_send_errors(self, mocker: MockerFixture) -> None:
-        mock_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
-        mock_stream.max_datagram_size = 1200
-        mock_stream.try_send = mocker.AsyncMock(side_effect=[True, True, Exception("Send failed"), True, True])
+        mock_transport = mocker.create_autospec(WebTransportDatagramTransport, instance=True)
+        mock_transport.max_datagram_size = 1200
+        mock_transport.try_send = mocker.AsyncMock(side_effect=[True, True, Exception("Send failed"), True, True])
         mocker.patch("pywebtransport.datagram.utils.asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_time = mocker.patch("pywebtransport.datagram.utils.get_timestamp")
         start_time = 1000.0
@@ -118,24 +120,24 @@ class TestDatagramUtils:
             start_time + 0.06,
         ]
 
-        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=duration)
+        results = await datagram_throughput_test(datagram_transport=mock_transport, duration=duration)
 
-        assert mock_stream.try_send.call_count == 5
+        assert mock_transport.try_send.call_count == 5
         assert results["datagrams_sent"] == 4
         assert results["errors"] == 1
         assert results["error_rate"] == 1 / 5
 
     @pytest.mark.asyncio
     async def test_datagram_throughput_test_zero_duration(self, mocker: MockerFixture) -> None:
-        mock_stream = mocker.create_autospec(WebTransportDatagramDuplexStream, instance=True)
-        mock_stream.max_datagram_size = 1200
-        mock_stream.try_send = mocker.AsyncMock(return_value=True)
+        mock_transport = mocker.create_autospec(WebTransportDatagramTransport, instance=True)
+        mock_transport.max_datagram_size = 1200
+        mock_transport.try_send = mocker.AsyncMock(return_value=True)
         mocker.patch("pywebtransport.datagram.utils.asyncio.sleep", new_callable=mocker.AsyncMock)
         mock_time = mocker.patch("pywebtransport.datagram.utils.get_timestamp")
         start_time = 1000.0
         mock_time.side_effect = [start_time, start_time + 0.1, start_time + 0.1]
 
-        results = await datagram_throughput_test(datagram_stream=mock_stream, duration=0)
+        results = await datagram_throughput_test(datagram_transport=mock_transport, duration=0)
 
         assert results["datagrams_sent"] == 0
         assert results["errors"] == 0

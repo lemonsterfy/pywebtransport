@@ -28,16 +28,24 @@ from pywebtransport.constants import (
     DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
     DEFAULT_DEBUG,
     DEFAULT_DEV_PORT,
+    DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE,
+    DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
+    DEFAULT_INITIAL_MAX_DATA,
+    DEFAULT_INITIAL_MAX_STREAMS_BIDI,
+    DEFAULT_INITIAL_MAX_STREAMS_UNI,
     DEFAULT_KEEP_ALIVE,
     DEFAULT_KEYFILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_DATAGRAM_SIZE,
     DEFAULT_MAX_INCOMING_STREAMS,
+    DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
     DEFAULT_MAX_RETRIES,
     DEFAULT_MAX_RETRY_DELAY,
     DEFAULT_MAX_SESSIONS,
     DEFAULT_MAX_STREAMS,
     DEFAULT_MAX_STREAMS_PER_CONNECTION,
+    DEFAULT_MAX_TOTAL_PENDING_EVENTS,
+    DEFAULT_PENDING_EVENT_TTL,
     DEFAULT_READ_TIMEOUT,
     DEFAULT_RETRY_BACKOFF,
     DEFAULT_RETRY_DELAY,
@@ -46,6 +54,8 @@ from pywebtransport.constants import (
     DEFAULT_SESSION_CLEANUP_INTERVAL,
     DEFAULT_STREAM_CLEANUP_INTERVAL,
     DEFAULT_STREAM_CREATION_TIMEOUT,
+    DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
+    DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
     DEFAULT_WRITE_TIMEOUT,
     MAX_BUFFER_SIZE,
     SUPPORTED_CONGESTION_CONTROL_ALGORITHMS,
@@ -79,23 +89,33 @@ class ClientConfig:
     connection_idle_timeout: float = DEFAULT_CONNECTION_IDLE_TIMEOUT
     connection_keepalive_timeout: float = DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
     debug: bool = DEFAULT_DEBUG
+    flow_control_window_auto_scale: bool = DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE
+    flow_control_window_size: int = DEFAULT_FLOW_CONTROL_WINDOW_SIZE
     headers: Headers = field(default_factory=dict)
+    initial_max_data: int = DEFAULT_INITIAL_MAX_DATA
+    initial_max_streams_bidi: int = DEFAULT_INITIAL_MAX_STREAMS_BIDI
+    initial_max_streams_uni: int = DEFAULT_INITIAL_MAX_STREAMS_UNI
     keep_alive: bool = DEFAULT_KEEP_ALIVE
     keyfile: str | None = None
     log_level: str = DEFAULT_LOG_LEVEL
     max_connections: int = DEFAULT_CLIENT_MAX_CONNECTIONS
     max_datagram_size: int = DEFAULT_MAX_DATAGRAM_SIZE
     max_incoming_streams: int = DEFAULT_MAX_INCOMING_STREAMS
+    max_pending_events_per_session: int = DEFAULT_MAX_PENDING_EVENTS_PER_SESSION
     max_retries: int = DEFAULT_MAX_RETRIES
     max_retry_delay: float = DEFAULT_MAX_RETRY_DELAY
     max_stream_buffer_size: int = MAX_BUFFER_SIZE
     max_streams: int = DEFAULT_MAX_STREAMS
+    max_total_pending_events: int = DEFAULT_MAX_TOTAL_PENDING_EVENTS
+    pending_event_ttl: float = DEFAULT_PENDING_EVENT_TTL
     read_timeout: float | None = DEFAULT_READ_TIMEOUT
     retry_backoff: float = DEFAULT_RETRY_BACKOFF
     retry_delay: float = DEFAULT_RETRY_DELAY
     stream_buffer_size: int = DEFAULT_BUFFER_SIZE
     stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
     stream_creation_timeout: float = DEFAULT_STREAM_CREATION_TIMEOUT
+    stream_flow_control_increment_bidi: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
+    stream_flow_control_increment_uni: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
     user_agent: str = f"pywebtransport/{__version__}"
     verify_mode: ssl.VerifyMode | None = DEFAULT_CLIENT_VERIFY_MODE
     write_timeout: float | None = DEFAULT_WRITE_TIMEOUT
@@ -181,8 +201,6 @@ class ClientConfig:
             match value:
                 case ssl.VerifyMode():
                     result[field_name] = value.name
-                case Path():
-                    result[field_name] = str(value)
                 case _:
                     result[field_name] = value
         return result
@@ -216,6 +234,7 @@ class ClientConfig:
             _validate_timeout(timeout=self.connection_idle_check_interval)
             _validate_timeout(timeout=self.connection_idle_timeout)
             _validate_timeout(timeout=self.connection_keepalive_timeout)
+            _validate_timeout(timeout=self.pending_event_ttl)
             _validate_timeout(timeout=self.read_timeout)
             _validate_timeout(timeout=self.stream_cleanup_interval)
             _validate_timeout(timeout=self.stream_creation_timeout)
@@ -223,6 +242,12 @@ class ClientConfig:
         except ValueError as e:
             raise invalid_config(key="timeout", value=str(e), reason="invalid timeout value") from e
 
+        if self.flow_control_window_size <= 0:
+            raise invalid_config(
+                key="flow_control_window_size",
+                value=self.flow_control_window_size,
+                reason="must be positive",
+            )
         if self.max_connections <= 0:
             raise invalid_config(key="max_connections", value=self.max_connections, reason="must be positive")
         if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
@@ -237,8 +262,20 @@ class ClientConfig:
                 value=self.max_incoming_streams,
                 reason="must be positive",
             )
+        if self.max_pending_events_per_session <= 0:
+            raise invalid_config(
+                key="max_pending_events_per_session",
+                value=self.max_pending_events_per_session,
+                reason="must be positive",
+            )
         if self.max_streams <= 0:
             raise invalid_config(key="max_streams", value=self.max_streams, reason="must be positive")
+        if self.max_total_pending_events <= 0:
+            raise invalid_config(
+                key="max_total_pending_events",
+                value=self.max_total_pending_events,
+                reason="must be positive",
+            )
         if self.stream_buffer_size <= 0:
             raise invalid_config(
                 key="stream_buffer_size",
@@ -250,6 +287,18 @@ class ClientConfig:
                 key="max_stream_buffer_size",
                 value=self.max_stream_buffer_size,
                 reason="must be >= stream_buffer_size",
+            )
+        if self.stream_flow_control_increment_bidi <= 0:
+            raise invalid_config(
+                key="stream_flow_control_increment_bidi",
+                value=self.stream_flow_control_increment_bidi,
+                reason="must be positive",
+            )
+        if self.stream_flow_control_increment_uni <= 0:
+            raise invalid_config(
+                key="stream_flow_control_increment_uni",
+                value=self.stream_flow_control_increment_uni,
+                reason="must be positive",
             )
 
         if self.max_retries < 0:
@@ -302,20 +351,30 @@ class ServerConfig:
     connection_idle_timeout: float = DEFAULT_CONNECTION_IDLE_TIMEOUT
     connection_keepalive_timeout: float = DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
     debug: bool = DEFAULT_DEBUG
+    flow_control_window_auto_scale: bool = DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE
+    flow_control_window_size: int = DEFAULT_FLOW_CONTROL_WINDOW_SIZE
+    initial_max_data: int = DEFAULT_INITIAL_MAX_DATA
+    initial_max_streams_bidi: int = DEFAULT_INITIAL_MAX_STREAMS_BIDI
+    initial_max_streams_uni: int = DEFAULT_INITIAL_MAX_STREAMS_UNI
     keep_alive: bool = DEFAULT_KEEP_ALIVE
     keyfile: str = DEFAULT_KEYFILE
     log_level: str = DEFAULT_LOG_LEVEL
     max_connections: int = DEFAULT_SERVER_MAX_CONNECTIONS
     max_datagram_size: int = DEFAULT_MAX_DATAGRAM_SIZE
     max_incoming_streams: int = DEFAULT_MAX_INCOMING_STREAMS
+    max_pending_events_per_session: int = DEFAULT_MAX_PENDING_EVENTS_PER_SESSION
     max_sessions: int = DEFAULT_MAX_SESSIONS
     max_stream_buffer_size: int = MAX_BUFFER_SIZE
     max_streams_per_connection: int = DEFAULT_MAX_STREAMS_PER_CONNECTION
+    max_total_pending_events: int = DEFAULT_MAX_TOTAL_PENDING_EVENTS
     middleware: list[MiddlewareProtocol] = field(default_factory=list)
+    pending_event_ttl: float = DEFAULT_PENDING_EVENT_TTL
     read_timeout: float | None = DEFAULT_READ_TIMEOUT
     session_cleanup_interval: float = DEFAULT_SESSION_CLEANUP_INTERVAL
     stream_buffer_size: int = DEFAULT_BUFFER_SIZE
     stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
+    stream_flow_control_increment_bidi: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
+    stream_flow_control_increment_uni: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
     verify_mode: ssl.VerifyMode = DEFAULT_SERVER_VERIFY_MODE
     write_timeout: float | None = DEFAULT_WRITE_TIMEOUT
 
@@ -416,8 +475,6 @@ class ServerConfig:
             match value:
                 case ssl.VerifyMode():
                     result[field_name] = value.name
-                case Path():
-                    result[field_name] = str(value)
                 case _:
                     result[field_name] = value
         return result
@@ -455,6 +512,7 @@ class ServerConfig:
             _validate_timeout(timeout=self.connection_idle_check_interval)
             _validate_timeout(timeout=self.connection_idle_timeout)
             _validate_timeout(timeout=self.connection_keepalive_timeout)
+            _validate_timeout(timeout=self.pending_event_ttl)
             _validate_timeout(timeout=self.read_timeout)
             _validate_timeout(timeout=self.session_cleanup_interval)
             _validate_timeout(timeout=self.stream_cleanup_interval)
@@ -462,6 +520,12 @@ class ServerConfig:
         except ValueError as e:
             raise invalid_config(key="timeout", value=str(e), reason="invalid timeout value") from e
 
+        if self.flow_control_window_size <= 0:
+            raise invalid_config(
+                key="flow_control_window_size",
+                value=self.flow_control_window_size,
+                reason="must be positive",
+            )
         if self.max_connections <= 0:
             raise invalid_config(key="max_connections", value=self.max_connections, reason="must be positive")
         if self.max_datagram_size <= 0 or self.max_datagram_size > 65535:
@@ -476,12 +540,30 @@ class ServerConfig:
                 value=self.max_incoming_streams,
                 reason="must be positive",
             )
+        if self.max_pending_events_per_session <= 0:
+            raise invalid_config(
+                key="max_pending_events_per_session",
+                value=self.max_pending_events_per_session,
+                reason="must be positive",
+            )
         if self.max_sessions <= 0:
             raise invalid_config(key="max_sessions", value=self.max_sessions, reason="must be positive")
+        if self.max_stream_buffer_size < self.stream_buffer_size:
+            raise invalid_config(
+                key="max_stream_buffer_size",
+                value=self.max_stream_buffer_size,
+                reason="must be >= stream_buffer_size",
+            )
         if self.max_streams_per_connection <= 0:
             raise invalid_config(
                 key="max_streams_per_connection",
                 value=self.max_streams_per_connection,
+                reason="must be positive",
+            )
+        if self.max_total_pending_events <= 0:
+            raise invalid_config(
+                key="max_total_pending_events",
+                value=self.max_total_pending_events,
                 reason="must be positive",
             )
         if self.stream_buffer_size <= 0:
@@ -490,11 +572,17 @@ class ServerConfig:
                 value=self.stream_buffer_size,
                 reason="must be positive",
             )
-        if self.max_stream_buffer_size < self.stream_buffer_size:
+        if self.stream_flow_control_increment_bidi <= 0:
             raise invalid_config(
-                key="max_stream_buffer_size",
-                value=self.max_stream_buffer_size,
-                reason="must be >= stream_buffer_size",
+                key="stream_flow_control_increment_bidi",
+                value=self.stream_flow_control_increment_bidi,
+                reason="must be positive",
+            )
+        if self.stream_flow_control_increment_uni <= 0:
+            raise invalid_config(
+                key="stream_flow_control_increment_uni",
+                value=self.stream_flow_control_increment_uni,
+                reason="must be positive",
             )
 
         if self.ca_certs and not Path(self.ca_certs).exists():
@@ -548,6 +636,34 @@ class ConfigBuilder:
         """Set debug and logging settings."""
         self._config_dict["debug"] = enabled
         self._config_dict["log_level"] = log_level
+        return self
+
+    def flow_control(
+        self,
+        *,
+        window_size: int | None = None,
+        window_auto_scale: bool | None = None,
+        initial_max_data: int | None = None,
+        initial_max_streams_bidi: int | None = None,
+        initial_max_streams_uni: int | None = None,
+        stream_increment_bidi: int | None = None,
+        stream_increment_uni: int | None = None,
+    ) -> Self:
+        """Set flow control related settings."""
+        if window_size is not None:
+            self._config_dict["flow_control_window_size"] = window_size
+        if window_auto_scale is not None:
+            self._config_dict["flow_control_window_auto_scale"] = window_auto_scale
+        if initial_max_data is not None:
+            self._config_dict["initial_max_data"] = initial_max_data
+        if initial_max_streams_bidi is not None:
+            self._config_dict["initial_max_streams_bidi"] = initial_max_streams_bidi
+        if initial_max_streams_uni is not None:
+            self._config_dict["initial_max_streams_uni"] = initial_max_streams_uni
+        if stream_increment_bidi is not None:
+            self._config_dict["stream_flow_control_increment_bidi"] = stream_increment_bidi
+        if stream_increment_uni is not None:
+            self._config_dict["stream_flow_control_increment_uni"] = stream_increment_uni
         return self
 
     def performance(

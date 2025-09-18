@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Self, Type
 
 from pywebtransport.constants import DEFAULT_BUFFER_SIZE, MAX_BUFFER_SIZE
 from pywebtransport.events import Event, EventEmitter
-from pywebtransport.exceptions import StreamError, TimeoutError
+from pywebtransport.exceptions import FlowControlError, StreamError, TimeoutError
 from pywebtransport.types import Data, StreamDirection, StreamId, StreamState
 from pywebtransport.utils import ensure_bytes, format_duration, get_logger, get_timestamp
 
@@ -182,6 +182,11 @@ class _StreamBase:
     _is_initialized: bool = False
 
     @property
+    def direction(self) -> StreamDirection:
+        """Get the direction of the stream."""
+        return self._direction
+
+    @property
     def is_closed(self) -> bool:
         """Check if the stream is fully closed."""
         return self._state in [
@@ -189,11 +194,6 @@ class _StreamBase:
             StreamState.RESET_RECEIVED,
             StreamState.RESET_SENT,
         ]
-
-    @property
-    def direction(self) -> StreamDirection:
-        """Get the direction of the stream."""
-        return self._direction
 
     @property
     def state(self) -> StreamState:
@@ -204,6 +204,15 @@ class _StreamBase:
     def stream_id(self) -> StreamId:
         """Get the unique ID of the stream."""
         return self._stream_id
+
+    async def wait_closed(self) -> None:
+        """Wait until the stream is fully closed."""
+        if not self._is_initialized or self._closed_future is None:
+            raise StreamError(
+                f"{self.__class__.__name__} is not initialized."
+                "Its factory should call 'await stream.initialize()' before use."
+            )
+        await self._closed_future
 
     def debug_state(self) -> dict[str, Any]:
         """Get a detailed, structured snapshot of the stream state for debugging."""
@@ -237,19 +246,11 @@ class _StreamBase:
             "avg_write_time": stats.get("avg_write_time", 0),
         }
 
-    async def wait_closed(self) -> None:
-        """Wait until the stream is fully closed."""
-        if not self._is_initialized or self._closed_future is None:
-            raise StreamError(
-                f"{self.__class__.__name__} is not initialized."
-                "Its factory should call 'await stream.initialize()' before use."
-            )
-        await self._closed_future
-
     def __str__(self) -> str:
         """Format a concise, human-readable summary of the stream."""
         stats = self._stats
         uptime_str = format_duration(seconds=stats.uptime) if stats.uptime > 0 else "0s"
+
         return (
             f"Stream({self.stream_id}, state={self.state}, direction={self.direction}, "
             f"uptime={uptime_str}, sent={stats.bytes_sent}, received={stats.bytes_received})"
@@ -295,6 +296,13 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
         if not self.is_closed:
             await self.abort()
 
+    async def abort(self, *, code: int = 0) -> None:
+        """Abort the reading side of the stream."""
+        session = self._session()
+        if session and session.protocol_handler:
+            session.protocol_handler.abort_stream(stream_id=self._stream_id, error_code=code)
+        self._set_state(new_state=StreamState.RESET_SENT)
+
     async def initialize(self) -> None:
         """Initialize asyncio resources for the stream."""
         if self._is_initialized:
@@ -317,13 +325,6 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
             )
 
         self._is_initialized = True
-
-    async def abort(self, *, code: int = 0) -> None:
-        """Abort the reading side of the stream."""
-        session = self._session()
-        if session and session.protocol_handler:
-            session.protocol_handler.abort_stream(stream_id=self._stream_id, error_code=code)
-        self._set_state(new_state=StreamState.RESET_SENT)
 
     async def read(self, *, size: int = 8192) -> bytes:
         """Read up to `size` bytes of data from the stream."""
@@ -514,23 +515,6 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
         if not self.is_closed:
             await self.abort()
 
-    async def initialize(self) -> None:
-        """Initialize asyncio resources for the stream."""
-        if self._is_initialized:
-            return
-
-        loop = asyncio.get_running_loop()
-        self._write_lock = asyncio.Lock()
-        self._new_data_event = asyncio.Event()
-        self._backpressure_event = asyncio.Event()
-        self._backpressure_event.set()
-        self._flushed_event = asyncio.Event()
-        self._flushed_event.set()
-        self._closed_future = loop.create_future()
-        self._ensure_writer_is_running()
-
-        self._is_initialized = True
-
     async def abort(self, *, code: int = 0) -> None:
         """Abort the writing side of the stream immediately."""
         session = self._session()
@@ -566,6 +550,23 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
             await asyncio.wait_for(self._flushed_event.wait(), timeout=self._write_timeout)
         except asyncio.TimeoutError:
             raise TimeoutError("Flush timeout") from None
+
+    async def initialize(self) -> None:
+        """Initialize asyncio resources for the stream."""
+        if self._is_initialized:
+            return
+
+        loop = asyncio.get_running_loop()
+        self._write_lock = asyncio.Lock()
+        self._new_data_event = asyncio.Event()
+        self._backpressure_event = asyncio.Event()
+        self._backpressure_event.set()
+        self._flushed_event = asyncio.Event()
+        self._flushed_event.set()
+        self._closed_future = loop.create_future()
+        self._ensure_writer_is_running()
+
+        self._is_initialized = True
 
     async def write(self, *, data: Data, end_stream: bool = False, wait_flush: bool = True) -> None:
         """Write data to the stream, handling backpressure and chunking."""
@@ -719,7 +720,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                         self._flushed_event.set()
                         self._new_data_event.clear()
                     else:
-                        item = self._write_buffer.popleft()
+                        item = self._write_buffer[0]
 
                 if item is None:
                     await self._new_data_event.wait()
@@ -732,15 +733,20 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                 )
 
                 session = self._session()
-                if not session or not session.protocol_handler:
-                    await asyncio.sleep(0.1)
+                if not session or not session.protocol_handler or session.is_closed:
+                    if future and not future.done():
+                        future.set_exception(StreamError("Session is not available for writing."))
+                    async with self._write_lock:
+                        self._write_buffer.popleft()
                     continue
 
                 handler = session.protocol_handler
 
                 try:
                     handler.send_webtransport_stream_data(stream_id=self._stream_id, data=data, end_stream=end_stream)
+
                     async with self._write_lock:
+                        self._write_buffer.popleft()
                         self._write_buffer_size -= len(data)
                         if self._write_buffer_size < self._backpressure_limit:
                             self._backpressure_event.set()
@@ -755,6 +761,17 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                         )
                         self._set_state(new_state=new_state)
                         break
+                except FlowControlError:
+                    self._stats.flow_control_errors += 1
+                    if session._data_credit_event:
+                        session._data_credit_event.clear()
+                        try:
+                            await asyncio.wait_for(session._data_credit_event.wait(), timeout=self._write_timeout)
+                        except asyncio.TimeoutError:
+                            exc = TimeoutError("Timeout waiting for data credit")
+                            if future and not future.done():
+                                future.set_exception(exc)
+                            raise exc from None
                 except Exception as e:
                     if future and not future.done():
                         future.set_exception(e)
@@ -823,6 +840,10 @@ class WebTransportStream(WebTransportReceiveStream, WebTransportSendStream):
         if not self.is_closed:
             await self.abort()
 
+    async def close(self) -> None:
+        """Gracefully close the stream's write side."""
+        await WebTransportSendStream.close(self=self)
+
     async def initialize(self) -> None:
         """Initialize all bidirectional resources."""
         if self._is_initialized:
@@ -855,10 +876,6 @@ class WebTransportStream(WebTransportReceiveStream, WebTransportSendStream):
         self._ensure_writer_is_running()
 
         self._is_initialized = True
-
-    async def close(self) -> None:
-        """Gracefully close the stream's write side."""
-        await WebTransportSendStream.close(self=self)
 
     async def diagnose_issues(
         self,

@@ -71,8 +71,8 @@ async def echo_handler(session: WebTransportSession) -> None:
 async def health_check_handler(session: WebTransportSession) -> None:
     """Send a simple health status datagram and close the session."""
     try:
-        datagrams = await session.datagrams
-        await datagrams.send(data=b'{"status": "healthy"}')
+        datagram_transport = await session.datagrams
+        await datagram_transport.send(data=b'{"status": "healthy"}')
     except Exception as e:
         logger.error("Health check datagram send failed: %s", e, exc_info=True)
     finally:
@@ -82,11 +82,11 @@ async def health_check_handler(session: WebTransportSession) -> None:
 async def _echo_datagrams(*, session: WebTransportSession) -> None:
     """Echo datagrams received on a session."""
     try:
-        datagrams = await session.datagrams
+        datagram_transport = await session.datagrams
         while not session.is_closed:
-            data = await datagrams.receive()
+            data = await datagram_transport.receive()
             if data:
-                await datagrams.send(data=b"ECHO: " + data)
+                await datagram_transport.send(data=b"ECHO: " + data)
     except asyncio.CancelledError:
         pass
     except Exception:

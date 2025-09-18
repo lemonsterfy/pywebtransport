@@ -58,6 +58,18 @@ Represents stateful information about a WebTransport session.
 - `closed_at` (`float | None`): The timestamp when the session was closed. `Default: None`.
 - `close_code` (`int | None`): The code with which the session was closed. `Default: None`.
 - `close_reason` (`str | None`): The reason the session was closed. `Default: None`.
+- `local_max_data` (`int`): The maximum amount of data this endpoint is prepared to receive. `Default: 0`.
+- `local_data_sent` (`int`): The amount of data this endpoint has sent. `Default: 0`.
+- `peer_max_data` (`int`): The maximum amount of data the peer is prepared to receive. `Default: 0`.
+- `peer_data_sent` (`int`): The amount of data the peer has sent. `Default: 0`.
+- `local_max_streams_bidi` (`int`): The maximum number of bidirectional streams the peer can create. `Default: 0`.
+- `local_streams_bidi_opened` (`int`): The number of bidirectional streams this endpoint has opened. `Default: 0`.
+- `peer_max_streams_bidi` (`int`): The maximum number of bidirectional streams this endpoint can create. `Default: 0`.
+- `peer_streams_bidi_opened` (`int`): The number of bidirectional streams the peer has opened. `Default: 0`.
+- `local_max_streams_uni` (`int`): The maximum number of unidirectional streams the peer can create. `Default: 0`.
+- `local_streams_uni_opened` (`int`): The number of unidirectional streams this endpoint has opened. `Default: 0`.
+- `peer_max_streams_uni` (`int`): The maximum number of unidirectional streams this endpoint can create. `Default: 0`.
+- `peer_streams_uni_opened` (`int`): The number of unidirectional streams the peer has opened. `Default: 0`.
 
 ## StreamInfo Class
 
@@ -92,6 +104,7 @@ These helper functions are available in the `pywebtransport.protocol.utils` modu
 - **`def is_client_initiated_stream(*, stream_id: StreamId) -> bool`**: Checks if a stream was initiated by the client.
 - **`def is_server_initiated_stream(*, stream_id: StreamId) -> bool`**: Checks if a stream was initiated by the server.
 - **`def is_unidirectional_stream(*, stream_id: StreamId) -> bool`**: Checks if a stream is unidirectional.
+- **`def webtransport_code_to_http_code(app_error_code: int) -> int`**: Maps a 32-bit WebTransport application error code to an HTTP/3 error code.
 
 ## See Also
 

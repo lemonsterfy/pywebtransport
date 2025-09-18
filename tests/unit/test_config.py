@@ -9,7 +9,13 @@ from pytest_mock import MockerFixture
 from pywebtransport import CertificateError, ClientConfig, ConfigurationError, ServerConfig
 from pywebtransport import __version__ as real_version
 from pywebtransport.config import ConfigBuilder, _validate_port, _validate_timeout
-from pywebtransport.constants import DEFAULT_CONNECT_TIMEOUT, DEFAULT_SERVER_MAX_CONNECTIONS
+from pywebtransport.constants import (
+    DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
+    DEFAULT_INITIAL_MAX_DATA,
+    DEFAULT_READ_TIMEOUT,
+    DEFAULT_SERVER_MAX_CONNECTIONS,
+)
 
 
 @pytest.fixture
@@ -27,6 +33,8 @@ class TestClientConfig:
         assert config.headers["user-agent"] == f"pywebtransport/{real_version}"
         assert config.congestion_control_algorithm == "cubic"
         assert config.auto_reconnect is False
+        assert config.flow_control_window_size == DEFAULT_FLOW_CONTROL_WINDOW_SIZE
+        assert config.initial_max_data == DEFAULT_INITIAL_MAX_DATA
 
     def test_post_init_preserves_user_agent(self) -> None:
         config = ClientConfig(headers={"user-agent": "custom-agent/1.0"})
@@ -125,13 +133,19 @@ class TestClientConfig:
             ({"congestion_control_algorithm": "invalid_algo"}, "must be one of"),
             ({"connect_timeout": -1}, "invalid timeout value"),
             ({"connection_idle_timeout": 0}, "invalid timeout value"),
+            ({"flow_control_window_size": 0}, "must be positive"),
             ({"max_connections": 0}, "must be positive"),
             ({"max_datagram_size": 0}, "must be 1-65535"),
             ({"max_datagram_size": 65536}, "must be 1-65535"),
             ({"max_incoming_streams": -1}, "must be positive"),
+            ({"max_pending_events_per_session": 0}, "must be positive"),
             ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
             ({"max_streams": 0}, "must be positive"),
+            ({"max_total_pending_events": 0}, "must be positive"),
+            ({"pending_event_ttl": 0}, "invalid timeout value"),
             ({"stream_buffer_size": -10}, "must be positive"),
+            ({"stream_flow_control_increment_bidi": 0}, "must be positive"),
+            ({"stream_flow_control_increment_uni": 0}, "must be positive"),
             ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
         ],
     )
@@ -184,6 +198,8 @@ class TestServerConfig:
         assert config.bind_host == "localhost"
         assert config.max_connections == DEFAULT_SERVER_MAX_CONNECTIONS
         assert config.congestion_control_algorithm == "cubic"
+        assert config.flow_control_window_size == DEFAULT_FLOW_CONTROL_WINDOW_SIZE
+        assert config.initial_max_data == DEFAULT_INITIAL_MAX_DATA
 
     def test_create_factory_method(self, mocker: MockerFixture) -> None:
         mocker.patch(
@@ -237,14 +253,17 @@ class TestServerConfig:
 
         assert result == ("127.0.0.1", 8888)
 
-    def test_merge_method(self) -> None:
-        config1 = ServerConfig(max_connections=100)
-        config2 = ServerConfig(max_connections=200, max_sessions=256)
+    def test_merge_method(self, mocker: MockerFixture) -> None:
+        config1 = ServerConfig(max_connections=100, max_sessions=50)
+        mocker.patch.object(ServerConfig, "validate", return_value=None)
+        invalid_max_sessions: Any = None
+        config2 = ServerConfig(max_connections=200, max_sessions=invalid_max_sessions)
+        mocker.stopall()
 
         merged = config1.merge(other=config2)
 
         assert merged.max_connections == 200
-        assert merged.max_sessions == 256
+        assert merged.max_sessions == 50
         with pytest.raises(TypeError):
             invalid_value: Any = 123
             config1.merge(other=invalid_value)
@@ -272,14 +291,20 @@ class TestServerConfig:
             ({"certfile": "a.pem", "keyfile": ""}, "certfile and keyfile must be provided together"),
             ({"congestion_control_algorithm": "invalid_algo"}, "must be one of"),
             ({"connection_keepalive_timeout": 0}, "invalid timeout value"),
+            ({"flow_control_window_size": 0}, "must be positive"),
             ({"max_connections": 0}, "must be positive"),
             ({"max_datagram_size": 0}, "must be 1-65535"),
             ({"max_datagram_size": 65536}, "must be 1-65535"),
             ({"max_incoming_streams": 0}, "must be positive"),
+            ({"max_pending_events_per_session": 0}, "must be positive"),
             ({"max_sessions": 0}, "must be positive"),
             ({"max_stream_buffer_size": 100, "stream_buffer_size": 200}, "must be >= stream_buffer_size"),
             ({"max_streams_per_connection": 0}, "must be positive"),
+            ({"max_total_pending_events": 0}, "must be positive"),
+            ({"pending_event_ttl": -1.0}, "invalid timeout value"),
             ({"stream_buffer_size": 0}, "must be positive"),
+            ({"stream_flow_control_increment_bidi": 0}, "must be positive"),
+            ({"stream_flow_control_increment_uni": 0}, "must be positive"),
             ({"verify_mode": "INVALID"}, "invalid SSL verify mode"),
         ],
     )
@@ -349,6 +374,32 @@ class TestConfigBuilder:
         assert isinstance(config, ServerConfig)
         assert config.bind_host == "0.0.0.0"
         assert config.max_connections == 500
+
+    def test_builder_with_flow_control(self) -> None:
+        builder = ConfigBuilder(config_type="client")
+
+        config = builder.flow_control(
+            window_size=2048,
+            initial_max_data=1024,
+            stream_increment_bidi=5,
+            window_auto_scale=False,
+        ).build()
+
+        assert isinstance(config, ClientConfig)
+        assert config.flow_control_window_size == 2048
+        assert config.initial_max_data == 1024
+        assert config.stream_flow_control_increment_bidi == 5
+        assert config.flow_control_window_auto_scale is False
+
+    def test_builder_with_partial_params(self, mock_path_exists: Any) -> None:
+        builder = ConfigBuilder()
+        config = builder.timeout(connect=10).security(certfile="cert.pem", keyfile="key.pem").build()
+
+        assert isinstance(config, ClientConfig)
+        assert config.connect_timeout == 10.0
+        assert config.read_timeout == DEFAULT_READ_TIMEOUT
+        assert config.certfile == "cert.pem"
+        assert config.keyfile == "key.pem"
 
     def test_builder_invalid_method_for_type(self) -> None:
         builder = ConfigBuilder(config_type="client")

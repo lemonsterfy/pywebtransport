@@ -20,22 +20,27 @@ Enumeration of connection states.
 
 Enumeration of system event types.
 
+- `CAPSULE_RECEIVED` (`str`): "capsule_received"
 - `CONNECTION_ESTABLISHED` (`str`): "connection_established"
 - `CONNECTION_LOST` (`str`): "connection_lost"
 - `CONNECTION_FAILED` (`str`): "connection_failed"
 - `CONNECTION_CLOSED` (`str`): "connection_closed"
-- `SESSION_REQUEST` (`str`): "session_request"
-- `SESSION_READY` (`str`): "session_ready"
+- `DATAGRAM_ERROR` (`str`): "datagram_error"
+- `DATAGRAM_RECEIVED` (`str`): "datagram_received"
+- `DATAGRAM_SENT` (`str`): "datagram_sent"
+- `PROTOCOL_ERROR` (`str`): "protocol_error"
+- `SETTINGS_RECEIVED` (`str`): "settings_received"
 - `SESSION_CLOSED` (`str`): "session_closed"
 - `SESSION_DRAINING` (`str`): "session_draining"
-- `STREAM_OPENED` (`str`): "stream_opened"
+- `SESSION_MAX_DATA_UPDATED` (`str`): "session_max_data_updated"
+- `SESSION_MAX_STREAMS_BIDI_UPDATED` (`str`): "session_max_streams_bidi_updated"
+- `SESSION_MAX_STREAMS_UNI_UPDATED` (`str`): "session_max_streams_uni_updated"
+- `SESSION_READY` (`str`): "session_ready"
+- `SESSION_REQUEST` (`str`): "session_request"
 - `STREAM_CLOSED` (`str`): "stream_closed"
 - `STREAM_DATA_RECEIVED` (`str`): "stream_data_received"
 - `STREAM_ERROR` (`str`): "stream_error"
-- `DATAGRAM_RECEIVED` (`str`): "datagram_received"
-- `DATAGRAM_SENT` (`str`): "datagram_sent"
-- `DATAGRAM_ERROR` (`str`): "datagram_error"
-- `PROTOCOL_ERROR` (`str`): "protocol_error"
+- `STREAM_OPENED` (`str`): "stream_opened"
 - `TIMEOUT_ERROR` (`str`): "timeout_error"
 
 ## SessionState Class
@@ -115,6 +120,7 @@ A protocol defining the structure of a client configuration object.
 ### Attributes
 
 - `alpn_protocols` (`list[str]`): A list of ALPN protocols to negotiate.
+- `auto_reconnect` (`bool`): Flag to enable or disable client auto-reconnection.
 - `ca_certs` (`str | None`): Path to a CA certificate file for server verification.
 - `certfile` (`str | None`): Path to a certificate file for client authentication.
 - `close_timeout` (`float`): Time in seconds to wait for a graceful connection closure.
@@ -125,23 +131,33 @@ A protocol defining the structure of a client configuration object.
 - `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed.
 - `connection_keepalive_timeout` (`float`): Time in seconds for sending keep-alive packets.
 - `debug` (`bool`): Flag to enable or disable debug mode.
+- `flow_control_window_auto_scale` (`bool`): Flag for flow control window auto-scaling.
+- `flow_control_window_size` (`int`): The size of the flow control window.
 - `headers` (`Headers`): Custom headers for the initial connection request.
+- `initial_max_data` (`int`): Initial max data for flow control.
+- `initial_max_streams_bidi` (`int`): Initial max bidirectional streams.
+- `initial_max_streams_uni` (`int`): Initial max unidirectional streams.
 - `keep_alive` (`bool`): Flag to enable or disable TCP keep-alive.
 - `keyfile` (`str | None`): Path to a private key file for client authentication.
 - `log_level` (`str`): The logging level for the client.
 - `max_connections` (`int`): Maximum number of concurrent connections.
 - `max_datagram_size` (`int`): Maximum size in bytes for an outgoing datagram.
 - `max_incoming_streams` (`int`): Maximum number of concurrent incoming streams.
+- `max_pending_events_per_session` (`int`): Maximum buffered events per pending session.
 - `max_retries` (`int`): Maximum number of retries for a failed connection.
 - `max_retry_delay` (`float`): Maximum delay in seconds between connection retries.
 - `max_stream_buffer_size` (`int`): Maximum size in bytes for a stream buffer.
 - `max_streams` (`int`): Maximum number of concurrent streams per connection.
+- `max_total_pending_events` (`int`): Global maximum for buffered events.
+- `pending_event_ttl` (`float`): TTL for buffered events in seconds.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
 - `retry_backoff` (`float`): The backoff factor for connection retries.
 - `retry_delay` (`float`): Initial delay in seconds between connection retries.
 - `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
 - `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.
 - `stream_creation_timeout` (`float`): Timeout in seconds for creating a new stream.
+- `stream_flow_control_increment_bidi` (`int`): Stream increment for bidirectional flow control.
+- `stream_flow_control_increment_uni` (`int`): Stream increment for unidirectional flow control.
 - `user_agent` (`str`): The User-Agent string for the connection request.
 - `verify_mode` (`ssl.VerifyMode | None`): The SSL verification mode.
 - `write_timeout` (`float | None`): Timeout in seconds for stream write operations.
@@ -243,20 +259,30 @@ A protocol defining the structure of a server configuration object.
 - `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed.
 - `connection_keepalive_timeout` (`float`): Time in seconds for sending keep-alive packets.
 - `debug` (`bool`): Flag to enable or disable debug mode.
+- `flow_control_window_auto_scale` (`bool`): Flag for flow control window auto-scaling.
+- `flow_control_window_size` (`int`): The size of the flow control window.
+- `initial_max_data` (`int`): Initial max data for flow control.
+- `initial_max_streams_bidi` (`int`): Initial max bidirectional streams.
+- `initial_max_streams_uni` (`int`): Initial max unidirectional streams.
 - `keep_alive` (`bool`): Flag to enable or disable TCP keep-alive.
 - `keyfile` (`str`): Path to the server's private key file.
 - `log_level` (`str`): The logging level for the server.
 - `max_connections` (`int`): Maximum number of concurrent client connections.
 - `max_datagram_size` (`int`): Maximum size in bytes for an outgoing datagram.
 - `max_incoming_streams` (`int`): Maximum number of concurrent incoming streams per session.
+- `max_pending_events_per_session` (`int`): Maximum buffered events per pending session.
 - `max_sessions` (`int`): Maximum number of concurrent sessions per connection.
 - `max_stream_buffer_size` (`int`): Maximum size in bytes for a stream buffer.
 - `max_streams_per_connection` (`int`): Maximum number of concurrent streams per connection.
+- `max_total_pending_events` (`int`): Global maximum for buffered events.
 - `middleware` (`list[Any]`): A list of middleware to apply to incoming sessions.
+- `pending_event_ttl` (`float`): TTL for buffered events in seconds.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
 - `session_cleanup_interval` (`float`): Interval in seconds for cleaning up closed sessions.
 - `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
 - `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.
+- `stream_flow_control_increment_bidi` (`int`): Stream increment for bidirectional flow control.
+- `stream_flow_control_increment_uni` (`int`): Stream increment for unidirectional flow control.
 - `verify_mode` (`ssl.VerifyMode`): The SSL verification mode for client certificates.
 - `write_timeout` (`float | None`): Timeout in seconds for stream write operations.
 

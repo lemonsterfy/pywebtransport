@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Self, Type
 from pywebtransport.utils import get_logger, get_timestamp
 
 if TYPE_CHECKING:
-    from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
+    from pywebtransport.datagram.transport import WebTransportDatagramTransport
 
 
 __all__ = ["DatagramMonitor"]
@@ -21,11 +21,11 @@ logger = get_logger(name="datagram.monitor")
 
 
 class DatagramMonitor:
-    """Monitors datagram stream performance and generates alerts."""
+    """Monitors datagram transport performance and generates alerts."""
 
     def __init__(
         self,
-        datagram_stream: WebTransportDatagramDuplexStream,
+        datagram_transport: WebTransportDatagramTransport,
         *,
         monitoring_interval: float = 5.0,
         samples_maxlen: int = 100,
@@ -35,7 +35,7 @@ class DatagramMonitor:
         trend_analysis_window: int = 10,
     ):
         """Initialize the datagram performance monitor."""
-        self._stream = datagram_stream
+        self._transport = datagram_transport
         self._interval = monitoring_interval
         self._monitor_task: asyncio.Task[None] | None = None
         self._samples: deque[dict[str, Any]] = deque(maxlen=samples_maxlen)
@@ -48,11 +48,11 @@ class DatagramMonitor:
     def create(
         cls,
         *,
-        datagram_stream: WebTransportDatagramDuplexStream,
+        datagram_transport: WebTransportDatagramTransport,
         monitoring_interval: float = 5.0,
     ) -> Self:
-        """Factory method to create a new datagram monitor for a stream."""
-        return cls(datagram_stream=datagram_stream, monitoring_interval=monitoring_interval)
+        """Factory method to create a new datagram monitor for a transport."""
+        return cls(datagram_transport=datagram_transport, monitoring_interval=monitoring_interval)
 
     @property
     def is_monitoring(self) -> bool:
@@ -68,7 +68,7 @@ class DatagramMonitor:
             self._monitor_task = asyncio.create_task(self._monitor_loop())
             logger.info(
                 "Datagram monitoring started for session %s...",
-                self._stream.session_id[:12],
+                self._transport.session_id[:12],
             )
         except RuntimeError:
             logger.error(
@@ -93,7 +93,7 @@ class DatagramMonitor:
                 pass
         logger.info(
             "Datagram monitoring stopped for session %s...",
-            self._stream.session_id[:12],
+            self._transport.session_id[:12],
         )
 
     def get_alerts(self) -> list[dict[str, Any]]:
@@ -135,7 +135,10 @@ class DatagramMonitor:
 
     async def _check_alerts(self, *, current_sample: dict[str, Any]) -> None:
         """Check the current sample against configured alert thresholds."""
-        if current_sample["outgoing_queue_size"] > self._stream.outgoing_high_water_mark * self._queue_size_threshold:
+        if (
+            current_sample["outgoing_queue_size"]
+            > self._transport.outgoing_high_water_mark * self._queue_size_threshold
+        ):
             self._alerts.append(
                 {
                     "type": "high_queue_size",
@@ -170,8 +173,8 @@ class DatagramMonitor:
         try:
             while True:
                 await asyncio.sleep(self._interval)
-                stats = self._stream.stats
-                queue_stats = self._stream.get_queue_stats()
+                stats = self._transport.stats
+                queue_stats = self._transport.get_queue_stats()
 
                 sample = {
                     "timestamp": get_timestamp(),

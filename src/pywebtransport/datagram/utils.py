@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from pywebtransport.utils import get_logger, get_timestamp
 
 if TYPE_CHECKING:
-    from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
+    from pywebtransport.datagram.transport import WebTransportDatagramTransport
 
 
 __all__ = [
@@ -29,13 +29,13 @@ def create_heartbeat_datagram() -> bytes:
 
 async def datagram_throughput_test(
     *,
-    datagram_stream: WebTransportDatagramDuplexStream,
+    datagram_transport: WebTransportDatagramTransport,
     duration: float = 10.0,
     datagram_size: int = 1000,
 ) -> dict[str, Any]:
-    """Run a throughput test on the datagram stream."""
-    if datagram_size > datagram_stream.max_datagram_size:
-        raise ValueError(f"datagram_size {datagram_size} exceeds max size {datagram_stream.max_datagram_size}")
+    """Run a throughput test on the datagram transport."""
+    if datagram_size > datagram_transport.max_datagram_size:
+        raise ValueError(f"datagram_size {datagram_size} exceeds max size {datagram_transport.max_datagram_size}")
 
     test_data = b"X" * datagram_size
     start_time = get_timestamp()
@@ -45,7 +45,7 @@ async def datagram_throughput_test(
 
     while get_timestamp() < end_time:
         try:
-            if not await datagram_stream.try_send(data=test_data):
+            if not await datagram_transport.try_send(data=test_data):
                 await asyncio.sleep(0.01)
             sent_count += 1
         except Exception:

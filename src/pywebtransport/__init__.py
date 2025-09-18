@@ -4,7 +4,7 @@ The canonical, async-native WebTransport stack for Python.
 
 from .client import WebTransportClient
 from .config import ClientConfig, ServerConfig
-from .datagram import DatagramReliabilityLayer, StructuredDatagramStream, WebTransportDatagramDuplexStream
+from .datagram import DatagramReliabilityLayer, StructuredDatagramTransport, WebTransportDatagramTransport
 from .events import Event, EventEmitter
 from .exceptions import (
     AuthenticationError,
@@ -71,12 +71,12 @@ __all__ = [
     "StreamError",
     "StreamId",
     "StreamState",
-    "StructuredDatagramStream",
+    "StructuredDatagramTransport",
     "StructuredStream",
     "TimeoutError",
     "URL",
     "WebTransportClient",
-    "WebTransportDatagramDuplexStream",
+    "WebTransportDatagramTransport",
     "WebTransportError",
     "WebTransportReceiveStream",
     "WebTransportSendStream",

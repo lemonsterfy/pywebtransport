@@ -11,7 +11,7 @@ from collections import deque
 from types import TracebackType
 from typing import TYPE_CHECKING, Self, Type
 
-from pywebtransport.datagram.transport import DatagramMessage, WebTransportDatagramDuplexStream
+from pywebtransport.datagram.transport import DatagramMessage, WebTransportDatagramTransport
 from pywebtransport.events import EventType
 from pywebtransport.exceptions import DatagramError, TimeoutError
 from pywebtransport.types import Data
@@ -33,17 +33,17 @@ class _ReliableDatagram(DatagramMessage):
 
 
 class DatagramReliabilityLayer:
-    """Adds a TCP-like reliability layer over an unreliable datagram stream."""
+    """Adds a TCP-like reliability layer over an unreliable datagram transport."""
 
     def __init__(
         self,
-        datagram_stream: WebTransportDatagramDuplexStream,
+        datagram_transport: WebTransportDatagramTransport,
         *,
         ack_timeout: float = 2.0,
         max_retries: int = 5,
     ):
         """Initialize the datagram reliability layer."""
-        self._stream = weakref.ref(datagram_stream)
+        self._transport = weakref.ref(datagram_transport)
         self._ack_timeout = ack_timeout
         self._max_retries = max_retries
         self._closed = False
@@ -59,13 +59,13 @@ class DatagramReliabilityLayer:
     def create(
         cls,
         *,
-        datagram_stream: WebTransportDatagramDuplexStream,
+        datagram_transport: WebTransportDatagramTransport,
         ack_timeout: float = 1.0,
         max_retries: int = 3,
     ) -> Self:
-        """Factory method to create a new datagram reliability layer for a stream."""
+        """Factory method to create a new datagram reliability layer for a transport."""
         return cls(
-            datagram_stream=datagram_stream,
+            datagram_transport=datagram_transport,
             ack_timeout=ack_timeout,
             max_retries=max_retries,
         )
@@ -74,8 +74,8 @@ class DatagramReliabilityLayer:
         """Enter the async context and start background tasks."""
         self._lock = asyncio.Lock()
         self._incoming_queue = asyncio.Queue()
-        if stream := self._stream():
-            stream.on(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
+        if transport := self._transport():
+            transport.on(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
         self._start_background_tasks()
         return self
 
@@ -94,8 +94,8 @@ class DatagramReliabilityLayer:
             return
         self._closed = True
 
-        if stream := self._stream():
-            stream.off(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
+        if transport := self._transport():
+            transport.off(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
 
         if self._retry_task:
             self._retry_task.cancel()
@@ -130,7 +130,7 @@ class DatagramReliabilityLayer:
         if self._lock is None:
             raise DatagramError("Reliability layer has not been activated.")
 
-        stream = self._get_stream()
+        transport = self._get_transport()
         data_bytes = ensure_bytes(data=data)
 
         async with self._lock:
@@ -140,15 +140,15 @@ class DatagramReliabilityLayer:
             datagram = _ReliableDatagram(data=data_payload, sequence=seq)
             self._pending_acks[seq] = datagram
 
-        await stream._send_framed_data(message_type="DATA", payload=data_payload)
+        await transport._send_framed_data(message_type="DATA", payload=data_payload)
         logger.debug("Sent reliable datagram with sequence %d", seq)
 
-    def _get_stream(self) -> WebTransportDatagramDuplexStream:
-        """Get the underlying stream or raise an error if it is gone or closed."""
-        stream = self._stream()
-        if self._closed or not stream or stream.is_closed:
-            raise DatagramError("Reliability layer or underlying stream is closed.")
-        return stream
+    def _get_transport(self) -> WebTransportDatagramTransport:
+        """Get the underlying transport or raise an error if it is gone or closed."""
+        transport = self._transport()
+        if self._closed or not transport or transport.is_closed:
+            raise DatagramError("Reliability layer or underlying transport is closed.")
+        return transport
 
     async def _handle_ack_message(self, *, payload: bytes) -> None:
         """Handle an incoming ACK message."""
@@ -174,8 +174,8 @@ class DatagramReliabilityLayer:
         data = payload[4:]
 
         try:
-            stream = self._get_stream()
-            await stream._send_framed_data(message_type="ACK", payload=str(seq).encode("utf-8"))
+            transport = self._get_transport()
+            await transport._send_framed_data(message_type="ACK", payload=str(seq).encode("utf-8"))
         except DatagramError as e:
             logger.warning("Failed to send ACK for sequence %d: %s", seq, e, exc_info=True)
             return
@@ -188,7 +188,7 @@ class DatagramReliabilityLayer:
         await self._incoming_queue.put(data)
 
     async def _on_datagram_received(self, event: Event) -> None:
-        """Handle all incoming datagrams from the underlying stream."""
+        """Handle all incoming datagrams from the underlying transport."""
         if self._incoming_queue is None:
             return
         if not isinstance(event.data, dict):
@@ -247,9 +247,9 @@ class DatagramReliabilityLayer:
                     continue
 
                 try:
-                    stream = self._get_stream()
+                    transport = self._get_transport()
                 except DatagramError:
-                    logger.warning("Could not retry datagrams, stream is closed.")
+                    logger.warning("Could not retry datagrams, transport is closed.")
                     self._closed = True
                     return
 
@@ -259,7 +259,7 @@ class DatagramReliabilityLayer:
                             async with self._lock:
                                 datagram.retry_count += 1
                                 datagram.timestamp = get_timestamp()
-                            tg.create_task(stream._send_framed_data(message_type="DATA", payload=datagram.data))
+                            tg.create_task(transport._send_framed_data(message_type="DATA", payload=datagram.data))
                             logger.debug(
                                 "Retrying sequence %s, attempt %d",
                                 datagram.sequence,

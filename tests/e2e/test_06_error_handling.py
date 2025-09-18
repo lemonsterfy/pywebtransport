@@ -39,7 +39,13 @@ async def test_connection_timeout() -> bool:
     """Tests the handling of a connection timeout to an unreachable port."""
     logger.info("--- Test 06A: Connection Timeout ---")
     unreachable_url = f"https://{SERVER_HOST}:9999/"
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=2.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=2.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     logger.info("Attempting connection to unreachable server: %s", unreachable_url)
     start_time = time.time()
@@ -64,7 +70,13 @@ async def test_invalid_server_address() -> bool:
         "https://invalid-hostname-for-testing.local/",
         "http://127.0.0.1:4433/",
     ]
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=3.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=3.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -85,7 +97,13 @@ async def test_invalid_server_address() -> bool:
 async def test_stream_errors() -> bool:
     """Tests error handling for various stream operations."""
     logger.info("--- Test 06C: Stream Error Handling ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -114,7 +132,13 @@ async def test_stream_errors() -> bool:
 async def test_read_timeout() -> bool:
     """Tests the handling of a stream read timeout."""
     logger.info("--- Test 06D: Stream Read Timeout ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, read_timeout=1.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        read_timeout=1.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -141,7 +165,13 @@ async def test_read_timeout() -> bool:
 async def test_session_closure_handling() -> bool:
     """Tests that operations on a closed session correctly raise errors."""
     logger.info("--- Test 06E: Operations on Closed Session ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -163,8 +193,8 @@ async def test_session_closure_handling() -> bool:
 
             logger.info("Testing datagram send on closed session...")
             try:
-                datagrams = await session.datagrams
-                await datagrams.send(data=b"This should fail")
+                datagram_transport = await session.datagrams
+                await datagram_transport.send(data=b"This should fail")
                 logger.error("FAILURE: Datagram send on closed session should have failed.")
                 return False
             except (DatagramError, SessionError, ClientError):
@@ -182,19 +212,25 @@ async def test_session_closure_handling() -> bool:
 async def test_datagram_errors() -> bool:
     """Tests error handling for datagram operations, like oversized payloads."""
     logger.info("--- Test 06F: Datagram Error Handling ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
-            max_size = datagrams.max_datagram_size
+            datagram_transport = await session.datagrams
+            max_size = datagram_transport.max_datagram_size
             logger.info("Max datagram size: %s bytes.", max_size)
 
             logger.info("Testing oversized datagram...")
             try:
                 oversized_data = b"X" * (max_size + 1)
-                await datagrams.send(data=oversized_data)
+                await datagram_transport.send(data=oversized_data)
                 logger.error("FAILURE: Oversized datagram send should have failed.")
                 return False
             except DatagramError:
@@ -212,7 +248,13 @@ async def test_datagram_errors() -> bool:
 async def test_resource_exhaustion() -> bool:
     """Tests handling of resource exhaustion, specifically the stream limit."""
     logger.info("--- Test 06G: Resource Exhaustion (Stream Limit) ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -244,7 +286,13 @@ async def test_resource_exhaustion() -> bool:
 async def test_malformed_operations() -> bool:
     """Tests handling of malformed API operations."""
     logger.info("--- Test 06H: Malformed Operations ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -253,7 +301,7 @@ async def test_malformed_operations() -> bool:
 
             logger.info("Testing invalid write data (None)...")
             try:
-                await stream.write(data=None)  # type: ignore  # Expected failure with None input
+                await stream.write(data=None)  # type: ignore
                 logger.error("FAILURE: Writing None should have failed.")
                 return False
             except TypeError:

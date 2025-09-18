@@ -5,15 +5,7 @@ from typing import Any, Type
 
 import pytest
 
-from pywebtransport import (
-    ConnectionState,
-    EventType,
-    Headers,
-    Serializer,
-    SessionState,
-    StreamDirection,
-    StreamState,
-)
+from pywebtransport import ConnectionState, EventType, Headers, Serializer, SessionState, StreamDirection, StreamState
 from pywebtransport.types import (
     AuthHandlerProtocol,
     BidirectionalStreamProtocol,
@@ -45,15 +37,28 @@ class TestEnumerations:
     @pytest.mark.parametrize(
         "member, expected_value",
         [
+            (EventType.CAPSULE_RECEIVED, "capsule_received"),
+            (EventType.CONNECTION_CLOSED, "connection_closed"),
             (EventType.CONNECTION_ESTABLISHED, "connection_established"),
             (EventType.CONNECTION_FAILED, "connection_failed"),
             (EventType.CONNECTION_LOST, "connection_lost"),
-            (EventType.CONNECTION_CLOSED, "connection_closed"),
-            (EventType.SESSION_REQUEST, "session_request"),
-            (EventType.SESSION_READY, "session_ready"),
-            (EventType.STREAM_OPENED, "stream_opened"),
+            (EventType.DATAGRAM_ERROR, "datagram_error"),
             (EventType.DATAGRAM_RECEIVED, "datagram_received"),
+            (EventType.DATAGRAM_SENT, "datagram_sent"),
             (EventType.PROTOCOL_ERROR, "protocol_error"),
+            (EventType.SETTINGS_RECEIVED, "settings_received"),
+            (EventType.SESSION_CLOSED, "session_closed"),
+            (EventType.SESSION_DRAINING, "session_draining"),
+            (EventType.SESSION_MAX_DATA_UPDATED, "session_max_data_updated"),
+            (EventType.SESSION_MAX_STREAMS_BIDI_UPDATED, "session_max_streams_bidi_updated"),
+            (EventType.SESSION_MAX_STREAMS_UNI_UPDATED, "session_max_streams_uni_updated"),
+            (EventType.SESSION_READY, "session_ready"),
+            (EventType.SESSION_REQUEST, "session_request"),
+            (EventType.STREAM_CLOSED, "stream_closed"),
+            (EventType.STREAM_DATA_RECEIVED, "stream_data_received"),
+            (EventType.STREAM_ERROR, "stream_error"),
+            (EventType.STREAM_OPENED, "stream_opened"),
+            (EventType.TIMEOUT_ERROR, "timeout_error"),
         ],
     )
     def test_event_type(self, member: EventType, expected_value: str) -> None:
@@ -166,6 +171,7 @@ class TestRuntimeCheckableProtocols:
 
     class GoodClientConfig:
         alpn_protocols: list[str] = ["h3"]
+        auto_reconnect: bool = False
         ca_certs: str | None = None
         certfile: str | None = None
         close_timeout: float = 2.0
@@ -176,23 +182,33 @@ class TestRuntimeCheckableProtocols:
         connection_idle_timeout: float = 60.0
         connection_keepalive_timeout: float = 30.0
         debug: bool = False
+        flow_control_window_auto_scale: bool = True
+        flow_control_window_size: int = 1024
         headers: Headers = {}
+        initial_max_data: int = 0
+        initial_max_streams_bidi: int = 0
+        initial_max_streams_uni: int = 0
         keep_alive: bool = True
         keyfile: str | None = None
         log_level: str = "INFO"
         max_connections: int = 100
         max_datagram_size: int = 65535
         max_incoming_streams: int = 100
+        max_pending_events_per_session: int = 16
         max_retries: int = 3
         max_retry_delay: float = 30.0
         max_stream_buffer_size: int = 1024 * 1024
         max_streams: int = 100
+        max_total_pending_events: int = 1000
+        pending_event_ttl: float = 5.0
         read_timeout: float | None = 5.0
         retry_backoff: float = 2.0
         retry_delay: float = 1.0
         stream_buffer_size: int = 65536
         stream_cleanup_interval: float = 15.0
         stream_creation_timeout: float = 10.0
+        stream_flow_control_increment_bidi: int = 10
+        stream_flow_control_increment_uni: int = 10
         user_agent: str = "pywebtransport"
         verify_mode: ssl.VerifyMode | None = ssl.CERT_REQUIRED
         write_timeout: float | None = 5.0
@@ -235,20 +251,30 @@ class TestRuntimeCheckableProtocols:
         connection_idle_timeout: float = 60.0
         connection_keepalive_timeout: float = 30.0
         debug: bool = False
+        flow_control_window_auto_scale: bool = True
+        flow_control_window_size: int = 1024
+        initial_max_data: int = 0
+        initial_max_streams_bidi: int = 0
+        initial_max_streams_uni: int = 0
         keep_alive: bool = True
         keyfile: str = "key.pem"
         log_level: str = "INFO"
         max_connections: int = 1000
         max_datagram_size: int = 65535
         max_incoming_streams: int = 100
+        max_pending_events_per_session: int = 16
         max_sessions: int = 10000
         max_stream_buffer_size: int = 1024 * 1024
         max_streams_per_connection: int = 100
+        max_total_pending_events: int = 1000
         middleware: list = []
+        pending_event_ttl: float = 5.0
         read_timeout: float | None = 30.0
         session_cleanup_interval: float = 60.0
         stream_buffer_size: int = 65536
         stream_cleanup_interval: float = 15.0
+        stream_flow_control_increment_bidi: int = 10
+        stream_flow_control_increment_uni: int = 10
         verify_mode: ssl.VerifyMode = ssl.CERT_NONE
         write_timeout: float | None = 30.0
 

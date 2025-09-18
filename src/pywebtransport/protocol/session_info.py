@@ -39,6 +39,7 @@ class StreamInfo:
             duration = f" (duration: {self.closed_at - self.created_at:.2f}s)"
         else:
             duration = f" (active: {get_timestamp() - self.created_at:.2f}s)"
+
         return (
             f"Stream {self.stream_id} [{self.state}] "
             f"direction={self.direction} session={self.session_id} "
@@ -60,6 +61,18 @@ class WebTransportSessionInfo:
     closed_at: float | None = None
     close_code: int | None = None
     close_reason: str | None = None
+    local_max_data: int = 0
+    local_data_sent: int = 0
+    peer_max_data: int = 0
+    peer_data_sent: int = 0
+    local_max_streams_bidi: int = 0
+    local_streams_bidi_opened: int = 0
+    peer_max_streams_bidi: int = 0
+    peer_streams_bidi_opened: int = 0
+    local_max_streams_uni: int = 0
+    local_streams_uni_opened: int = 0
+    peer_max_streams_uni: int = 0
+    peer_streams_uni_opened: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the session information to a dictionary."""
@@ -72,4 +85,5 @@ class WebTransportSessionInfo:
             duration = f" (duration: {self.closed_at - self.ready_at:.2f}s)"
         elif self.ready_at:
             duration = f" (active: {get_timestamp() - self.ready_at:.2f}s)"
+
         return f"Session {self.session_id} [{self.state}] " f"path={self.path} stream={self.stream_id}{duration}"

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pywebtransport.types import Headers, StreamId
 
 __all__ = [
-    "DataReceived",
+    "CapsuleReceived",
     "DatagramReceived",
     "H3Event",
     "HeadersReceived",
@@ -22,12 +22,12 @@ class H3Event:
 
 
 @dataclass(kw_only=True)
-class DataReceived(H3Event):
-    """Fired when a generic H3 DATA frame is received."""
+class CapsuleReceived(H3Event):
+    """Fired when an HTTP Capsule is received on a stream."""
 
-    data: bytes
+    capsule_data: bytes
+    capsule_type: int
     stream_id: StreamId
-    stream_ended: bool
 
 
 @dataclass(kw_only=True)
