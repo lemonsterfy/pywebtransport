@@ -8,8 +8,8 @@ import pytest
 from pytest_mock import MockerFixture
 
 from pywebtransport import SerializationError, Serializer
-from pywebtransport.datagram import StructuredDatagramStream
-from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
+from pywebtransport.datagram import StructuredDatagramTransport
+from pywebtransport.datagram.transport import WebTransportDatagramTransport
 
 
 class MockMsgA:
@@ -21,8 +21,8 @@ class MockMsgB:
 
 
 @pytest.fixture
-def mock_datagram_stream(mocker: MockerFixture) -> AsyncMock:
-    mock = mocker.create_autospec(WebTransportDatagramDuplexStream, spec_set=True, instance=True)
+def mock_datagram_transport(mocker: MockerFixture) -> AsyncMock:
+    mock = mocker.create_autospec(WebTransportDatagramTransport, spec_set=True, instance=True)
     mock.receive = AsyncMock()
     mock.send = AsyncMock()
     mock.close = AsyncMock()
@@ -40,46 +40,46 @@ def registry() -> dict[int, Type[Any]]:
 
 
 @pytest.fixture
-def structured_stream(
-    mock_datagram_stream: AsyncMock,
+def structured_transport(
+    mock_datagram_transport: AsyncMock,
     mock_serializer: MagicMock,
     registry: dict[int, Type[Any]],
-) -> StructuredDatagramStream:
-    return StructuredDatagramStream(
-        datagram_stream=mock_datagram_stream,
+) -> StructuredDatagramTransport:
+    return StructuredDatagramTransport(
+        datagram_transport=mock_datagram_transport,
         serializer=mock_serializer,
         registry=registry,
     )
 
 
-class TestStructuredDatagramStream:
+class TestStructuredDatagramTransport:
     def test_init(
         self,
-        structured_stream: StructuredDatagramStream,
-        mock_datagram_stream: AsyncMock,
+        structured_transport: StructuredDatagramTransport,
+        mock_datagram_transport: AsyncMock,
         mock_serializer: MagicMock,
         registry: dict[int, Type[Any]],
     ) -> None:
         expected_class_to_id = {MockMsgA: 1, MockMsgB: 2}
 
-        assert structured_stream._datagram_stream is mock_datagram_stream
-        assert structured_stream._serializer is mock_serializer
-        assert structured_stream._registry is registry
-        assert structured_stream._class_to_id == expected_class_to_id
+        assert structured_transport._datagram_transport is mock_datagram_transport
+        assert structured_transport._serializer is mock_serializer
+        assert structured_transport._registry is registry
+        assert structured_transport._class_to_id == expected_class_to_id
 
     async def test_close_method(
         self,
-        structured_stream: StructuredDatagramStream,
-        mock_datagram_stream: AsyncMock,
+        structured_transport: StructuredDatagramTransport,
+        mock_datagram_transport: AsyncMock,
     ) -> None:
-        await structured_stream.close()
+        await structured_transport.close()
 
-        mock_datagram_stream.close.assert_awaited_once()
+        mock_datagram_transport.close.assert_awaited_once()
 
     async def test_send_obj_successful(
         self,
-        structured_stream: StructuredDatagramStream,
-        mock_datagram_stream: AsyncMock,
+        structured_transport: StructuredDatagramTransport,
+        mock_datagram_transport: AsyncMock,
         mock_serializer: MagicMock,
     ) -> None:
         obj_to_send = MockMsgA()
@@ -87,47 +87,47 @@ class TestStructuredDatagramStream:
         serialized_payload = b"serialized_data"
         mock_serializer.serialize.return_value = serialized_payload
 
-        await structured_stream.send_obj(obj=obj_to_send, priority=5, ttl=10.0)
+        await structured_transport.send_obj(obj=obj_to_send, priority=5, ttl=10.0)
 
         mock_serializer.serialize.assert_called_once_with(obj=obj_to_send)
         header = struct.pack("!H", type_id)
-        mock_datagram_stream.send.assert_awaited_once_with(data=header + serialized_payload, priority=5, ttl=10.0)
+        mock_datagram_transport.send.assert_awaited_once_with(data=header + serialized_payload, priority=5, ttl=10.0)
 
     async def test_receive_obj_successful(
         self,
-        structured_stream: StructuredDatagramStream,
-        mock_datagram_stream: AsyncMock,
+        structured_transport: StructuredDatagramTransport,
+        mock_datagram_transport: AsyncMock,
         mock_serializer: MagicMock,
     ) -> None:
         type_id = 2
         message_class = MockMsgB
         serialized_payload = b"serialized_data_b"
         header = struct.pack("!H", type_id)
-        mock_datagram_stream.receive.return_value = header + serialized_payload
+        mock_datagram_transport.receive.return_value = header + serialized_payload
         deserialized_obj = MockMsgB()
         mock_serializer.deserialize.return_value = deserialized_obj
 
-        result = await structured_stream.receive_obj(timeout=5.0)
+        result = await structured_transport.receive_obj(timeout=5.0)
 
-        mock_datagram_stream.receive.assert_awaited_once_with(timeout=5.0)
+        mock_datagram_transport.receive.assert_awaited_once_with(timeout=5.0)
         mock_serializer.deserialize.assert_called_once_with(data=serialized_payload, obj_type=message_class)
         assert result is deserialized_obj
 
     @pytest.mark.parametrize("closed_status", [True, False])
     def test_is_closed_property(
         self,
-        structured_stream: StructuredDatagramStream,
-        mock_datagram_stream: AsyncMock,
+        structured_transport: StructuredDatagramTransport,
+        mock_datagram_transport: AsyncMock,
         closed_status: bool,
     ) -> None:
-        type(mock_datagram_stream).is_closed = closed_status
+        type(mock_datagram_transport).is_closed = closed_status
 
-        assert structured_stream.is_closed is closed_status
+        assert structured_transport.is_closed is closed_status
 
     async def test_send_obj_unregistered_raises_error(
         self,
-        structured_stream: StructuredDatagramStream,
-        mock_datagram_stream: AsyncMock,
+        structured_transport: StructuredDatagramTransport,
+        mock_datagram_transport: AsyncMock,
         mock_serializer: MagicMock,
     ) -> None:
         class UnregisteredMsg:
@@ -136,25 +136,25 @@ class TestStructuredDatagramStream:
         obj_to_send = UnregisteredMsg()
 
         with pytest.raises(SerializationError) as exc_info:
-            await structured_stream.send_obj(obj=obj_to_send)
+            await structured_transport.send_obj(obj=obj_to_send)
 
         assert "Object of type 'UnregisteredMsg' is not registered" in str(exc_info.value)
         mock_serializer.serialize.assert_not_called()
-        mock_datagram_stream.send.assert_not_awaited()
+        mock_datagram_transport.send.assert_not_awaited()
 
     async def test_receive_obj_unknown_type_id_raises_error(
         self,
-        structured_stream: StructuredDatagramStream,
-        mock_datagram_stream: AsyncMock,
+        structured_transport: StructuredDatagramTransport,
+        mock_datagram_transport: AsyncMock,
         mock_serializer: MagicMock,
     ) -> None:
         unknown_type_id = 99
         header = struct.pack("!H", unknown_type_id)
         payload = b"some_payload"
-        mock_datagram_stream.receive.return_value = header + payload
+        mock_datagram_transport.receive.return_value = header + payload
 
         with pytest.raises(SerializationError) as exc_info:
-            await structured_stream.receive_obj()
+            await structured_transport.receive_obj()
 
         assert f"Received unknown message type ID: {unknown_type_id}" in str(exc_info.value)
         mock_serializer.deserialize.assert_not_called()

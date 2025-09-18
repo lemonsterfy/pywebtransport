@@ -92,6 +92,9 @@ class TestWebTransportSessionInfo:
         assert session_info.headers == {}
         assert session_info.ready_at is None
         assert session_info.closed_at is None
+        assert session_info.local_max_data == 0
+        assert session_info.peer_max_streams_bidi == 0
+        assert session_info.local_streams_uni_opened == 0
 
     @pytest.mark.parametrize(
         "ready_at, closed_at, timestamp, expected_duration_str",
@@ -134,6 +137,8 @@ class TestWebTransportSessionInfo:
             created_at=2000.0,
             headers=headers,
             ready_at=2001.0,
+            local_max_data=1024,
+            peer_streams_bidi_opened=5,
         )
 
         session_dict = session_info.to_dict()
@@ -143,3 +148,6 @@ class TestWebTransportSessionInfo:
         assert session_dict["state"] == SessionState.CONNECTED
         assert session_dict["headers"] == headers
         assert session_dict["ready_at"] == 2001.0
+        assert session_dict["local_max_data"] == 1024
+        assert session_dict["peer_streams_bidi_opened"] == 5
+        assert session_dict["peer_data_sent"] == 0

@@ -53,6 +53,9 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
     )
 
     try:
@@ -83,20 +86,20 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
             logger.info("   - SUCCESS: StructuredStream echo correct.")
             await s_stream.close()
 
-            logger.info("[%s] Testing StructuredDatagramStream...", serializer_name.upper())
-            s_datagram = await session.create_structured_datagram_stream(
+            logger.info("[%s] Testing StructuredDatagramTransport...", serializer_name.upper())
+            s_datagram_transport = await session.create_structured_datagram_transport(
                 serializer=serializer, registry=MESSAGE_REGISTRY
             )
 
             datagram_obj = UserData(id=99, name="datagram_user", email="dg@example.com")
             logger.info("   - Sending datagram object: %s", datagram_obj)
-            await s_datagram.send_obj(obj=datagram_obj)
-            received_datagram_obj = await s_datagram.receive_obj(timeout=5.0)
+            await s_datagram_transport.send_obj(obj=datagram_obj)
+            received_datagram_obj = await s_datagram_transport.receive_obj(timeout=5.0)
             logger.info("   - Received datagram object: %s", received_datagram_obj)
             if datagram_obj != received_datagram_obj:
                 logger.error("FAILURE: Datagram object mismatch.")
                 return False
-            logger.info("   - SUCCESS: StructuredDatagramStream echo correct.")
+            logger.info("   - SUCCESS: StructuredDatagramTransport echo correct.")
 
             return True
 

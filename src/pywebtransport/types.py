@@ -92,22 +92,27 @@ class ConnectionState(StrEnum):
 class EventType(StrEnum):
     """Enumeration of system event types."""
 
+    CAPSULE_RECEIVED = "capsule_received"
     CONNECTION_ESTABLISHED = "connection_established"
     CONNECTION_LOST = "connection_lost"
     CONNECTION_FAILED = "connection_failed"
     CONNECTION_CLOSED = "connection_closed"
-    SESSION_REQUEST = "session_request"
-    SESSION_READY = "session_ready"
+    DATAGRAM_ERROR = "datagram_error"
+    DATAGRAM_RECEIVED = "datagram_received"
+    DATAGRAM_SENT = "datagram_sent"
+    PROTOCOL_ERROR = "protocol_error"
+    SETTINGS_RECEIVED = "settings_received"
     SESSION_CLOSED = "session_closed"
     SESSION_DRAINING = "session_draining"
-    STREAM_OPENED = "stream_opened"
+    SESSION_MAX_DATA_UPDATED = "session_max_data_updated"
+    SESSION_MAX_STREAMS_BIDI_UPDATED = "session_max_streams_bidi_updated"
+    SESSION_MAX_STREAMS_UNI_UPDATED = "session_max_streams_uni_updated"
+    SESSION_READY = "session_ready"
+    SESSION_REQUEST = "session_request"
     STREAM_CLOSED = "stream_closed"
     STREAM_DATA_RECEIVED = "stream_data_received"
     STREAM_ERROR = "stream_error"
-    DATAGRAM_RECEIVED = "datagram_received"
-    DATAGRAM_SENT = "datagram_sent"
-    DATAGRAM_ERROR = "datagram_error"
-    PROTOCOL_ERROR = "protocol_error"
+    STREAM_OPENED = "stream_opened"
     TIMEOUT_ERROR = "timeout_error"
 
 
@@ -192,6 +197,7 @@ class ClientConfigProtocol(Protocol):
     """A protocol defining the structure of a client configuration object."""
 
     alpn_protocols: list[str]
+    auto_reconnect: bool
     ca_certs: str | None
     certfile: str | None
     close_timeout: float
@@ -202,23 +208,33 @@ class ClientConfigProtocol(Protocol):
     connection_idle_timeout: float
     connection_keepalive_timeout: float
     debug: bool
+    flow_control_window_auto_scale: bool
+    flow_control_window_size: int
     headers: Headers
+    initial_max_data: int
+    initial_max_streams_bidi: int
+    initial_max_streams_uni: int
     keep_alive: bool
     keyfile: str | None
     log_level: str
     max_connections: int
     max_datagram_size: int
     max_incoming_streams: int
+    max_pending_events_per_session: int
     max_retries: int
     max_retry_delay: float
     max_stream_buffer_size: int
     max_streams: int
+    max_total_pending_events: int
+    pending_event_ttl: float
     read_timeout: float | None
     retry_backoff: float
     retry_delay: float
     stream_buffer_size: int
     stream_cleanup_interval: float
     stream_creation_timeout: float
+    stream_flow_control_increment_bidi: int
+    stream_flow_control_increment_uni: int
     user_agent: str
     verify_mode: ssl.VerifyMode | None
     write_timeout: float | None
@@ -356,20 +372,30 @@ class ServerConfigProtocol(Protocol):
     connection_idle_timeout: float
     connection_keepalive_timeout: float
     debug: bool
+    flow_control_window_auto_scale: bool
+    flow_control_window_size: int
+    initial_max_data: int
+    initial_max_streams_bidi: int
+    initial_max_streams_uni: int
     keep_alive: bool
     keyfile: str
     log_level: str
     max_connections: int
     max_datagram_size: int
     max_incoming_streams: int
+    max_pending_events_per_session: int
     max_sessions: int
     max_stream_buffer_size: int
     max_streams_per_connection: int
+    max_total_pending_events: int
     middleware: list[Any]
+    pending_event_ttl: float
     read_timeout: float | None
     session_cleanup_interval: float
     stream_buffer_size: int
     stream_cleanup_interval: float
+    stream_flow_control_increment_bidi: int
+    stream_flow_control_increment_uni: int
     verify_mode: ssl.VerifyMode
     write_timeout: float | None
 

@@ -8,6 +8,7 @@ from typing import Any
 
 from aioquic.quic.configuration import QuicConfiguration
 
+from pywebtransport.constants import ErrorCodes
 from pywebtransport.types import ConnectionState, SessionState, StreamDirection, StreamId
 from pywebtransport.utils import get_logger, validate_stream_id
 
@@ -22,6 +23,7 @@ __all__ = [
     "is_client_initiated_stream",
     "is_server_initiated_stream",
     "is_unidirectional_stream",
+    "webtransport_code_to_http_code",
 ]
 
 logger = get_logger(name="protocol.utils")
@@ -65,6 +67,7 @@ def create_quic_configuration(*, is_client: bool = True, **kwargs: Any) -> QuicC
         "congestion_control_algorithm": kwargs["congestion_control_algorithm"],
         "max_datagram_frame_size": kwargs["max_datagram_size"],
     }
+
     return QuicConfiguration(is_client=is_client, **config_params)
 
 
@@ -104,3 +107,11 @@ def is_server_initiated_stream(*, stream_id: StreamId) -> bool:
 def is_unidirectional_stream(*, stream_id: StreamId) -> bool:
     """Check if a stream is unidirectional."""
     return (stream_id & 0x2) != 0
+
+
+def webtransport_code_to_http_code(app_error_code: int) -> int:
+    """Maps a 32-bit WebTransport application error code to an HTTP/3 error code."""
+    if not (0x0 <= app_error_code <= 0xFFFFFFFF):
+        raise ValueError("Application error code must be a 32-bit unsigned integer.")
+
+    return ErrorCodes.WT_APPLICATION_ERROR_FIRST + app_error_code + (app_error_code // 0x1E)

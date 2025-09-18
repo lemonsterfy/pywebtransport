@@ -25,6 +25,9 @@ def default_client_config() -> ClientConfig:
     return ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=15.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
     )
 
 
@@ -34,6 +37,9 @@ def concurrency_client_config() -> ClientConfig:
     return ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=30.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
     )
 
 

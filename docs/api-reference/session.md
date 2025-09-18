@@ -17,7 +17,7 @@ The primary user-facing class that represents a single, long-lived logical conne
 ### Properties
 
 - `connection` (`WebTransportConnection | None`): A weak reference to the parent `WebTransportConnection`.
-- `datagrams` (`WebTransportDatagramDuplexStream`): Asynchronously accesses the datagram stream, creating it on first use.
+- `datagrams` (`WebTransportDatagramTransport`): Asynchronously accesses the datagram transport, creating it on first use.
 - `headers` (`Headers`): A copy of the initial HTTP headers used to establish the session.
 - `is_closed` (`bool`): `True` if the session is fully closed.
 - `is_ready` (`bool`): `True` if the session is connected and ready for use.
@@ -30,7 +30,7 @@ The primary user-facing class that represents a single, long-lived logical conne
 
 - **`async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None`**: Closes the session.
 - **`async def create_bidirectional_stream(self, *, timeout: float | None = None) -> WebTransportStream`**: Creates and returns a new bidirectional stream.
-- **`async def create_structured_datagram_stream(self, *, serializer: Serializer, registry: dict[int, Type[Any]]) -> StructuredDatagramStream`**: Creates a new structured datagram stream for sending and receiving objects.
+- **`async def create_structured_datagram_transport(self, *, serializer: Serializer, registry: dict[int, Type[Any]]) -> StructuredDatagramTransport`**: Creates a new structured datagram transport for sending and receiving objects.
 - **`async def create_structured_stream(self, *, serializer: Serializer, registry: dict[int, Type[Any]], timeout: float | None = None) -> StructuredStream`**: Creates a new structured bidirectional stream for sending and receiving objects.
 - **`async def create_unidirectional_stream(self, *, timeout: float | None = None) -> WebTransportSendStream`**: Creates and returns a new unidirectional (send-only) stream.
 - **`async def debug_state(self) -> dict[str, Any]`**: Returns a detailed, structured snapshot of the session's internal state for debugging.

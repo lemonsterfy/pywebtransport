@@ -11,15 +11,12 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    container:
+      image: python:3.12-slim
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -32,20 +29,16 @@ jobs:
 
   test:
     needs: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-
+    container:
+      image: python:${{ matrix.python-version }}-slim
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -62,8 +55,10 @@ jobs:
 
   report:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'push'
+    container:
+      image: python:3.12-slim
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

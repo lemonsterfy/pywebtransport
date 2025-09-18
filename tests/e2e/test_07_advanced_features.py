@@ -29,7 +29,13 @@ logger = logging.getLogger("test_advanced_features")
 async def test_session_statistics() -> bool:
     """Tests the retrieval and correctness of session-level statistics."""
     logger.info("--- Test 07A: Session Statistics ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -41,9 +47,9 @@ async def test_session_statistics() -> bool:
                 await stream.write_all(data=f"Stats test {i + 1}".encode())
                 await stream.read_all()
 
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
             for i in range(5):
-                await datagrams.send(data=f"Datagram {i + 1}".encode())
+                await datagram_transport.send(data=f"Datagram {i + 1}".encode())
 
             await asyncio.sleep(0.1)
             final_stats = await session.get_session_stats()
@@ -68,7 +74,13 @@ async def test_session_statistics() -> bool:
 async def test_connection_info() -> bool:
     """Tests the retrieval of underlying connection information."""
     logger.info("--- Test 07B: Connection Information ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -99,7 +111,13 @@ async def test_connection_info() -> bool:
 async def test_client_statistics() -> bool:
     """Tests the retrieval of client-wide statistics across multiple connections."""
     logger.info("--- Test 07C: Client-Wide Statistics ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -131,7 +149,13 @@ async def test_client_statistics() -> bool:
 async def test_stream_management() -> bool:
     """Tests advanced stream management features."""
     logger.info("--- Test 07D: Stream Management ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -169,21 +193,27 @@ async def test_stream_management() -> bool:
 
 
 async def test_datagram_statistics() -> bool:
-    """Tests retrieval of detailed statistics for the datagram stream."""
+    """Tests retrieval of detailed statistics for the datagram transport."""
     logger.info("--- Test 07E: Datagram Statistics ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagrams = await session.datagrams
+            datagram_transport = await session.datagrams
 
             logger.info("Sending datagrams to generate statistics...")
             for i in range(5):
-                await datagrams.send(data=f"Datagram stats test {i}".encode())
+                await datagram_transport.send(data=f"Datagram stats test {i}".encode())
 
             await asyncio.sleep(0.1)
-            final_stats = datagrams.stats
+            final_stats = datagram_transport.stats
 
             logger.info("Final datagram statistics:")
             logger.info("   - Datagrams Sent: %s", final_stats.get("datagrams_sent", 0))
@@ -203,7 +233,13 @@ async def test_datagram_statistics() -> bool:
 async def test_performance_monitoring() -> bool:
     """Tests a simple performance monitoring loop over multiple transfers."""
     logger.info("--- Test 07F: Performance Monitoring ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -232,7 +268,13 @@ async def test_performance_monitoring() -> bool:
 async def test_session_lifecycle_events() -> bool:
     """Tests the basic session lifecycle event flow."""
     logger.info("--- Test 07G: Session Lifecycle Events ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         events_received = []
@@ -289,9 +331,11 @@ async def main() -> int:
 
     if passed == total:
         logger.info("TEST 07 PASSED: All advanced features tests successful!")
+        logger.info("Ready to proceed to Test 08")
         return 0
     else:
         logger.error("TEST 07 FAILED: Some advanced features tests failed!")
+        logger.error("Please fix the issues before proceeding")
         return 1
 
 

@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.6.0] - 2025-09-18
+
+This is a critical protocol conformance release that aligns the library strictly with the `draft-ietf-webtrans-http3-13` standard. It resolves core interoperability issues with major WebTransport implementations and introduces essential mechanisms for production-grade reliability, such as session-level flow control and robust termination logic.
+
+### BREAKING CHANGE
+
+- **The entire datagrams API has been refactored for conceptual clarity.** The primary class `WebTransportDatagramDuplexStream` is renamed to `WebTransportDatagramTransport`. All related components (`DatagramBroadcaster`, `DatagramMonitor`, `DatagramReliabilityLayer`, `StructuredDatagramTransport`) and methods have been updated to use the "Transport" terminology, improving API consistency.
+
+### Added
+
+- **Implemented a complete, spec-compliant session-level flow control system.** This includes not only enforcing data and stream limits but also a **reactive credit management** mechanism that automatically issues `MAX_DATA` and `MAX_STREAMS` updates to prevent deadlocks, ensuring robust communication even with conservative initial settings.
+- **Added a resource-limited buffering mechanism for out-of-order datagrams and streams** that arrive before their session is fully established, significantly improving connection reliability on complex networks.
+- **Implemented the protocol-mandated mapping of 32-bit application error codes** to the reserved HTTP/3 error code space, enabling more granular and interoperable error signaling.
+
+### Changed
+
+- **Protocol Negotiation Mechanism**: Updated the HTTP/3 `SETTINGS` frame exchange to use the standardized `SETTINGS_WT_MAX_SESSIONS` parameter, replacing the obsolete `SETTINGS_ENABLE_WEBTRANSPORT`. This is the cornerstone for interoperability with modern clients and servers.
+- **Session Termination**: `WebTransportSession.close()` now sends a `CLOSE_WEBTRANSPORT_SESSION` capsule for graceful shutdown, as required by the protocol, instead of relying on a simple stream reset.
+
+### Fixed
+
+- **Stream Reset Logic**: Ensured that upon session closure, all associated data streams are correctly reset with the `WT_SESSION_GONE` error code, fulfilling a key protocol requirement for clean resource teardown.
+- **Test Suite Configuration**: Updated all relevant test clients (unit, integration, E2E, and performance) with the necessary flow control configurations. This corrects a fundamental flaw where tests would be improperly throttled, ensuring that all test results are now valid and accurate.
+
 ## [0.5.1] - 2025-09-11
 
 This is a maintenance and quality-focused release that enhances the library's internal robustness and aligns the codebase with modern Python 3.11+ best practices. The primary enhancement is a comprehensive refactoring of `asyncio` event loop handling to use the more reliable `get_running_loop()` API, improving stability for production use cases.
@@ -182,7 +206,7 @@ This is a patch release focused on improving the reliability of the protocol han
 ### Changed
 
 - **Hardened the CI/CD pipeline** by fixing parallel coverage reporting, resolving Codecov repository detection issues, and ensuring the GitHub sync step is more robust.
-- **Refined development dependencies** by removing `pre-commit` from the core dev setup to simplify the environment and updated the `dev-requirements.txt` lock file.
+- **Refined development dependencies** by removing `pre-commit` from the core dev setup and updated the `dev-requirements.txt` lock file.
 - **Improved package metadata** in `pyproject.toml` for better discoverability on PyPI.
 
 ### Fixed
@@ -271,7 +295,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.0...v0.4.1

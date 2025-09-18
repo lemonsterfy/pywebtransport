@@ -14,7 +14,7 @@ from pywebtransport import (
     Event,
     EventType,
     TimeoutError,
-    WebTransportDatagramDuplexStream,
+    WebTransportDatagramTransport,
     WebTransportSession,
 )
 from pywebtransport.datagram import DatagramMessage, DatagramQueue, DatagramStats
@@ -43,23 +43,23 @@ async def queue() -> AsyncGenerator[DatagramQueue, None]:
 
 
 @pytest.fixture
-async def stream(mock_session: Any) -> AsyncGenerator[WebTransportDatagramDuplexStream, None]:
-    instance = WebTransportDatagramDuplexStream(session=mock_session)
+async def transport(mock_session: Any) -> AsyncGenerator[WebTransportDatagramTransport, None]:
+    instance = WebTransportDatagramTransport(session=mock_session)
     await instance.initialize()
     yield instance
     await instance.close()
 
 
-def _setup_high_drop_rate(*, stream: WebTransportDatagramDuplexStream) -> None:
-    stream._stats.send_drops = 11
-    stream._stats.datagrams_sent = 89
-    stream._stats.receive_drops = 11
-    stream._stats.datagrams_received = 89
+def _setup_high_drop_rate(*, transport: WebTransportDatagramTransport) -> None:
+    transport._stats.send_drops = 11
+    transport._stats.datagrams_sent = 89
+    transport._stats.receive_drops = 11
+    transport._stats.datagrams_received = 89
 
 
-def _setup_queue_nearly_full(*, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
+def _setup_queue_nearly_full(*, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
     mocker.patch.object(
-        stream,
+        transport,
         "get_queue_stats",
         return_value={
             "outgoing": {"size": 95, "max_size": 100},
@@ -68,18 +68,18 @@ def _setup_queue_nearly_full(*, stream: WebTransportDatagramDuplexStream, mocker
     )
 
 
-def _setup_high_send_latency(*, stream: WebTransportDatagramDuplexStream) -> None:
-    stream._stats.total_send_time = 2.0
-    stream._stats.datagrams_sent = 10
+def _setup_high_send_latency(*, transport: WebTransportDatagramTransport) -> None:
+    transport._stats.total_send_time = 2.0
+    transport._stats.datagrams_sent = 10
 
 
-def _setup_stream_closed(*, stream: WebTransportDatagramDuplexStream) -> None:
-    stream._closed = True
+def _setup_transport_closed(*, transport: WebTransportDatagramTransport) -> None:
+    transport._closed = True
 
 
-def _setup_session_not_ready(*, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-    if stream.session:
-        setattr(type(stream.session), "is_ready", mocker.PropertyMock(return_value=False))
+def _setup_session_not_ready(*, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+    if transport.session:
+        setattr(type(transport.session), "is_ready", mocker.PropertyMock(return_value=False))
 
 
 class TestDatagramStats:
@@ -353,18 +353,18 @@ class TestDatagramQueue:
             await queue.get()
 
 
-class TestWebTransportDatagramDuplexStream:
+class TestWebTransportDatagramTransport:
     def test_initialization(self, mock_session: Any) -> None:
-        stream = WebTransportDatagramDuplexStream(session=mock_session)
+        transport = WebTransportDatagramTransport(session=mock_session)
 
-        assert stream.session_id == mock_session.session_id
+        assert transport.session_id == mock_session.session_id
         mock_session.on.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_init_start_tasks_runtime_error(
         self, mock_session: Any, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
-        stream = WebTransportDatagramDuplexStream(session=mock_session)
+        transport = WebTransportDatagramTransport(session=mock_session)
 
         def mock_create_task_with_error(coro: Coroutine[Any, Any, None]) -> NoReturn:
             coro.close()
@@ -373,410 +373,412 @@ class TestWebTransportDatagramDuplexStream:
         mocker.patch("asyncio.create_task", side_effect=mock_create_task_with_error)
 
         with caplog.at_level(logging.WARNING):
-            await stream.initialize()
+            await transport.initialize()
             assert "Could not start datagram background tasks" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_properties_no_session(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        stream._session = mocker.MagicMock(return_value=None)
+    async def test_properties_no_session(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        transport._session = mocker.MagicMock(return_value=None)
 
-        assert stream.session is None
-        assert stream.max_datagram_size == 1200
+        assert transport.session is None
+        assert transport.max_datagram_size == 1200
 
-    def test_str_representation(self, stream: WebTransportDatagramDuplexStream) -> None:
-        stream._stats.datagrams_sent = 10
-        stream._stats.datagrams_received = 5
+    def test_str_representation(self, transport: WebTransportDatagramTransport) -> None:
+        transport._stats.datagrams_sent = 10
+        transport._stats.datagrams_received = 5
 
-        assert "DatagramStream" in str(stream)
-        assert "sent=10" in str(stream)
-        assert "received=5" in str(stream)
+        assert "DatagramTransport" in str(transport)
+        assert "sent=10" in str(transport)
+        assert "received=5" in str(transport)
 
     @pytest.mark.asyncio
-    async def test_close(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
+    async def test_close(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
         real_task = asyncio.create_task(asyncio.sleep(0.01))
-        stream._sender_task = real_task
-        assert stream._outgoing_queue is not None
-        assert stream._incoming_queue is not None
-        outgoing_close_spy = mocker.spy(stream._outgoing_queue, "close")
-        incoming_close_spy = mocker.spy(stream._incoming_queue, "close")
+        transport._sender_task = real_task
+        assert transport._outgoing_queue is not None
+        assert transport._incoming_queue is not None
+        outgoing_close_spy = mocker.spy(transport._outgoing_queue, "close")
+        incoming_close_spy = mocker.spy(transport._incoming_queue, "close")
 
-        await stream.close()
+        await transport.close()
 
-        assert stream.is_closed
+        assert transport.is_closed
         assert real_task.cancelled()
         outgoing_close_spy.assert_awaited_once()
         incoming_close_spy.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_close_idempotent(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._outgoing_queue is not None
-        close_spy = mocker.spy(stream._outgoing_queue, "close")
+    async def test_close_idempotent(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._outgoing_queue is not None
+        close_spy = mocker.spy(transport._outgoing_queue, "close")
 
-        await stream.close()
-        assert stream.is_closed
+        await transport.close()
+        assert transport.is_closed
         close_spy.assert_awaited_once()
 
-        await stream.close()
+        await transport.close()
         close_spy.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_async_context_manager(self, mock_session: Any) -> None:
-        stream = WebTransportDatagramDuplexStream(session=mock_session)
-        await stream.initialize()
+        transport = WebTransportDatagramTransport(session=mock_session)
+        await transport.initialize()
 
-        async with stream:
-            assert not stream.is_closed
+        async with transport:
+            assert not transport.is_closed
 
-        assert stream.is_closed
+        assert transport.is_closed
 
     @pytest.mark.asyncio
-    async def test_send_normal(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._outgoing_queue is not None
-        mock_put = mocker.patch.object(stream._outgoing_queue, "put", new_callable=mocker.AsyncMock)
+    async def test_send_normal(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._outgoing_queue is not None
+        mock_put = mocker.patch.object(transport._outgoing_queue, "put", new_callable=mocker.AsyncMock)
         mock_put.return_value = True
 
-        await stream.send(data=b"data")
+        await transport.send(data=b"data")
 
         mock_put.assert_awaited_once()
-        assert stream.datagrams_sent == 1
+        assert transport.datagrams_sent == 1
 
     @pytest.mark.asyncio
-    async def test_send_multiple(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        mock_send = mocker.patch.object(stream, "send", new_callable=mocker.AsyncMock)
+    async def test_send_multiple(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        mock_send = mocker.patch.object(transport, "send", new_callable=mocker.AsyncMock)
 
-        count = await stream.send_multiple(datagrams=[b"a", b"b", b"c"])
+        count = await transport.send_multiple(datagrams=[b"a", b"b", b"c"])
 
         assert count == 3
         assert mock_send.await_count == 3
 
     @pytest.mark.asyncio
     async def test_send_json_and_framed_data(
-        self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture
+        self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
-        mock_send = mocker.patch.object(stream, "send", new_callable=mocker.AsyncMock)
+        mock_send = mocker.patch.object(transport, "send", new_callable=mocker.AsyncMock)
 
-        await stream.send_json(data={"key": "value"})
+        await transport.send_json(data={"key": "value"})
         mock_send.assert_awaited_with(data=b'{"key":"value"}', priority=0, ttl=None)
 
-        await stream._send_framed_data(message_type="my-type", payload=b"payload")
+        await transport._send_framed_data(message_type="my-type", payload=b"payload")
         mock_send.assert_awaited_with(data=b"\x07my-typepayload", priority=0, ttl=None)
 
     @pytest.mark.asyncio
-    async def test_try_send(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._outgoing_queue is not None
-        mock_put = mocker.patch.object(stream._outgoing_queue, "put_nowait", new_callable=mocker.AsyncMock)
+    async def test_try_send(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._outgoing_queue is not None
+        mock_put = mocker.patch.object(transport._outgoing_queue, "put_nowait", new_callable=mocker.AsyncMock)
         mock_put.return_value = True
 
-        result = await stream.try_send(data=b"data")
+        result = await transport.try_send(data=b"data")
 
         assert result is True
         mock_put.assert_awaited_once()
-        assert stream.datagrams_sent == 1
+        assert transport.datagrams_sent == 1
 
     @pytest.mark.asyncio
-    async def test_receive_normal(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._incoming_queue is not None
+    async def test_receive_normal(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._incoming_queue is not None
         datagram = DatagramMessage(data=b"incoming")
-        mocker.patch.object(stream._incoming_queue, "get", new_callable=mocker.AsyncMock, return_value=datagram)
+        mocker.patch.object(transport._incoming_queue, "get", new_callable=mocker.AsyncMock, return_value=datagram)
 
-        data = await stream.receive()
+        data = await transport.receive()
 
         assert data == b"incoming"
-        assert stream.datagrams_received == 1
+        assert transport.datagrams_received == 1
 
     @pytest.mark.asyncio
-    async def test_receive_multiple(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        mocker.patch.object(stream, "receive", new_callable=mocker.AsyncMock, side_effect=[b"one"])
-        mocker.patch.object(stream, "try_receive", new_callable=mocker.AsyncMock, side_effect=[b"two", b"three", None])
+    async def test_receive_multiple(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        mocker.patch.object(transport, "receive", new_callable=mocker.AsyncMock, side_effect=[b"one"])
+        mocker.patch.object(
+            transport, "try_receive", new_callable=mocker.AsyncMock, side_effect=[b"two", b"three", None]
+        )
 
-        datagrams = await stream.receive_multiple(max_count=5)
+        datagrams = await transport.receive_multiple(max_count=5)
 
         assert datagrams == [b"one", b"two", b"three"]
 
     @pytest.mark.asyncio
-    async def test_receive_with_metadata(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._incoming_queue is not None
+    async def test_receive_with_metadata(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._incoming_queue is not None
         datagram = DatagramMessage(data=b"meta", sequence=42)
-        mocker.patch.object(stream._incoming_queue, "get", new_callable=mocker.AsyncMock, return_value=datagram)
+        mocker.patch.object(transport._incoming_queue, "get", new_callable=mocker.AsyncMock, return_value=datagram)
 
-        result = await stream.receive_with_metadata()
+        result = await transport.receive_with_metadata()
 
         assert result["data"] == b"meta"
         assert result["metadata"]["sequence"] == 42
 
     @pytest.mark.asyncio
-    async def test_receive_helpers(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        mock_receive = mocker.patch.object(stream, "receive", new_callable=mocker.AsyncMock)
+    async def test_receive_helpers(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        mock_receive = mocker.patch.object(transport, "receive", new_callable=mocker.AsyncMock)
 
         mock_receive.return_value = b'{"a":1}'
-        assert await stream.receive_json() == {"a": 1}
+        assert await transport.receive_json() == {"a": 1}
 
         mock_receive.return_value = b"\x04typepayload"
-        msg_type, payload = await stream._receive_framed_data()
+        msg_type, payload = await transport._receive_framed_data()
         assert msg_type == "type"
         assert payload == b"payload"
 
     @pytest.mark.asyncio
-    async def test_try_receive(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._incoming_queue is not None
-        mock_get_nowait = mocker.patch.object(stream._incoming_queue, "get_nowait", new_callable=mocker.AsyncMock)
+    async def test_try_receive(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._incoming_queue is not None
+        mock_get_nowait = mocker.patch.object(transport._incoming_queue, "get_nowait", new_callable=mocker.AsyncMock)
 
         mock_get_nowait.return_value = None
-        assert await stream.try_receive() is None
+        assert await transport.try_receive() is None
 
         datagram = DatagramMessage(data=b"buffered")
         mock_get_nowait.return_value = datagram
-        assert await stream.try_receive() == b"buffered"
+        assert await transport.try_receive() == b"buffered"
 
     @pytest.mark.asyncio
-    async def test_buffer_management(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._outgoing_queue is not None
-        assert stream._incoming_queue is not None
-        mocker.patch.object(stream._outgoing_queue, "qsize", return_value=5)
-        mocker.patch.object(stream._incoming_queue, "qsize", return_value=3)
-        mock_clear_out = mocker.patch.object(stream._outgoing_queue, "clear", new_callable=mocker.AsyncMock)
-        mock_clear_in = mocker.patch.object(stream._incoming_queue, "clear", new_callable=mocker.AsyncMock)
+    async def test_buffer_management(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._outgoing_queue is not None
+        assert transport._incoming_queue is not None
+        mocker.patch.object(transport._outgoing_queue, "qsize", return_value=5)
+        mocker.patch.object(transport._incoming_queue, "qsize", return_value=3)
+        mock_clear_out = mocker.patch.object(transport._outgoing_queue, "clear", new_callable=mocker.AsyncMock)
+        mock_clear_in = mocker.patch.object(transport._incoming_queue, "clear", new_callable=mocker.AsyncMock)
 
-        assert stream.get_send_buffer_size() == 5
-        assert stream.get_receive_buffer_size() == 3
-        await stream.clear_send_buffer()
-        await stream.clear_receive_buffer()
+        assert transport.get_send_buffer_size() == 5
+        assert transport.get_receive_buffer_size() == 3
+        await transport.clear_send_buffer()
+        await transport.clear_receive_buffer()
 
         mock_clear_out.assert_awaited_once()
         mock_clear_in.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_start_heartbeat(self, stream: WebTransportDatagramDuplexStream) -> None:
-        task = stream.start_heartbeat(interval=0.01)
+    async def test_start_heartbeat(self, transport: WebTransportDatagramTransport) -> None:
+        task = transport.start_heartbeat(interval=0.01)
 
         assert isinstance(task, asyncio.Task)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    def test_debug_state(self, stream: WebTransportDatagramDuplexStream) -> None:
-        state = stream.debug_state()
+    def test_debug_state(self, transport: WebTransportDatagramTransport) -> None:
+        state = transport.debug_state()
 
-        assert "stream" in state
+        assert "transport" in state
         assert "statistics" in state
         assert "queues" in state
         assert "configuration" in state
         assert "sequences" in state
 
     @pytest.mark.asyncio
-    async def test_send_too_large(self, stream: WebTransportDatagramDuplexStream) -> None:
-        large_data = b"a" * (stream.max_datagram_size + 1)
+    async def test_send_too_large(self, transport: WebTransportDatagramTransport) -> None:
+        large_data = b"a" * (transport.max_datagram_size + 1)
 
         with pytest.raises(DatagramError, match="exceeds maximum"):
-            await stream.send(data=large_data)
+            await transport.send(data=large_data)
 
     @pytest.mark.asyncio
-    async def test_send_when_closed(self, stream: WebTransportDatagramDuplexStream) -> None:
-        await stream.close()
+    async def test_send_when_closed(self, transport: WebTransportDatagramTransport) -> None:
+        await transport.close()
 
-        with pytest.raises(DatagramError, match="stream is closed"):
-            await stream.send(data=b"data")
+        with pytest.raises(DatagramError, match="transport is closed"):
+            await transport.send(data=b"data")
 
     @pytest.mark.asyncio
-    async def test_send_queue_full(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._outgoing_queue is not None
-        mocker.patch.object(stream._outgoing_queue, "put", new_callable=mocker.AsyncMock, return_value=False)
+    async def test_send_queue_full(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._outgoing_queue is not None
+        mocker.patch.object(transport._outgoing_queue, "put", new_callable=mocker.AsyncMock, return_value=False)
 
         with pytest.raises(DatagramError, match="queue full"):
-            await stream.send(data=b"data")
+            await transport.send(data=b"data")
 
-        assert stream.stats["send_drops"] == 1
+        assert transport.stats["send_drops"] == 1
 
     @pytest.mark.asyncio
     async def test_send_multiple_with_error(
-        self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture
+        self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
-        mock_send = mocker.patch.object(stream, "send", new_callable=mocker.AsyncMock)
+        mock_send = mocker.patch.object(transport, "send", new_callable=mocker.AsyncMock)
         mock_send.side_effect = [None, DatagramError("fail"), None]
 
-        count = await stream.send_multiple(datagrams=[b"a", b"b", b"c"])
+        count = await transport.send_multiple(datagrams=[b"a", b"b", b"c"])
 
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_try_send_failures(self, stream: WebTransportDatagramDuplexStream) -> None:
-        large_data = b"a" * (stream.max_datagram_size + 1)
+    async def test_try_send_failures(self, transport: WebTransportDatagramTransport) -> None:
+        large_data = b"a" * (transport.max_datagram_size + 1)
 
-        assert await stream.try_send(data=large_data) is False
-        assert stream.stats["send_drops"] == 1
+        assert await transport.try_send(data=large_data) is False
+        assert transport.stats["send_drops"] == 1
 
-        await stream.close()
-        assert await stream.try_send(data=b"data") is False
+        await transport.close()
+        assert await transport.try_send(data=b"data") is False
 
     @pytest.mark.asyncio
-    async def test_receive_timeout(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._incoming_queue is not None
-        mocker.patch.object(stream._incoming_queue, "get", side_effect=TimeoutError("timeout"))
+    async def test_receive_timeout(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._incoming_queue is not None
+        mocker.patch.object(transport._incoming_queue, "get", side_effect=TimeoutError("timeout"))
 
         with pytest.raises(TimeoutError):
-            await stream.receive(timeout=0.1)
+            await transport.receive(timeout=0.1)
 
     @pytest.mark.asyncio
     async def test_receive_multiple_timeout_after_first(
-        self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture
+        self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
         mocker.patch.object(
-            stream, "receive", new_callable=mocker.AsyncMock, side_effect=[b"one", TimeoutError("timeout")]
+            transport, "receive", new_callable=mocker.AsyncMock, side_effect=[b"one", TimeoutError("timeout")]
         )
-        mocker.patch.object(stream, "try_receive", new_callable=mocker.AsyncMock, return_value=None)
+        mocker.patch.object(transport, "try_receive", new_callable=mocker.AsyncMock, return_value=None)
 
-        datagrams = await stream.receive_multiple(max_count=5)
+        datagrams = await transport.receive_multiple(max_count=5)
 
         assert datagrams == [b"one"]
 
     @pytest.mark.asyncio
-    async def test_framed_data_errors(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        mock_receive = mocker.patch.object(stream, "receive", new_callable=mocker.AsyncMock)
+    async def test_framed_data_errors(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        mock_receive = mocker.patch.object(transport, "receive", new_callable=mocker.AsyncMock)
 
         mock_receive.return_value = b"\xff"
         with pytest.raises(DatagramError, match="Failed to receive framed datagram"):
-            await stream._receive_framed_data()
+            await transport._receive_framed_data()
 
         mock_receive.return_value = b"\x01"
         with pytest.raises(DatagramError, match="too short for type header"):
-            await stream._receive_framed_data()
+            await transport._receive_framed_data()
 
         mock_receive.return_value = b""
         with pytest.raises(DatagramError, match="too short for frame header"):
-            await stream._receive_framed_data()
+            await transport._receive_framed_data()
 
     @pytest.mark.asyncio
     async def test_receive_json_and_framed_data_timeout(
-        self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture
+        self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
-        mocker.patch.object(stream, "receive", side_effect=TimeoutError("timeout"))
+        mocker.patch.object(transport, "receive", side_effect=TimeoutError("timeout"))
 
         with pytest.raises(TimeoutError):
-            await stream.receive_json()
+            await transport.receive_json()
 
         with pytest.raises(TimeoutError):
-            await stream._receive_framed_data()
+            await transport._receive_framed_data()
 
     @pytest.mark.asyncio
-    async def test_on_datagram_received(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        assert stream._incoming_queue is not None
-        mock_put = mocker.patch.object(stream._incoming_queue, "put", new_callable=mocker.AsyncMock)
+    async def test_on_datagram_received(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        assert transport._incoming_queue is not None
+        mock_put = mocker.patch.object(transport._incoming_queue, "put", new_callable=mocker.AsyncMock)
         event = Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"from-event"})
 
-        await stream._on_datagram_received(event=event)
+        await transport._on_datagram_received(event=event)
 
         mock_put.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_on_datagram_received_failures(
-        self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture
+        self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
-        assert stream._incoming_queue is not None
-        mocker.patch.object(stream._incoming_queue, "put", new_callable=mocker.AsyncMock, return_value=False)
+        assert transport._incoming_queue is not None
+        mocker.patch.object(transport._incoming_queue, "put", new_callable=mocker.AsyncMock, return_value=False)
         event = Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"dropped"})
 
-        await stream._on_datagram_received(event=event)
-        assert stream.stats["receive_drops"] == 1
+        await transport._on_datagram_received(event=event)
+        assert transport.stats["receive_drops"] == 1
 
-        mocker.patch.object(stream._incoming_queue, "put", side_effect=ValueError("test error"))
-        stream._stats.receive_errors = 0
-        await stream._on_datagram_received(event=event)
-        assert stream.stats["receive_errors"] == 1
+        mocker.patch.object(transport._incoming_queue, "put", side_effect=ValueError("test error"))
+        transport._stats.receive_errors = 0
+        await transport._on_datagram_received(event=event)
+        assert transport.stats["receive_errors"] == 1
 
-        await stream._on_datagram_received(event=Event(type=EventType.DATAGRAM_RECEIVED, data={"no-data": True}))
-        assert stream.stats["receive_errors"] == 1
+        await transport._on_datagram_received(event=Event(type=EventType.DATAGRAM_RECEIVED, data={"no-data": True}))
+        assert transport.stats["receive_errors"] == 1
 
     @pytest.mark.asyncio
-    async def test_sender_loop(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
+    async def test_sender_loop(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
         datagram_to_send = DatagramMessage(data=b"loop-data")
-        assert stream._outgoing_queue is not None
-        assert stream.session is not None
-        assert stream.session.protocol_handler is not None
-        mock_send_dgram = mocker.patch.object(stream.session.protocol_handler, "send_webtransport_datagram")
-        mock_get = mocker.patch.object(stream._outgoing_queue, "get", new_callable=mocker.AsyncMock)
+        assert transport._outgoing_queue is not None
+        assert transport.session is not None
+        assert transport.session.protocol_handler is not None
+        mock_send_dgram = mocker.patch.object(transport.session.protocol_handler, "send_webtransport_datagram")
+        mock_get = mocker.patch.object(transport._outgoing_queue, "get", new_callable=mocker.AsyncMock)
 
         async def get_side_effect(*args: Any, **kwargs: Any) -> DatagramMessage:
             if mock_get.call_count == 1:
                 return datagram_to_send
-            stream._closed = True
+            transport._closed = True
             raise TimeoutError("stop loop")
 
         mock_get.side_effect = get_side_effect
 
-        await stream._sender_loop()
+        await transport._sender_loop()
 
-        mock_send_dgram.assert_called_once_with(session_id=stream.session_id, data=datagram_to_send.data)
+        mock_send_dgram.assert_called_once_with(session_id=transport.session_id, data=datagram_to_send.data)
 
     @pytest.mark.asyncio
     async def test_sender_loop_failures(
         self,
-        stream: WebTransportDatagramDuplexStream,
+        transport: WebTransportDatagramTransport,
         caplog: LogCaptureFixture,
         mocker: MockerFixture,
         mock_session: Any,
     ) -> None:
-        assert stream._outgoing_queue is not None
+        assert transport._outgoing_queue is not None
         datagram = DatagramMessage(data=b"data")
-        stream._session = mocker.MagicMock(return_value=None)
-        mock_get = mocker.patch.object(stream._outgoing_queue, "get", new_callable=mocker.AsyncMock)
+        transport._session = mocker.MagicMock(return_value=None)
+        mock_get = mocker.patch.object(transport._outgoing_queue, "get", new_callable=mocker.AsyncMock)
 
         async def get_side_effect_1(*args: Any, **kwargs: Any) -> DatagramMessage:
-            stream._closed = True
+            transport._closed = True
             return datagram
 
         mock_get.side_effect = get_side_effect_1
         with caplog.at_level(logging.WARNING):
-            await stream._sender_loop()
+            await transport._sender_loop()
             assert "session is gone" in caplog.text
 
-        stream._closed = False
+        transport._closed = False
         caplog.clear()
         mock_get.side_effect = ValueError("Fatal Error")
         with caplog.at_level(logging.ERROR):
-            await stream._sender_loop()
+            await transport._sender_loop()
             assert "Sender loop fatal error" in caplog.text
 
-        stream._closed = False
+        transport._closed = False
         caplog.clear()
-        stream._session = mocker.MagicMock(return_value=mock_session)
+        transport._session = mocker.MagicMock(return_value=mock_session)
         mock_session.protocol_handler.send_webtransport_datagram.side_effect = ValueError("Send Error")
         mock_get.side_effect = get_side_effect_1
         with caplog.at_level(logging.WARNING):
-            await stream._sender_loop()
+            await transport._sender_loop()
             assert "Failed to send datagram" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_heartbeat_loop(self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture) -> None:
-        mock_send = mocker.patch.object(stream, "send", new_callable=mocker.AsyncMock)
+    async def test_heartbeat_loop(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
+        mock_send = mocker.patch.object(transport, "send", new_callable=mocker.AsyncMock)
         asyncio_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
 
         async def sleep_side_effect(*args: Any, **kwargs: Any) -> None:
             if mock_send.call_count >= 2:
-                stream._closed = True
+                transport._closed = True
 
         asyncio_sleep.side_effect = sleep_side_effect
 
-        await stream._heartbeat_loop(interval=0.01)
+        await transport._heartbeat_loop(interval=0.01)
 
         assert mock_send.call_count == 2
 
     @pytest.mark.asyncio
     async def test_heartbeat_loop_send_error(
-        self, stream: WebTransportDatagramDuplexStream, mocker: MockerFixture, caplog: LogCaptureFixture
+        self, transport: WebTransportDatagramTransport, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
-        mocker.patch.object(stream, "send", side_effect=DatagramError("send failed"))
+        mocker.patch.object(transport, "send", side_effect=DatagramError("send failed"))
         asyncio_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
         asyncio_sleep.side_effect = asyncio.CancelledError
 
         with caplog.at_level(logging.WARNING):
-            await stream._heartbeat_loop(interval=10)
+            await transport._heartbeat_loop(interval=10)
             assert "Failed to send heartbeat" in caplog.text
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("method_name", ["send", "receive", "try_send", "try_receive", "start_heartbeat"])
-    async def test_uninitialized_stream_raises_error(self, mock_session: Any, method_name: str) -> None:
-        stream = WebTransportDatagramDuplexStream(session=mock_session)
-        method = getattr(stream, method_name)
+    async def test_uninitialized_transport_raises_error(self, mock_session: Any, method_name: str) -> None:
+        transport = WebTransportDatagramTransport(session=mock_session)
+        method = getattr(transport, method_name)
         with pytest.raises(DatagramError, match="not initialized"):
             if asyncio.iscoroutinefunction(method):
                 if "send" in method_name:
@@ -792,23 +794,23 @@ class TestWebTransportDatagramDuplexStream:
             (_setup_high_drop_rate, "High drop rate"),
             (_setup_queue_nearly_full, "Outgoing queue nearly full"),
             (_setup_high_send_latency, "High send latency"),
-            (_setup_stream_closed, "Datagram stream is closed"),
+            (_setup_transport_closed, "Datagram transport is closed"),
             (_setup_session_not_ready, "Session not available or not ready"),
         ],
     )
     @pytest.mark.asyncio
     async def test_diagnose_issues_comprehensive(
         self,
-        stream: WebTransportDatagramDuplexStream,
+        transport: WebTransportDatagramTransport,
         setup_func: Callable[..., None],
         expected_issue: str,
         mocker: MockerFixture,
     ) -> None:
         if "session_not_ready" in setup_func.__name__ or "queue_nearly_full" in setup_func.__name__:
-            setup_func(stream=stream, mocker=mocker)
+            setup_func(transport=transport, mocker=mocker)
         else:
-            setup_func(stream=stream)
+            setup_func(transport=transport)
 
-        issues = await stream.diagnose_issues()
+        issues = await transport.diagnose_issues()
 
         assert any(expected_issue in issue for issue in issues)

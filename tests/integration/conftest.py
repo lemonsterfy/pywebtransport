@@ -38,6 +38,9 @@ def server_config(certificates_dir: Path) -> ServerConfig:
         keyfile=str(certificates_dir / "localhost.key"),
         max_connections=10,
         connection_idle_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
     )
 
 
@@ -47,6 +50,9 @@ def client_config(certificates_dir: Path) -> ClientConfig:
     return ClientConfig(
         ca_certs=str(certificates_dir / "localhost.crt"),
         connect_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
     )
 
 

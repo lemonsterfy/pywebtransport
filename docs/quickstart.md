@@ -36,6 +36,8 @@ app = ServerApp(
     config=ServerConfig.create(
         certfile="localhost.crt",
         keyfile="localhost.key",
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=10,
     )
 )
 
@@ -43,10 +45,10 @@ app = ServerApp(
 async def handle_datagrams(session: WebTransportSession) -> None:
     """A background task to handle incoming datagrams."""
     try:
-        datagrams = await session.datagrams
+        datagram_transport = await session.datagrams
         while True:
-            data = await datagrams.receive()
-            await datagrams.send(data=b"ECHO: " + data)
+            data = await datagram_transport.receive()
+            await datagram_transport.send(data=b"ECHO: " + data)
     except (ConnectionError, SessionError, asyncio.CancelledError):
         # The session was closed, so we exit the loop.
         pass
@@ -102,15 +104,19 @@ from pywebtransport import ClientConfig, WebTransportClient
 async def main() -> None:
     # We disable SSL certificate verification because we are using a self-signed cert.
     # For production, you should use a proper certificate and validation.
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=10,
+    )
 
     async with WebTransportClient(config=config) as client:
         session = await client.connect(url="https://127.0.0.1:4433/")
 
         print("Connection established. Testing datagrams...")
-        datagrams = await session.datagrams
-        await datagrams.send(data=b"Hello, Datagram!")
-        response = await datagrams.receive()
+        datagram_transport = await session.datagrams
+        await datagram_transport.send(data=b"Hello, Datagram!")
+        response = await datagram_transport.receive()
         print(f"Datagram echo: {response!r}\n")
 
         print("Testing streams...")

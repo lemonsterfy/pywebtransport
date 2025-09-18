@@ -11,13 +11,13 @@ from pywebtransport.exceptions import SerializationError
 from pywebtransport.types import Serializer
 
 if TYPE_CHECKING:
-    from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
+    from pywebtransport.datagram.transport import WebTransportDatagramTransport
 
 
-__all__ = ["StructuredDatagramStream"]
+__all__ = ["StructuredDatagramTransport"]
 
 
-class StructuredDatagramStream:
+class StructuredDatagramTransport:
     """A high-level wrapper for sending and receiving structured objects."""
 
     _HEADER_FORMAT = "!H"
@@ -26,28 +26,28 @@ class StructuredDatagramStream:
     def __init__(
         self,
         *,
-        datagram_stream: WebTransportDatagramDuplexStream,
+        datagram_transport: WebTransportDatagramTransport,
         serializer: Serializer,
         registry: dict[int, Type[Any]],
     ):
-        """Initialize the structured datagram stream."""
-        self._datagram_stream = datagram_stream
+        """Initialize the structured datagram transport."""
+        self._datagram_transport = datagram_transport
         self._serializer = serializer
         self._registry = registry
         self._class_to_id = {v: k for k, v in registry.items()}
 
     @property
     def is_closed(self) -> bool:
-        """Check if the underlying datagram stream is closed."""
-        return self._datagram_stream.is_closed
+        """Check if the underlying datagram transport is closed."""
+        return self._datagram_transport.is_closed
 
     async def close(self) -> None:
-        """Close the underlying datagram stream."""
-        await self._datagram_stream.close()
+        """Close the underlying datagram transport."""
+        await self._datagram_transport.close()
 
     async def receive_obj(self, *, timeout: float | None = None) -> Any:
         """Receive and deserialize a Python object from a datagram."""
-        datagram = await self._datagram_stream.receive(timeout=timeout)
+        datagram = await self._datagram_transport.receive(timeout=timeout)
 
         header_bytes, payload = datagram[: self._HEADER_SIZE], datagram[self._HEADER_SIZE :]
         type_id = struct.unpack(self._HEADER_FORMAT, header_bytes)[0]
@@ -74,4 +74,4 @@ class StructuredDatagramStream:
         header = struct.pack(self._HEADER_FORMAT, type_id)
         payload = self._serializer.serialize(obj=obj)
 
-        await self._datagram_stream.send(data=header + payload, priority=priority, ttl=ttl)
+        await self._datagram_transport.send(data=header + payload, priority=priority, ttl=ttl)

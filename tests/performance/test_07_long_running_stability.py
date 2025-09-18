@@ -133,6 +133,9 @@ class TestLongRunningStability:
             connect_timeout=20.0,
             read_timeout=40.0,
             write_timeout=40.0,
+            initial_max_data=1024 * 1024,
+            initial_max_streams_bidi=100,
+            initial_max_streams_uni=100,
         )
 
     @pytest.fixture(scope="class")

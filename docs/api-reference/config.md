@@ -24,23 +24,33 @@ A dataclass that holds all configuration options for a WebTransport client.
 - `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed. `Default: 60.0`.
 - `connection_keepalive_timeout` (`float`): Interval for sending keep-alive packets. `Default: 30.0`.
 - `debug` (`bool`): Enable debug mode. `Default: False`.
+- `flow_control_window_auto_scale` (`bool`): Enable automatic scaling of the flow control window. `Default: True`.
+- `flow_control_window_size` (`int`): The initial size of the flow control window in bytes. `Default: 1048576`.
 - `headers` (`Headers`): A dictionary of additional headers to send. `Default: {}`.
+- `initial_max_data` (`int`): Initial session-level data limit advertised to the peer. `Default: 0`.
+- `initial_max_streams_bidi` (`int`): Initial number of bidirectional streams the peer can open. `Default: 0`.
+- `initial_max_streams_uni` (`int`): Initial number of unidirectional streams the peer can open. `Default: 0`.
 - `keep_alive` (`bool`): Enable the connection keep-alive mechanism. `Default: True`.
 - `keyfile` (`str | None`): Path to the client's private key file (for mTLS). `Default: None`.
 - `log_level` (`str`): Logging level. `Default: "INFO"`.
 - `max_connections` (`int`): Maximum number of concurrent connections for the client. `Default: 100`.
 - `max_datagram_size` (`int`): Maximum size for a datagram payload. `Default: 65535`.
 - `max_incoming_streams` (`int`): Maximum number of concurrent server-initiated streams. `Default: 100`.
+- `max_pending_events_per_session` (`int`): Max events to buffer for a session before it's established. `Default: 16`.
 - `max_retries` (`int`): Maximum number of connection retries. `Default: 3`.
 - `max_retry_delay` (`float`): Maximum delay between retries. `Default: 30.0`.
 - `max_stream_buffer_size` (`int`): Maximum buffer size for streams. `Default: 1048576`.
 - `max_streams` (`int`): Maximum number of concurrent client-initiated streams. `Default: 100`.
+- `max_total_pending_events` (`int`): Global limit for buffered events across all pending sessions. `Default: 1000`.
+- `pending_event_ttl` (`float`): Time-to-live in seconds for a buffered event. `Default: 5.0`.
 - `read_timeout` (`float | None`): Timeout for read operations. `Default: 60.0`.
 - `retry_backoff` (`float`): Multiplier for increasing retry delay. `Default: 2.0`.
 - `retry_delay` (`float`): Initial delay between retries in seconds. `Default: 1.0`.
 - `stream_buffer_size` (`int`): Default buffer size for streams in bytes. `Default: 65536`.
 - `stream_cleanup_interval` (`float`): Interval for cleaning up closed streams. `Default: 15.0`.
 - `stream_creation_timeout` (`float`): Timeout for creating a new stream. `Default: 10.0`.
+- `stream_flow_control_increment_bidi` (`int`): Number of bidirectional streams to grant when the limit is reached. `Default: 10`.
+- `stream_flow_control_increment_uni` (`int`): Number of unidirectional streams to grant when the limit is reached. `Default: 10`.
 - `user_agent` (`str`): The User-Agent header string.
 - `verify_mode` (`ssl.VerifyMode | None`): SSL verification mode. `Default: ssl.CERT_REQUIRED`.
 - `write_timeout` (`float | None`): Timeout for write operations. `Default: 30.0`.
@@ -80,20 +90,30 @@ A dataclass that holds all configuration options for a WebTransport server.
 - `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed. `Default: 60.0`.
 - `connection_keepalive_timeout` (`float`): Interval for sending keep-alive packets. `Default: 30.0`.
 - `debug` (`bool`): Enable debug mode. `Default: False`.
+- `flow_control_window_auto_scale` (`bool`): Enable automatic scaling of the flow control window. `Default: True`.
+- `flow_control_window_size` (`int`): The initial size of the flow control window in bytes. `Default: 1048576`.
+- `initial_max_data` (`int`): Initial session-level data limit advertised to clients. `Default: 0`.
+- `initial_max_streams_bidi` (`int`): Initial number of bidirectional streams a client can open. `Default: 0`.
+- `initial_max_streams_uni` (`int`): Initial number of unidirectional streams a client can open. `Default: 0`.
 - `keep_alive` (`bool`): Whether to enable TCP keep-alive. `Default: True`.
 - `keyfile` (`str`): Path to the server's private key file. `Default: ""`.
 - `log_level` (`str`): Logging level. `Default: "INFO"`.
 - `max_connections` (`int`): Maximum number of concurrent connections. `Default: 3000`.
 - `max_datagram_size` (`int`): Maximum size for a datagram payload. `Default: 65535`.
 - `max_incoming_streams` (`int`): Maximum number of concurrent client-initiated streams. `Default: 100`.
+- `max_pending_events_per_session` (`int`): Max events to buffer for a session before it's established. `Default: 16`.
 - `max_sessions` (`int`): Maximum number of concurrent WebTransport sessions. `Default: 10000`.
 - `max_stream_buffer_size` (`int`): Maximum buffer size for streams. `Default: 1048576`.
 - `max_streams_per_connection` (`int`): Maximum streams per connection. `Default: 100`.
+- `max_total_pending_events` (`int`): Global limit for buffered events across all pending sessions. `Default: 1000`.
 - `middleware` (`list[MiddlewareProtocol]`): A list of middleware to apply to sessions. `Default: []`.
+- `pending_event_ttl` (`float`): Time-to-live in seconds for a buffered event. `Default: 5.0`.
 - `read_timeout` (`float | None`): Timeout for read operations. `Default: 60.0`.
 - `session_cleanup_interval` (`float`): Interval for cleaning up closed sessions. `Default: 60.0`.
 - `stream_buffer_size` (`int`): Default buffer size for streams in bytes. `Default: 65536`.
 - `stream_cleanup_interval` (`float`): Interval for cleaning up closed streams. `Default: 15.0`.
+- `stream_flow_control_increment_bidi` (`int`): Number of bidirectional streams to grant when the limit is reached. `Default: 10`.
+- `stream_flow_control_increment_uni` (`int`): Number of unidirectional streams to grant when the limit is reached. `Default: 10`.
 - `verify_mode` (`ssl.VerifyMode`): SSL verification mode for client certificates. `Default: ssl.CERT_NONE`.
 - `write_timeout` (`float | None`): Timeout for write operations. `Default: 30.0`.
 
@@ -126,6 +146,7 @@ A fluent builder for creating `ClientConfig` or `ServerConfig` instances.
 - **`def bind(self, *, host: str, port: int) -> Self`**: Sets bind address (server only).
 - **`def build(self) -> ClientConfig | ServerConfig`**: Constructs and returns the final configuration object.
 - **`def debug(self, *, enabled: bool = True, log_level: str = "DEBUG") -> Self`**: Sets debug settings.
+- **`def flow_control(self, *, window_size: int | None = None, window_auto_scale: bool | None = None, initial_max_data: int | None = None, initial_max_streams_bidi: int | None = None, initial_max_streams_uni: int | None = None, stream_increment_bidi: int | None = None, stream_increment_uni: int | None = None) -> Self`**: Sets session-level flow control settings.
 - **`def performance(self, *, max_streams: int | None = None, buffer_size: int | None = None, max_connections: int | None = None) -> Self`**: Sets performance settings.
 - **`def security(self, *, certfile: str | None = None, keyfile: str | None = None, ca_certs: str | None = None, verify_mode: ssl.VerifyMode | None = None) -> Self`**: Sets security settings.
 - **`def timeout(self, *, connect: float | None = None, read: float | None = None, write: float | None = None) -> Self`**: Sets timeout settings.

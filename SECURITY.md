@@ -2,11 +2,9 @@
 
 ## Supported Versions
 
-We provide security updates for the following versions of PyWebTransport:
+Only the **latest stable release** of PyWebTransport is supported with security updates.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+Previous versions are considered end-of-life (EOL) upon the publication of a new release and will not receive patches. To ensure system security, users must upgrade to the latest available version.
 
 ## Reporting a Vulnerability
 
@@ -98,12 +96,13 @@ We monitor these dependencies for security updates and will update PyWebTranspor
 
 ## Security Updates
 
-Security updates will be:
+Security patches are integrated directly into the development of the next release. Upon publication, we will:
 
-- Released as patch versions (e.g., 0.1.1 → 0.1.2)
-- Documented in our changelog with security tags
-- Announced through GitHub security advisories
-- Available immediately upon release
+- Announce the update and its security implications via GitHub Security Advisories.
+- Detail the fix in the release notes, published in the project's `CHANGELOG.md`.
+- Make the updated version immediately available on PyPI.
+
+Users are responsible for upgrading to the latest version to apply security patches.
 
 ## Bug Bounty
 

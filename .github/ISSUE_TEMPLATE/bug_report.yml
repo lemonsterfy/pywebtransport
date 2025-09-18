@@ -1,0 +1,95 @@
+# PyWebTransport Bug Report GitHub Issue Form
+
+name: "🐞 Bug Report"
+description: "Report a bug to help us improve the library."
+title: "[Bug]: A brief description of the bug"
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to file a bug report! Please fill out the form below to help us diagnose and fix the issue as quickly as possible.
+
+  - type: input
+    id: version
+    attributes:
+      label: "PyWebTransport Version"
+      description: "What version of `pywebtransport` are you using? (e.g., 0.6.0)"
+      placeholder: "e.g., 0.6.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: "Python Version"
+      description: "What version of Python are you using? (e.g., 3.11.4)"
+      placeholder: "e.g., 3.11.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: "Operating System"
+      description: "What operating system are you running this on?"
+      options:
+        - "Linux"
+        - "macOS"
+        - "Windows"
+      multiple: true
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Bug Description"
+      description: "A clear and concise description of what the bug is."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: "Steps to Reproduce"
+      description: "Please provide a minimal, self-contained code snippet that reproduces the problem. This is the most important part of any bug report."
+      placeholder: |
+        ```python
+        # Your minimal, runnable code example here
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: "Expected Behavior"
+      description: "A clear and concise description of what you expected to happen."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: "Actual Behavior"
+      description: "A clear and concise description of what actually happened."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Logs and Tracebacks"
+      description: "If applicable, add any logs or tracebacks to help explain your problem. Please use debug-level logging for maximum detail."
+      render: "python"
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: "Verification"
+      options:
+        - label: "I have searched the existing issues and have not found a similar bug report."
+          required: true
+        - label: "I am willing to provide additional information and follow-up on this issue."
+          required: true

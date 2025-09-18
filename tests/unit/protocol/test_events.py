@@ -4,8 +4,8 @@ import pytest
 
 from pywebtransport.types import Headers, StreamId
 from pywebtransport.protocol.events import (
+    CapsuleReceived,
     DatagramReceived,
-    DataReceived,
     H3Event,
     HeadersReceived,
     WebTransportStreamDataReceived,
@@ -19,21 +19,20 @@ def test_h3event_creation() -> None:
 
 
 @pytest.mark.parametrize(
-    "data, stream_id, stream_ended",
+    "capsule_data, capsule_type, stream_id",
     [
-        (b"some data", 0, True),
-        (b"more data", 4, False),
-        (b"", 1, True),
-        (b"\x00\x01\x02", 99, False),
+        (b"some capsule data", 0, 0),
+        (b"", 12345, 4),
+        (b"\x00\x01\x02", 99, 8),
     ],
 )
-def test_data_received_event(data: bytes, stream_id: StreamId, stream_ended: bool) -> None:
-    event = DataReceived(data=data, stream_id=stream_id, stream_ended=stream_ended)
+def test_capsule_received_event(capsule_data: bytes, capsule_type: int, stream_id: StreamId) -> None:
+    event = CapsuleReceived(capsule_data=capsule_data, capsule_type=capsule_type, stream_id=stream_id)
 
     assert isinstance(event, H3Event)
-    assert event.data == data
+    assert event.capsule_data == capsule_data
+    assert event.capsule_type == capsule_type
     assert event.stream_id == stream_id
-    assert event.stream_ended is stream_ended
 
 
 @pytest.mark.parametrize(

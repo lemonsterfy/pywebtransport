@@ -65,7 +65,14 @@ class TestResourceUsage:
     @pytest.fixture(scope="class")
     def client_config(self) -> ClientConfig:
         """Provide a client configuration for resource tests."""
-        return ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=15.0, read_timeout=15.0)
+        return ClientConfig.create(
+            verify_mode=ssl.CERT_NONE,
+            connect_timeout=15.0,
+            read_timeout=15.0,
+            initial_max_data=1024 * 1024,
+            initial_max_streams_bidi=100,
+            initial_max_streams_uni=100,
+        )
 
     async def test_idle_connections_memory(self, client_config: ClientConfig) -> None:
         """Measure the memory increase caused by establishing idle connections."""

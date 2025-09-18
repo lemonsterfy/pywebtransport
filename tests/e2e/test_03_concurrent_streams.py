@@ -37,7 +37,14 @@ async def test_sequential_streams() -> bool:
     """Tests creating and using multiple streams sequentially in one session."""
     logger.info("--- Test 03A: Sequential Multiple Streams ---")
     num_streams = 3
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        read_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -73,7 +80,14 @@ async def test_concurrent_streams() -> bool:
     """Tests handling multiple streams concurrently using asyncio tasks."""
     logger.info("--- Test 03B: Concurrent Streams ---")
     num_streams = 10
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=10.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        read_timeout=10.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     async def stream_task(*, session: WebTransportSession, task_id: int) -> bool:
         """Defines the work for a single concurrent stream test."""
@@ -125,7 +139,14 @@ async def test_concurrent_streams() -> bool:
 async def test_stream_lifecycle() -> bool:
     """Tests the full lifecycle management of a single stream."""
     logger.info("--- Test 03C: Stream Lifecycle Management ---")
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        read_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:
@@ -157,7 +178,14 @@ async def test_stream_stress() -> bool:
     """Performs a stress test by rapidly creating and using streams."""
     logger.info("--- Test 03D: Stream Stress Test ---")
     num_iterations = 20
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=10.0, read_timeout=5.0)
+    config = ClientConfig.create(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+        read_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
 
     try:
         async with WebTransportClient(config=config) as client:

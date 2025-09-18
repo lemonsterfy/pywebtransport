@@ -13,7 +13,7 @@ from pywebtransport.types import Data
 from pywebtransport.utils import get_logger
 
 if TYPE_CHECKING:
-    from pywebtransport.datagram.transport import WebTransportDatagramDuplexStream
+    from pywebtransport.datagram.transport import WebTransportDatagramTransport
 
 
 __all__ = ["DatagramBroadcaster"]
@@ -22,11 +22,11 @@ logger = get_logger(name="datagram.broadcaster")
 
 
 class DatagramBroadcaster:
-    """A broadcaster to send datagrams to multiple streams concurrently."""
+    """A broadcaster to send datagrams to multiple transports concurrently."""
 
     def __init__(self) -> None:
         """Initialize the datagram broadcaster."""
-        self._streams: list[WebTransportDatagramDuplexStream] = []
+        self._transports: list[WebTransportDatagramTransport] = []
         self._lock: asyncio.Lock | None = None
 
     @classmethod
@@ -45,24 +45,24 @@ class DatagramBroadcaster:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        """Exit async context, clearing the stream list."""
+        """Exit async context, clearing the transport list."""
         if self._lock:
             async with self._lock:
-                self._streams.clear()
+                self._transports.clear()
 
-    async def add_stream(self, *, stream: WebTransportDatagramDuplexStream) -> None:
-        """Add a stream to the broadcast list."""
+    async def add_transport(self, *, transport: WebTransportDatagramTransport) -> None:
+        """Add a transport to the broadcast list."""
         if self._lock is None:
             raise DatagramError(
                 "DatagramBroadcaster has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
         async with self._lock:
-            if stream not in self._streams:
-                self._streams.append(stream)
+            if transport not in self._transports:
+                self._transports.append(transport)
 
     async def broadcast(self, *, data: Data, priority: int = 0, ttl: float | None = None) -> int:
-        """Broadcast a datagram to all registered streams concurrently."""
+        """Broadcast a datagram to all registered transports concurrently."""
         if self._lock is None:
             raise DatagramError(
                 "DatagramBroadcaster has not been activated. It must be used as an "
@@ -70,44 +70,44 @@ class DatagramBroadcaster:
             )
 
         sent_count = 0
-        failed_streams = []
+        failed_transports = []
 
         async with self._lock:
-            streams_copy = self._streams.copy()
+            transports_copy = self._transports.copy()
 
-        active_streams = []
+        active_transports = []
         tasks = []
-        for stream in streams_copy:
-            if not stream.is_closed:
-                tasks.append(stream.send(data=data, priority=priority, ttl=ttl))
-                active_streams.append(stream)
+        for transport in transports_copy:
+            if not transport.is_closed:
+                tasks.append(transport.send(data=data, priority=priority, ttl=ttl))
+                active_transports.append(transport)
             else:
-                failed_streams.append(stream)
+                failed_transports.append(transport)
 
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            for stream, result in zip(active_streams, results):
+            for transport, result in zip(active_transports, results):
                 if isinstance(result, Exception):
                     logger.warning(
-                        "Failed to broadcast to stream %s: %s",
-                        stream,
+                        "Failed to broadcast to transport %s: %s",
+                        transport,
                         result,
                         exc_info=True,
                     )
-                    failed_streams.append(stream)
+                    failed_transports.append(transport)
                 else:
                     sent_count += 1
 
-        if failed_streams:
+        if failed_transports:
             async with self._lock:
-                for stream in failed_streams:
-                    if stream in self._streams:
-                        self._streams.remove(stream)
+                for transport in failed_transports:
+                    if transport in self._transports:
+                        self._transports.remove(transport)
 
         return sent_count
 
-    async def remove_stream(self, *, stream: WebTransportDatagramDuplexStream) -> None:
-        """Remove a stream from the broadcast list."""
+    async def remove_transport(self, *, transport: WebTransportDatagramTransport) -> None:
+        """Remove a transport from the broadcast list."""
         if self._lock is None:
             raise DatagramError(
                 "DatagramBroadcaster has not been activated. It must be used as an "
@@ -115,16 +115,16 @@ class DatagramBroadcaster:
             )
         async with self._lock:
             try:
-                self._streams.remove(stream)
+                self._transports.remove(transport)
             except ValueError:
                 pass
 
-    async def get_stream_count(self) -> int:
-        """Get the current number of active streams safely."""
+    async def get_transport_count(self) -> int:
+        """Get the current number of active transports safely."""
         if self._lock is None:
             raise DatagramError(
                 "DatagramBroadcaster has not been activated. It must be used as an "
                 "asynchronous context manager (`async with ...`)."
             )
         async with self._lock:
-            return len(self._streams)
+            return len(self._transports)

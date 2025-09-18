@@ -30,6 +30,9 @@ def client_config() -> ClientConfig:
         read_timeout=90.0,
         write_timeout=90.0,
         stream_creation_timeout=30.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=200,
+        initial_max_streams_uni=200,
     )
 
 

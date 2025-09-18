@@ -14,6 +14,7 @@ from pywebtransport import (
     ClientConfig,
     Event,
     EventType,
+    FlowControlError,
     Serializer,
     ServerConfig,
     SessionError,
@@ -90,8 +91,8 @@ class TestWebTransportSession:
         return connection
 
     @pytest.fixture
-    def mock_datagram_stream(self, mocker: MockerFixture) -> Any:
-        mock_class = mocker.patch("pywebtransport.session.session.WebTransportDatagramDuplexStream", autospec=True)
+    def mock_datagram_transport(self, mocker: MockerFixture) -> Any:
+        mock_class = mocker.patch("pywebtransport.session.session.WebTransportDatagramTransport", autospec=True)
         mock_instance = mock_class.return_value
         mock_instance.initialize = mock.AsyncMock()
         mock_instance.close = mock.AsyncMock()
@@ -113,7 +114,7 @@ class TestWebTransportSession:
     async def session(
         self,
         mock_connection: Any,
-        mock_datagram_stream: Any,
+        mock_datagram_transport: Any,
         mocker: MockerFixture,
     ) -> AsyncGenerator[WebTransportSession, None]:
         mocker.patch("pywebtransport.session.session.get_timestamp", return_value=1000.0)
@@ -157,6 +158,15 @@ class TestWebTransportSession:
             mocker.call(event_type=EventType.SESSION_CLOSED, handler=session._on_session_closed),
             mocker.call(event_type=EventType.STREAM_OPENED, handler=session._on_stream_opened),
             mocker.call(event_type=EventType.DATAGRAM_RECEIVED, handler=session._on_datagram_received),
+            mocker.call(event_type=EventType.SESSION_MAX_DATA_UPDATED, handler=session._on_max_data_updated),
+            mocker.call(
+                event_type=EventType.SESSION_MAX_STREAMS_BIDI_UPDATED,
+                handler=session._on_max_streams_bidi_updated,
+            ),
+            mocker.call(
+                event_type=EventType.SESSION_MAX_STREAMS_UNI_UPDATED,
+                handler=session._on_max_streams_uni_updated,
+            ),
         ]
         mock_protocol_handler.on.assert_has_calls(expected_calls, any_order=True)
         mock_connection.once.assert_called_once_with(
@@ -231,13 +241,13 @@ class TestWebTransportSession:
 
     @pytest.mark.asyncio
     async def test_datagrams_property_lazy_creation(
-        self, session: WebTransportSession, mock_datagram_stream: Any
+        self, session: WebTransportSession, mock_datagram_transport: Any
     ) -> None:
-        assert session._datagrams is None
+        assert session._datagram_transport is None
 
         datagrams = await session.datagrams
 
-        mock_datagram_stream.assert_called_once_with(session=session)
+        mock_datagram_transport.assert_called_once_with(session=session)
         assert datagrams is not None
         cast(mock.AsyncMock, datagrams.initialize).assert_awaited_once()
 
@@ -289,12 +299,14 @@ class TestWebTransportSession:
         await session.wait_closed()
 
     @pytest.mark.asyncio
-    async def test_close_without_datagram_stream(self, session: WebTransportSession, mock_datagram_stream: Any) -> None:
-        assert session._datagrams is None
+    async def test_close_without_datagram_transport(
+        self, session: WebTransportSession, mock_datagram_transport: Any
+    ) -> None:
+        assert session._datagram_transport is None
 
         await session.close(close_connection=False)
 
-        cast(AsyncMock, mock_datagram_stream.return_value.close).assert_not_awaited()
+        cast(AsyncMock, mock_datagram_transport.return_value.close).assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_close_idempotent(self, session: WebTransportSession, mock_protocol_handler: Any) -> None:
@@ -310,20 +322,24 @@ class TestWebTransportSession:
         assert session.state == SessionState.CLOSED
 
     @pytest.mark.asyncio
-    async def test_create_structured_datagram_stream(self, session: WebTransportSession, mocker: MockerFixture) -> None:
+    async def test_create_structured_datagram_transport(
+        self, session: WebTransportSession, mocker: MockerFixture
+    ) -> None:
         mock_serializer = mocker.Mock(spec=Serializer)
         mock_registry: dict[int, type[Any]] = {1: int}
-        mock_struct_class = mocker.patch("pywebtransport.datagram.structured.StructuredDatagramStream", autospec=True)
-        raw_datagram_stream = await session.datagrams
+        mock_struct_class = mocker.patch(
+            "pywebtransport.datagram.structured.StructuredDatagramTransport", autospec=True
+        )
+        datagram_transport = await session.datagrams
 
-        structured_stream = await session.create_structured_datagram_stream(
+        structured_transport = await session.create_structured_datagram_transport(
             serializer=mock_serializer, registry=mock_registry
         )
 
         mock_struct_class.assert_called_once_with(
-            datagram_stream=raw_datagram_stream, serializer=mock_serializer, registry=mock_registry
+            datagram_transport=datagram_transport, serializer=mock_serializer, registry=mock_registry
         )
-        assert structured_stream is mock_struct_class.return_value
+        assert structured_transport is mock_struct_class.return_value
 
     @pytest.mark.asyncio
     async def test_create_structured_stream(self, session: WebTransportSession, mocker: MockerFixture) -> None:
@@ -453,7 +469,7 @@ class TestWebTransportSession:
 
     @pytest.mark.asyncio
     async def test_get_session_stats_no_datagrams(self, session: WebTransportSession) -> None:
-        assert session._datagrams is None
+        assert session._datagram_transport is None
 
         stats = await session.get_session_stats()
 
@@ -557,7 +573,25 @@ class TestWebTransportSession:
         )
         assert session._closed_event is not None
         assert session._closed_event.is_set()
-        mock_protocol_handler.off.assert_called()
+
+        mock_protocol_handler.off.assert_has_calls(
+            [
+                mocker.call(event_type=EventType.SESSION_READY, handler=session._on_session_ready),
+                mocker.call(event_type=EventType.SESSION_CLOSED, handler=session._on_session_closed),
+                mocker.call(event_type=EventType.STREAM_OPENED, handler=session._on_stream_opened),
+                mocker.call(event_type=EventType.DATAGRAM_RECEIVED, handler=session._on_datagram_received),
+                mocker.call(event_type=EventType.SESSION_MAX_DATA_UPDATED, handler=session._on_max_data_updated),
+                mocker.call(
+                    event_type=EventType.SESSION_MAX_STREAMS_BIDI_UPDATED,
+                    handler=session._on_max_streams_bidi_updated,
+                ),
+                mocker.call(
+                    event_type=EventType.SESSION_MAX_STREAMS_UNI_UPDATED,
+                    handler=session._on_max_streams_uni_updated,
+                ),
+            ],
+            any_order=True,
+        )
         mock_connection.off.assert_called_once_with(
             event_type=EventType.CONNECTION_CLOSED, handler=session._on_connection_closed
         )
@@ -818,7 +852,7 @@ class TestWebTransportSession:
     async def test_datagrams_property_when_closed(self, session: WebTransportSession) -> None:
         session._state = SessionState.CLOSED
 
-        with pytest.raises(SessionError, match="is closed, cannot access datagrams"):
+        with pytest.raises(SessionError, match="is closed"):
             await session.datagrams
 
     @pytest.mark.asyncio
@@ -861,6 +895,34 @@ class TestWebTransportSession:
             await session._create_stream_on_protocol(is_unidirectional=False)
 
         assert session._stats.stream_errors == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("is_unidirectional", [False, True])
+    async def test_create_stream_on_protocol_flow_control(
+        self, session: WebTransportSession, mock_protocol_handler: Any, is_unidirectional: bool, mocker: MockerFixture
+    ) -> None:
+        stream_id = 101
+        mock_protocol_handler.create_webtransport_stream.side_effect = [
+            FlowControlError("No stream credit"),
+            stream_id,
+        ]
+
+        credit_event = session._uni_stream_credit_event if is_unidirectional else session._bidi_stream_credit_event
+        assert credit_event is not None
+        mocker.patch.object(credit_event, "wait", new_callable=AsyncMock)
+        mocker.patch.object(credit_event, "clear")
+
+        async def set_event_later() -> None:
+            await asyncio.sleep(0.01)
+            credit_event.set()
+
+        asyncio.create_task(set_event_later())
+        result_stream_id = await session._create_stream_on_protocol(is_unidirectional=is_unidirectional)
+
+        assert result_stream_id == stream_id
+        cast(AsyncMock, credit_event.clear).assert_called_once()
+        cast(AsyncMock, credit_event.wait).assert_awaited_once()
+        assert mock_protocol_handler.create_webtransport_stream.call_count == 2
 
     @pytest.mark.asyncio
     async def test_incoming_streams_timeout(self, session: WebTransportSession, mocker: MockerFixture) -> None:
@@ -950,7 +1012,7 @@ class TestWebTransportSession:
         cast(AsyncMock, mock_handler).assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_on_datagram_received_no_handler_on_stream(
+    async def test_on_datagram_received_no_handler_on_transport(
         self, session: WebTransportSession, mocker: MockerFixture
     ) -> None:
         datagrams = await session.datagrams
@@ -959,6 +1021,60 @@ class TestWebTransportSession:
         event = Event(type=EventType.DATAGRAM_RECEIVED, data={"session_id": "session-1", "data": b"ping"})
 
         await session._on_datagram_received(event=event)
+
+    @pytest.mark.asyncio
+    async def test_on_max_data_updated(self, session: WebTransportSession) -> None:
+        assert session._data_credit_event is not None
+        assert not session._data_credit_event.is_set()
+        event = Event(type=EventType.SESSION_MAX_DATA_UPDATED, data={"session_id": "session-1"})
+
+        await session._on_max_data_updated(event=event)
+
+        assert session._data_credit_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_on_max_streams_bidi_updated(self, session: WebTransportSession) -> None:
+        assert session._bidi_stream_credit_event is not None
+        assert not session._bidi_stream_credit_event.is_set()
+        event = Event(type=EventType.SESSION_MAX_STREAMS_BIDI_UPDATED, data={"session_id": "session-1"})
+
+        await session._on_max_streams_bidi_updated(event=event)
+
+        assert session._bidi_stream_credit_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_on_max_streams_uni_updated(self, session: WebTransportSession) -> None:
+        assert session._uni_stream_credit_event is not None
+        assert not session._uni_stream_credit_event.is_set()
+        event = Event(type=EventType.SESSION_MAX_STREAMS_UNI_UPDATED, data={"session_id": "session-1"})
+
+        await session._on_max_streams_uni_updated(event=event)
+
+        assert session._uni_stream_credit_event.is_set()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "handler_name, event_type",
+        [
+            ("_on_max_data_updated", EventType.SESSION_MAX_DATA_UPDATED),
+            ("_on_max_streams_bidi_updated", EventType.SESSION_MAX_STREAMS_BIDI_UPDATED),
+            ("_on_max_streams_uni_updated", EventType.SESSION_MAX_STREAMS_UNI_UPDATED),
+        ],
+    )
+    async def test_on_max_credit_events_mismatched_id(
+        self, session: WebTransportSession, handler_name: str, event_type: EventType
+    ) -> None:
+        handler = getattr(session, handler_name)
+        event = Event(type=event_type, data={"session_id": "session-2"})
+
+        await handler(event=event)
+
+        if session._data_credit_event:
+            assert not session._data_credit_event.is_set()
+        if session._bidi_stream_credit_event:
+            assert not session._bidi_stream_credit_event.is_set()
+        if session._uni_stream_credit_event:
+            assert not session._uni_stream_credit_event.is_set()
 
     @pytest.mark.asyncio
     async def test_diagnose_issues_no_connection_object(
@@ -973,7 +1089,7 @@ class TestWebTransportSession:
         assert any("Underlying connection not available" in issue for issue in issues)
 
     @pytest.mark.asyncio
-    async def test_diagnose_issues_no_datagram_stream(
+    async def test_diagnose_issues_no_datagram_transport(
         self, session: WebTransportSession, mocker: MockerFixture
     ) -> None:
         session._state = SessionState.CONNECTED
@@ -987,7 +1103,7 @@ class TestWebTransportSession:
 
     @pytest.mark.asyncio
     async def test_diagnose_issues_large_datagram_buffer(
-        self, session: WebTransportSession, mock_datagram_stream: Any
+        self, session: WebTransportSession, mock_datagram_transport: Any
     ) -> None:
         session._state = SessionState.CONNECTED
 
