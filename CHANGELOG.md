@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.6.1] - 2025-09-20
+
+This is a quality and hardening release focused on improving the core protocol handler's stability, refining the developer experience through documentation alignment, and ensuring the reliability of the CI/CD pipeline.
+
+### Changed
+
+- **Refined API Documentation and Examples**: Aligned all documentation (`README.md`, `quickstart.md`) and code examples to use the simplified top-level import path for `ConnectionError` and `SessionError`, improving usability and consistency.
+- **Improved CI/CD Reliability**: Added necessary dependencies (`git`, `curl`, `gpg`) to the continuous integration workflow to harden the Codecov coverage reporting step and prevent intermittent failures.
+
+### Fixed
+
+- **Fixed Critical Resource Leak in Protocol Handler**: Resolved a major stability issue where a `StreamReset` on a data stream would not be properly cleaned up, preventing state and memory leaks in long-running applications.
+- **Hardened Protocol Parsing**: The protocol handler now safely decodes `CLOSE_SESSION` reason strings containing invalid UTF-8 and uses a side-effect-free pattern for internal state checks, improving overall robustness.
+- **Improved API Consistency**: Enhanced the `WebTransportDatagramTransport` by adding fail-fast initialization checks and wrapping unexpected internal errors in the documented `DatagramError` exception, creating a more predictable API.
+
 ## [0.6.0] - 2025-09-18
 
 This is a critical protocol conformance release that aligns the library strictly with the `draft-ietf-webtrans-http3-13` standard. It resolves core interoperability issues with major WebTransport implementations and introduces essential mechanisms for production-grade reliability, such as session-level flow control and robust termination logic.
@@ -295,7 +310,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.4.1...v0.5.0

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 import pytest
 from aioquic.buffer import Buffer, encode_uint_var
 from aioquic.quic.connection import QuicConnection, QuicConnectionState
-from aioquic.quic.events import StreamReset
+from aioquic.quic.events import QuicEvent, StreamReset
 from pytest_mock import MockerFixture
 
 from pywebtransport import (
@@ -95,6 +95,7 @@ def mock_quic(mocker: MockerFixture) -> MagicMock:
     mock.configuration.server_name = "test.server"
     mock._streams = {}
     mock._quic_logger = None
+    mock._state = QuicConnectionState.CONNECTED
     return cast(MagicMock, mock)
 
 
@@ -240,6 +241,46 @@ class TestCapsuleHandling:
         with pytest.raises(ProtocolError, match="Flow control limit decreased"):
             await handler_with_session._on_capsule_received(event)
 
+    @pytest.mark.parametrize(
+        "capsule_type, update_event_type, initial_value_attr",
+        [
+            (constants.WT_MAX_DATA_TYPE, EventType.SESSION_MAX_DATA_UPDATED, "peer_max_data"),
+            (
+                constants.WT_MAX_STREAMS_BIDI_TYPE,
+                EventType.SESSION_MAX_STREAMS_BIDI_UPDATED,
+                "peer_max_streams_bidi",
+            ),
+            (
+                constants.WT_MAX_STREAMS_UNI_TYPE,
+                EventType.SESSION_MAX_STREAMS_UNI_UPDATED,
+                "peer_max_streams_uni",
+            ),
+        ],
+    )
+    async def test_on_capsule_received_flow_control_equal_limit(
+        self,
+        handler_with_session: WebTransportProtocolHandler,
+        capsule_type: int,
+        update_event_type: EventType,
+        initial_value_attr: str,
+    ) -> None:
+        session_info = handler_with_session.get_session_info(session_id="session-1234")
+        assert session_info is not None
+        initial_value = 100
+        setattr(session_info, initial_value_attr, initial_value)
+        event = CapsuleReceived(
+            stream_id=0,
+            capsule_type=capsule_type,
+            capsule_data=encode_uint_var(initial_value),
+        )
+        update_spy = AsyncMock()
+        handler_with_session.on(event_type=update_event_type, handler=update_spy)
+
+        await handler_with_session._on_capsule_received(event)
+
+        assert getattr(session_info, initial_value_attr) == initial_value
+        update_spy.assert_not_called()
+
     async def test_on_capsule_received_for_unknown_session(self, handler: WebTransportProtocolHandler) -> None:
         event = CapsuleReceived(stream_id=999, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"\x01")
 
@@ -261,216 +302,23 @@ class TestCapsuleHandling:
 
         assert "Could not parse flow control capsule" in caplog.text
 
-
-@pytest.mark.asyncio
-class TestCoverageGaps:
-    async def test_abort_receive_only_stream(
-        self, handler: WebTransportProtocolHandler, mock_quic: MagicMock, mocker: MockerFixture
-    ) -> None:
-        mock_stream = MagicMock()
-        mock_stream.receiver.is_finished = False
-        mock_quic._streams[5] = mock_stream
-        mocker.patch(
-            "pywebtransport.protocol.handler.protocol_utils.can_send_data_on_stream",
-            return_value=False,
-        )
-        mocker.patch(
-            "pywebtransport.protocol.handler.protocol_utils.can_receive_data_on_stream",
-            return_value=True,
-        )
-        mocker.patch(
-            "pywebtransport.protocol.handler.protocol_utils.webtransport_code_to_http_code",
-            return_value=0xDEADBEEF,
-        )
-
-        handler.abort_stream(stream_id=5, error_code=1)
-
-        mock_quic.reset_stream.assert_not_called()
-        mock_quic.stop_stream.assert_called_once_with(stream_id=5, error_code=0xDEADBEEF)
-
-    async def test_cleanup_stream_without_session_owner(self, handler: WebTransportProtocolHandler) -> None:
-        handler._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
-        handler._data_stream_to_session.pop(4)
-
-        handler._cleanup_stream(stream_id=4)
-
-        assert 4 not in handler._streams
-
-    async def test_close_without_cleanup_task(self, mock_quic: MagicMock, mock_h3_engine: MagicMock) -> None:
-        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
-        handler._config.pending_event_ttl = 0
-
-        handler.connection_established()
-        await handler.close()
-
-        assert handler._cleanup_pending_events_task is None
-        mock_h3_engine.off.assert_called()
-
-    async def test_handle_datagram_no_connection(self, mock_quic: MagicMock, mock_h3_engine: MagicMock) -> None:
-        handler = WebTransportProtocolHandler(quic_connection=mock_quic, connection=None)
-        event = DatagramReceived(stream_id=0, data=b"hello")
-
-        await handler._handle_datagram_received(event=event)
-
-    async def test_handle_orphan_stream_data_without_buffering(
-        self, handler: WebTransportProtocolHandler, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        handler._quic._state = QuicConnectionState.CONNECTED
-        handler._config.pending_event_ttl = 0
-        event = WebTransportStreamDataReceived(stream_id=4, session_id=99, data=b"", stream_ended=True)
-
-        with caplog.at_level(logging.ERROR):
-            await handler._handle_webtransport_stream_data(event=event)
-
-        assert "No session mapping found" in caplog.text
-
-    async def test_handle_stream_reset_on_non_session_stream(self, handler: WebTransportProtocolHandler) -> None:
-        reset_event = StreamReset(stream_id=999, error_code=123)
-        closed_spy = AsyncMock()
-        handler.on(event_type=EventType.SESSION_CLOSED, handler=closed_spy)
-
-        await handler.handle_quic_event(event=reset_event)
-
-        closed_spy.assert_not_called()
-
-    async def test_read_stream_complete_reentrant_handler(self, handler: WebTransportProtocolHandler) -> None:
-        future = asyncio.get_running_loop().create_future()
-        chunks: list[bytes] = []
-        handler_event: Event | None = None
-
-        async def data_handler(event: Event) -> None:
-            nonlocal handler_event
-            if future.done():
-                return
-            handler_event = event
-            if event.data and event.data.get("data"):
-                chunks.append(event.data.get("data", b""))
-            if event.data and event.data.get("end_stream"):
-                future.set_result(None)
-
-        handler.on(event_type="stream_data_received:4", handler=data_handler)
-
-        await handler.emit(
-            event_type="stream_data_received:4",
-            data={"data": b"part1", "end_stream": True},
-        )
-        await asyncio.sleep(0)
-
-        assert future.done()
-        assert handler_event is not None
-        if handler_event:
-            await data_handler(handler_event)
-        assert b"".join(chunks) == b"part1"
-
-    async def test_teardown_with_no_h3_engine(self, mock_quic: MagicMock) -> None:
-        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
-        handler._h3 = None  # type: ignore[assignment]
-
-        await handler.close()
-
-    async def test_update_flow_control_with_window_disabled(
-        self, handler: WebTransportProtocolHandler, mock_h3_engine: MagicMock
-    ) -> None:
-        session_info = WebTransportSessionInfo(
-            session_id="s1",
-            stream_id=0,
-            state=SessionState.CONNECTED,
-            path="/",
-            created_at=123.0,
-            local_max_streams_bidi=100,
-            local_max_streams_uni=100,
-        )
-        handler._sessions["s1"] = session_info
-        handler._config.flow_control_window_size = 0
-
-        await handler._update_local_flow_control(session_id="s1")
-
-        mock_h3_engine.send_capsule.assert_not_called()
-
-    @pytest.mark.parametrize(
-        "update_func_name",
-        ["_update_stream_state_on_receive_end", "_update_stream_state_on_send_end"],
-    )
-    async def test_update_stream_state_with_invalid_id(
-        self, handler: WebTransportProtocolHandler, update_func_name: str
-    ) -> None:
-        update_func = getattr(handler, update_func_name)
-
-        update_func(stream_id=999)
-
-
-@pytest.mark.asyncio
-class TestFinalCoveragePush:
-    async def test_abort_send_only_stream(
-        self, handler: WebTransportProtocolHandler, mock_quic: MagicMock, mocker: MockerFixture
-    ) -> None:
-        mock_stream = MagicMock()
-        mock_stream.sender._reset_error_code = None
-        mock_quic._streams[1] = mock_stream
-        mocker.patch(
-            "pywebtransport.protocol.handler.protocol_utils.can_send_data_on_stream",
-            return_value=True,
-        )
-        mocker.patch(
-            "pywebtransport.protocol.handler.protocol_utils.can_receive_data_on_stream",
-            return_value=False,
-        )
-
-        handler.abort_stream(stream_id=1, error_code=1)
-
-        mock_quic.reset_stream.assert_called_once()
-        mock_quic.stop_stream.assert_not_called()
-
-    async def test_close_with_completed_cleanup_task(self, mock_quic: MagicMock, mock_h3_engine: MagicMock) -> None:
-        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
-        handler.connection_established()
-        assert handler._cleanup_pending_events_task is not None
-        future: asyncio.Future[None] = asyncio.Future()
-        future.set_result(None)
-        handler._cleanup_pending_events_task = future  # type: ignore[assignment]
-
-        await handler.close()
-
-    async def test_send_blocked_capsule_on_send_data(
+    async def test_on_capsule_received_unicode_error(
         self,
-        handler: WebTransportProtocolHandler,
-        mocker: MockerFixture,
+        handler_with_session: WebTransportProtocolHandler,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        send_blocked_spy = mocker.spy(handler, "_send_blocked_capsule")
-        session_info = WebTransportSessionInfo(
-            session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=123.0
-        )
-        session_info.peer_max_data = 10
-        handler._sessions["s1"] = session_info
-        handler._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
-
-        with pytest.raises(FlowControlError):
-            handler.send_webtransport_stream_data(stream_id=4, data=b"x" * 11)
-
-        send_blocked_spy.assert_called_once_with(session_info=session_info, is_data=True)
-
-    @pytest.mark.parametrize("state", [StreamState.HALF_CLOSED_LOCAL, StreamState.HALF_CLOSED_REMOTE])
-    async def test_update_stream_state_to_closed(
-        self, handler: WebTransportProtocolHandler, state: StreamState
-    ) -> None:
-        session_info = WebTransportSessionInfo(
-            session_id="session-1234",
+        event = CapsuleReceived(
             stream_id=0,
-            state=SessionState.CONNECTED,
-            path="/",
-            created_at=123.0,
+            capsule_type=constants.CLOSE_WEBTRANSPORT_SESSION_TYPE,
+            capsule_data=b"\x00\x00\x00\x01\xff",
         )
-        handler._sessions["session-1234"] = session_info
-        stream_info = handler._register_stream(
-            session_id="session-1234", stream_id=4, direction=StreamDirection.BIDIRECTIONAL
-        )
-        stream_info.state = state
-
-        if state == StreamState.HALF_CLOSED_LOCAL:
-            handler._update_stream_state_on_receive_end(stream_id=4)
-        else:
-            handler.send_webtransport_stream_data(stream_id=4, data=b"", end_stream=True)
-        assert 4 not in handler._streams
+        closed_spy = AsyncMock()
+        handler_with_session.on(event_type=EventType.SESSION_CLOSED, handler=closed_spy)
+        with caplog.at_level(logging.WARNING):
+            await handler_with_session._on_capsule_received(event)
+        assert "invalid UTF-8 reason string" in caplog.text
+        closed_spy.assert_called_once()
+        assert closed_spy.call_args.args[0].data["reason"] == "\ufffd"
 
 
 @pytest.mark.asyncio
@@ -487,6 +335,28 @@ class TestFlowControlUpdates:
         handler._sessions["session-1234"] = session_info
         handler._session_control_streams[0] = "session-1234"
         return handler
+
+    async def test_update_local_flow_control_no_session(self, handler: WebTransportProtocolHandler) -> None:
+        await handler._update_local_flow_control(session_id="non-existent")
+
+    async def test_update_local_flow_control_sends_nothing_when_not_needed(
+        self,
+        handler_with_session: WebTransportProtocolHandler,
+        mock_h3_engine: MagicMock,
+    ) -> None:
+        handler = handler_with_session
+        session_info = handler.get_session_info(session_id="session-1234")
+        assert session_info is not None
+        session_info.local_max_data = handler._config.flow_control_window_size
+        session_info.peer_data_sent = 0
+        session_info.local_max_streams_bidi = 100
+        session_info.peer_streams_bidi_opened = 10
+        session_info.local_max_streams_uni = 100
+        session_info.peer_streams_uni_opened = 10
+
+        await handler._update_local_flow_control(session_id="session-1234")
+
+        mock_h3_engine.send_capsule.assert_not_called()
 
     @pytest.mark.parametrize("auto_scale", [True, False])
     async def test_update_local_flow_control_sends_max_data(
@@ -550,27 +420,12 @@ class TestFlowControlUpdates:
         capsule_type = buf.pull_uint_var()
         assert capsule_type == expected_capsule_type
 
-    async def test_update_local_flow_control_sends_nothing_when_not_needed(
-        self,
-        handler_with_session: WebTransportProtocolHandler,
-        mock_h3_engine: MagicMock,
-    ) -> None:
-        handler = handler_with_session
-        session_info = handler.get_session_info(session_id="session-1234")
-        assert session_info is not None
-        session_info.local_max_data = handler._config.flow_control_window_size
-        session_info.peer_data_sent = 0
-        session_info.local_max_streams_bidi = 100
-        session_info.peer_streams_bidi_opened = 10
-        session_info.local_max_streams_uni = 100
-        session_info.peer_streams_uni_opened = 10
-
-        await handler._update_local_flow_control(session_id="session-1234")
-
-        mock_h3_engine.send_capsule.assert_not_called()
-
 
 class TestInitialization:
+    def test_create_factory_method(self, mock_quic: MagicMock) -> None:
+        handler = WebTransportProtocolHandler.create(quic_connection=mock_quic)
+        assert isinstance(handler, WebTransportProtocolHandler)
+
     def test_init_client_no_connection(self, mock_quic: MagicMock, mock_h3_engine: MagicMock) -> None:
         handler = WebTransportProtocolHandler(quic_connection=mock_quic, is_client=True, connection=None)
 
@@ -706,6 +561,27 @@ class TestWebTransportProtocolHandlerClient:
 
         mock_h3_engine.send_capsule.assert_not_called()
 
+    async def test_close_webtransport_session_not_found(
+        self, client_handler: WebTransportProtocolHandler, mock_h3_engine: MagicMock
+    ) -> None:
+        client_handler.close_webtransport_session(session_id="non-existent")
+        mock_h3_engine.send_capsule.assert_not_called()
+
+    async def test_create_webtransport_session_authority_fallback(
+        self,
+        client_handler: WebTransportProtocolHandler,
+        mock_quic: MagicMock,
+        mock_h3_engine: MagicMock,
+    ) -> None:
+        mock_quic.get_next_available_stream_id.return_value = 0
+        mock_quic.configuration.server_name = None
+
+        await client_handler.create_webtransport_session(path="/test")
+
+        mock_h3_engine.send_headers.assert_called_once()
+        headers = mock_h3_engine.send_headers.call_args.kwargs["headers"]
+        assert headers[":authority"] == "localhost"
+
     async def test_create_webtransport_session_limit_reached(self, client_handler: WebTransportProtocolHandler) -> None:
         client_handler._peer_max_sessions = 0
 
@@ -737,6 +613,11 @@ class TestWebTransportProtocolHandlerClient:
     ) -> None:
         client_handler.connection_established()
         mocker.patch.object(client_handler, "wait_for", side_effect=asyncio.TimeoutError)
+        mocker.patch.object(
+            client_handler,
+            "create_webtransport_session",
+            return_value=("session-1234", 0),
+        )
 
         with pytest.raises(asyncio.TimeoutError):
             await client_handler.establish_session(path="/", timeout=0.1)
@@ -760,6 +641,14 @@ class TestWebTransportProtocolHandlerClient:
         emitted_event = mock_session_closed_handler.call_args.args[0]
         assert emitted_event.data["session_id"] == session_id
         assert "404" in emitted_event.data["reason"]
+
+    async def test_handle_session_headers_inconsistent_state(self, client_handler: WebTransportProtocolHandler) -> None:
+        client_handler._session_control_streams[0] = "ghost-session"
+        ready_spy = AsyncMock()
+        client_handler.on(event_type=EventType.SESSION_READY, handler=ready_spy)
+        headers_event = HeadersReceived(stream_id=0, headers={":status": "200"}, stream_ended=False)
+        await client_handler._handle_session_headers(event=headers_event)
+        ready_spy.assert_not_called()
 
     async def test_handle_session_headers_success(
         self, client_handler: WebTransportProtocolHandler, mock_quic: MagicMock
@@ -961,6 +850,10 @@ class TestWebTransportProtocolHandlerCommon:
 
         cancel_spy.assert_not_called()
 
+    async def test_connection_established_when_already_connected(self, handler: WebTransportProtocolHandler) -> None:
+        handler._connection_state = ConnectionState.CONNECTED
+        handler.connection_established()
+
     async def test_connection_property_dead_ref(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         conn = WebTransportConnection(config=client_config)
         handler = WebTransportProtocolHandler(quic_connection=mock_quic, is_client=True, connection=conn)
@@ -969,12 +862,19 @@ class TestWebTransportProtocolHandlerCommon:
         del conn
         assert handler.connection is None
 
-    @pytest.mark.parametrize("is_unidirectional", [True, False])
+    @pytest.mark.parametrize(
+        "is_unidirectional, expected_capsule_type",
+        [
+            (False, constants.WT_STREAMS_BLOCKED_BIDI_TYPE),
+            (True, constants.WT_STREAMS_BLOCKED_UNI_TYPE),
+        ],
+    )
     async def test_create_stream_flow_control_error(
         self,
         handler: WebTransportProtocolHandler,
         mock_h3_engine: MagicMock,
         is_unidirectional: bool,
+        expected_capsule_type: int,
     ) -> None:
         session_info = WebTransportSessionInfo(
             session_id="session-1234",
@@ -992,6 +892,27 @@ class TestWebTransportProtocolHandlerCommon:
             handler.create_webtransport_stream(session_id="session-1234", is_unidirectional=is_unidirectional)
 
         mock_h3_engine.send_capsule.assert_called_once()
+        kwargs = mock_h3_engine.send_capsule.call_args.kwargs
+        buf = Buffer(data=kwargs["capsule_data"])
+        capsule_type = buf.pull_uint_var()
+        assert capsule_type == expected_capsule_type
+
+    async def test_create_stream_for_non_existent_session(self, handler: WebTransportProtocolHandler) -> None:
+        with pytest.raises(ProtocolError, match="not found or not ready"):
+            handler.create_webtransport_stream(session_id="non-existent")
+
+    async def test_create_stream_session_not_ready(self, handler: WebTransportProtocolHandler) -> None:
+        session_info = WebTransportSessionInfo(
+            session_id="session-1234",
+            stream_id=0,
+            state=SessionState.CONNECTING,
+            path="/",
+            created_at=123.0,
+        )
+        handler._sessions["session-1234"] = session_info
+
+        with pytest.raises(ProtocolError, match="not found or not ready"):
+            handler.create_webtransport_stream(session_id="session-1234")
 
     async def test_create_stream_success(self, handler: WebTransportProtocolHandler, mock_h3_engine: MagicMock) -> None:
         session_info = WebTransportSessionInfo(
@@ -1069,6 +990,11 @@ class TestWebTransportProtocolHandlerCommon:
         if connected_at is None:
             assert status["uptime"] == 0.0
 
+    async def test_get_health_status_no_sessions_created(self, handler: WebTransportProtocolHandler) -> None:
+        handler._stats["sessions_created"] = 0
+        status = handler.get_health_status()
+        assert status["error_rate"] == 0.0
+
     async def test_handle_datagram_pending_global_buffer_full(
         self,
         handler: WebTransportProtocolHandler,
@@ -1083,6 +1009,20 @@ class TestWebTransportProtocolHandlerCommon:
         assert "Global pending event buffer full" in caplog.text
         assert len(handler._pending_events) == 0
 
+    async def test_handle_datagram_pending_session_buffer_full(
+        self,
+        handler: WebTransportProtocolHandler,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        handler._config.max_pending_events_per_session = 0
+
+        with caplog.at_level(logging.WARNING):
+            event = DatagramReceived(stream_id=0, data=b"hello")
+            await handler._handle_datagram_received(event=event)
+
+        assert "Pending event buffer full for session stream 0" in caplog.text
+        assert not handler._pending_events.get(0)
+
     async def test_handle_h3_event_ignores_unknown_event(
         self, handler: WebTransportProtocolHandler, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1093,6 +1033,10 @@ class TestWebTransportProtocolHandlerCommon:
             await handler._handle_h3_event(h3_event=UnknownH3Event())
 
         assert "Ignoring unhandled H3 event" in caplog.text
+
+    async def test_handle_quic_event_when_closed(self, handler: WebTransportProtocolHandler) -> None:
+        await handler.close()
+        await handler.handle_quic_event(event=QuicEvent())
 
     async def test_handle_stream_data_for_connecting_session_is_not_buffered(
         self, handler: WebTransportProtocolHandler
@@ -1111,7 +1055,23 @@ class TestWebTransportProtocolHandlerCommon:
 
         assert not handler._pending_events
 
-    async def test_handle_stream_data_pending_buffer_full(
+    async def test_handle_stream_data_pending_global_buffer_full(
+        self,
+        handler: WebTransportProtocolHandler,
+        caplog: pytest.LogCaptureFixture,
+        mocker: MockerFixture,
+    ) -> None:
+        handler._config.max_total_pending_events = 0
+        abort_spy = mocker.spy(handler, "abort_stream")
+
+        with caplog.at_level(logging.WARNING):
+            event = WebTransportStreamDataReceived(stream_id=4, session_id=0, data=b"hello", stream_ended=True)
+            await handler._handle_webtransport_stream_data(event=event)
+
+        assert "Global pending event buffer full" in caplog.text
+        abort_spy.assert_called_with(stream_id=4, error_code=ErrorCodes.WT_BUFFERED_STREAM_REJECTED)
+
+    async def test_handle_stream_data_pending_session_buffer_full(
         self,
         handler: WebTransportProtocolHandler,
         caplog: pytest.LogCaptureFixture,
@@ -1152,6 +1112,21 @@ class TestWebTransportProtocolHandlerCommon:
         assert emitted_event.data["session_id"] == "session-1234"
         assert emitted_event.data["reason"] == "Control stream reset"
 
+    @pytest.mark.parametrize("settings_data", [{}, {"settings": None}])
+    async def test_on_settings_received_no_settings(
+        self, handler: WebTransportProtocolHandler, settings_data: dict
+    ) -> None:
+        event = Event(type=EventType.SETTINGS_RECEIVED, data=settings_data)
+
+        await handler._on_settings_received(event)
+        assert handler._peer_max_sessions is None
+
+    async def test_on_settings_received_no_connection(self, mock_quic: MagicMock) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
+        handler._connection_ref = None
+        event = Event(type=EventType.SETTINGS_RECEIVED, data={"settings": {}})
+        await handler._on_settings_received(event)
+
     async def test_on_settings_received_updates_peer_limits(self, handler: WebTransportProtocolHandler) -> None:
         session_info = WebTransportSessionInfo(
             session_id="pre-existing",
@@ -1180,11 +1155,13 @@ class TestWebTransportProtocolHandlerCommon:
 
     async def test_pending_events_buffering_and_processing(self, handler: WebTransportProtocolHandler) -> None:
         stream_data_event = WebTransportStreamDataReceived(stream_id=4, session_id=0, data=b"hello", stream_ended=True)
+        datagram_event = DatagramReceived(stream_id=0, data=b"world")
 
         await handler._handle_webtransport_stream_data(event=stream_data_event)
+        await handler._handle_datagram_received(event=datagram_event)
 
         assert not handler._streams
-        assert handler._pending_events[0][0][1] == stream_data_event
+        assert len(handler._pending_events[0]) == 2
 
         session_info = WebTransportSessionInfo(
             session_id="session-1234",
@@ -1195,7 +1172,9 @@ class TestWebTransportProtocolHandlerCommon:
         )
         handler._register_session(session_id="session-1234", session_info=session_info)
         mock_stream_opened_handler: AsyncMock = AsyncMock()
+        mock_datagram_handler: AsyncMock = AsyncMock()
         handler.on(event_type=EventType.STREAM_OPENED, handler=mock_stream_opened_handler)
+        handler.on(event_type=EventType.DATAGRAM_RECEIVED, handler=mock_datagram_handler)
 
         handler._process_pending_events(connect_stream_id=0)
         await asyncio.sleep(0)
@@ -1203,9 +1182,22 @@ class TestWebTransportProtocolHandlerCommon:
         assert not handler._pending_events
         assert 4 in handler._streams
         mock_stream_opened_handler.assert_called_once()
+        mock_datagram_handler.assert_called_once()
         emitted_event = mock_stream_opened_handler.call_args.args[0]
         assert emitted_event.data["stream_id"] == 4
         assert emitted_event.data["initial_payload"]["data"] == b"hello"
+        emitted_event_datagram = mock_datagram_handler.call_args.args[0]
+        assert emitted_event_datagram.data["data"] == b"world"
+
+    async def test_process_buffered_events_unknown_event(self, handler: WebTransportProtocolHandler) -> None:
+        handler._pending_events[0] = [(123.0, CapsuleReceived(stream_id=0, capsule_type=1, capsule_data=b""))]
+        handler._pending_events_count = 1
+        handler._process_pending_events(connect_stream_id=0)
+        await asyncio.sleep(0)
+        assert not handler._pending_events
+
+    async def test_process_pending_events_no_events(self, handler: WebTransportProtocolHandler) -> None:
+        handler._process_pending_events(connect_stream_id=99)
 
     async def test_read_stream_complete_success(self, handler: WebTransportProtocolHandler) -> None:
         async def emit_data() -> None:
@@ -1250,6 +1242,17 @@ class TestWebTransportProtocolHandlerCommon:
         assert create_mock.call_count == 2
         sleep_mock.assert_called_once_with(1.0)
 
+    async def test_recover_session_generic_exception(
+        self, handler: WebTransportProtocolHandler, mocker: MockerFixture
+    ) -> None:
+        original_session = WebTransportSessionInfo(
+            session_id="s1", stream_id=0, state=SessionState.CLOSED, path="/", created_at=123.0
+        )
+        handler._sessions["s1"] = original_session
+        mocker.patch.object(handler, "create_webtransport_session", side_effect=RuntimeError("Generic error"))
+        result = await handler.recover_session(session_id="s1", max_retries=1)
+        assert result is False
+
     async def test_recover_session_not_found(self, handler: WebTransportProtocolHandler) -> None:
         result = await handler.recover_session(session_id="non-existent")
 
@@ -1277,6 +1280,12 @@ class TestWebTransportProtocolHandlerCommon:
         assert result is True
         create_mock.assert_called_once_with(path="/recover", headers={"x-foo": "bar"})
 
+    async def test_send_data_for_stream_with_no_session(self, handler: WebTransportProtocolHandler) -> None:
+        handler._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
+        handler._sessions.pop("s1", None)
+        with pytest.raises(ProtocolError, match="No session found for stream"):
+            handler.send_webtransport_stream_data(stream_id=4, data=b"foo")
+
     async def test_send_webtransport_datagram(
         self, handler: WebTransportProtocolHandler, mock_h3_engine: MagicMock
     ) -> None:
@@ -1293,6 +1302,23 @@ class TestWebTransportProtocolHandlerCommon:
 
         mock_h3_engine.send_datagram.assert_called_once_with(stream_id=0, data=b"ping")
         assert handler.stats["datagrams_sent"] == 1
+
+    async def test_send_webtransport_datagram_session_not_found(self, handler: WebTransportProtocolHandler) -> None:
+        with pytest.raises(ProtocolError, match="not found or not ready"):
+            handler.send_webtransport_datagram(session_id="non-existent", data=b"ping")
+
+    async def test_send_webtransport_datagram_session_not_ready(self, handler: WebTransportProtocolHandler) -> None:
+        session_info = WebTransportSessionInfo(
+            session_id="session-1234",
+            stream_id=0,
+            state=SessionState.CONNECTING,
+            path="/",
+            created_at=123.0,
+        )
+        handler._sessions["session-1234"] = session_info
+
+        with pytest.raises(ProtocolError, match="not found or not ready"):
+            handler.send_webtransport_datagram(session_id="session-1234", data=b"ping")
 
     async def test_send_webtransport_stream_data_flow_control_error(self, handler: WebTransportProtocolHandler) -> None:
         session_info = WebTransportSessionInfo(
@@ -1313,8 +1339,9 @@ class TestWebTransportProtocolHandlerCommon:
         with pytest.raises(FlowControlError, match="Session data limit reached"):
             handler.send_webtransport_stream_data(stream_id=4, data=b"a" * 101)
 
-    async def test_send_webtransport_stream_data_on_half_closed_stream(
-        self, handler: WebTransportProtocolHandler
+    @pytest.mark.parametrize("state", [StreamState.HALF_CLOSED_LOCAL, StreamState.CLOSED])
+    async def test_send_webtransport_stream_data_on_unwritable_stream(
+        self, handler: WebTransportProtocolHandler, state: StreamState
     ) -> None:
         session_info = WebTransportSessionInfo(
             session_id="session-1234",
@@ -1329,10 +1356,14 @@ class TestWebTransportProtocolHandlerCommon:
             stream_id=4,
             direction=StreamDirection.BIDIRECTIONAL,
         )
-        stream.state = StreamState.HALF_CLOSED_LOCAL
+        stream.state = state
 
         with pytest.raises(ProtocolError, match="not found or not writable"):
             handler.send_webtransport_stream_data(stream_id=4, data=b"foo")
+
+    async def test_trigger_transmission_no_connection(self, mock_quic: MagicMock) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic, connection=None)
+        handler.abort_stream(stream_id=4, error_code=1)
 
 
 @pytest.mark.asyncio
@@ -1376,11 +1407,13 @@ class TestWebTransportProtocolHandlerServer:
         server_handler.on(event_type=EventType.SESSION_READY, handler=mock_session_ready_handler)
 
         server_handler.accept_webtransport_session(stream_id=0, session_id=session_id)
+        await asyncio.sleep(0)
 
         mock_h3_engine.send_headers.assert_called_with(stream_id=0, headers={":status": "200"})
         session_info_after = server_handler.get_session_info(session_id=session_id)
         assert session_info_after is not None
         assert session_info_after.state == SessionState.CONNECTED
+        mock_session_ready_handler.assert_called_once()
 
     async def test_accept_webtransport_session_with_invalid_id(
         self, server_handler: WebTransportProtocolHandler
@@ -1408,6 +1441,24 @@ class TestWebTransportProtocolHandlerServer:
         assert session_info.state == SessionState.CONNECTING
         assert session_info.path == "/chat"
         assert session_info.stream_id == 0
+
+    async def test_handle_session_headers_connect_request_no_connection(
+        self, mock_quic: MagicMock, server_config: ServerConfig
+    ) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic, is_client=False, connection=None)
+        handler._config = server_config
+        request_spy = AsyncMock()
+        handler.on(event_type=EventType.SESSION_REQUEST, handler=request_spy)
+
+        headers_event = HeadersReceived(
+            stream_id=0,
+            headers={":method": "CONNECT", ":protocol": "webtransport"},
+            stream_ended=False,
+        )
+        await handler._handle_session_headers(event=headers_event)
+
+        request_spy.assert_called_once()
+        assert "connection" not in request_spy.call_args.args[0].data
 
     async def test_handle_session_headers_non_connect_and_send_fails(
         self,
@@ -1454,3 +1505,279 @@ class TestWebTransportProtocolHandlerServer:
 
         mock_quic.reset_stream.assert_called_once_with(stream_id=4, error_code=ErrorCodes.H3_REQUEST_REJECTED)
         assert len(server_handler._sessions) == 1
+
+
+@pytest.mark.asyncio
+class TestCoverageGaps:
+    async def test_abort_receive_only_stream(
+        self, handler: WebTransportProtocolHandler, mock_quic: MagicMock, mocker: MockerFixture
+    ) -> None:
+        mock_stream = MagicMock()
+        mock_stream.receiver.is_finished = False
+        mock_quic._streams[5] = mock_stream
+        mocker.patch(
+            "pywebtransport.protocol.handler.protocol_utils.can_send_data_on_stream",
+            return_value=False,
+        )
+        mocker.patch(
+            "pywebtransport.protocol.handler.protocol_utils.can_receive_data_on_stream",
+            return_value=True,
+        )
+        mocker.patch(
+            "pywebtransport.protocol.handler.protocol_utils.webtransport_code_to_http_code",
+            return_value=0xDEADBEEF,
+        )
+
+        handler.abort_stream(stream_id=5, error_code=1)
+
+        mock_quic.reset_stream.assert_not_called()
+        mock_quic.stop_stream.assert_called_once_with(stream_id=5, error_code=0xDEADBEEF)
+
+    async def test_capsule_handler_ignores_non_capsule_events(self, handler: WebTransportProtocolHandler) -> None:
+        await handler._capsule_received_handler(Event(type=EventType.SESSION_REQUEST, data={}))
+
+    async def test_cleanup_session_idempotent(self, handler: WebTransportProtocolHandler) -> None:
+        handler._cleanup_session(session_id="non-existent")
+
+    async def test_cleanup_session_with_pre_cleaned_stream(self, handler: WebTransportProtocolHandler) -> None:
+        session_info = WebTransportSessionInfo(
+            session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=1
+        )
+        handler._register_session(session_id="s1", session_info=session_info)
+        stream_info = handler._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
+        assert 4 in handler._session_owned_streams["s1"]
+        handler._streams.pop(4)
+        handler._cleanup_session(session_id="s1")
+        assert "s1" not in handler._sessions
+        assert stream_info is not None
+
+    async def test_cleanup_stream_without_session_owner(self, handler: WebTransportProtocolHandler) -> None:
+        handler._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
+        handler._data_stream_to_session.pop(4)
+
+        handler._cleanup_stream(stream_id=4)
+
+        assert 4 not in handler._streams
+
+    async def test_close_before_connection_established(self, mock_quic: MagicMock) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
+        await handler.close()
+        assert handler._cleanup_pending_events_task is None
+
+    async def test_close_without_cleanup_task(self, mock_quic: MagicMock, mock_h3_engine: MagicMock) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
+        handler._config.pending_event_ttl = 0
+
+        handler.connection_established()
+        await handler.close()
+
+        assert handler._cleanup_pending_events_task is None
+        mock_h3_engine.off.assert_called()
+
+    async def test_handle_datagram_no_connection(self, mock_quic: MagicMock, mock_h3_engine: MagicMock) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic, connection=None)
+        event = DatagramReceived(stream_id=0, data=b"hello")
+
+        await handler._handle_datagram_received(event=event)
+
+    async def test_handle_session_headers_no_record_activity(
+        self, mock_quic: MagicMock, mock_connection: MagicMock
+    ) -> None:
+        del mock_connection.record_activity
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic, connection=mock_connection, is_client=True)
+        await handler._handle_session_headers(
+            event=HeadersReceived(stream_id=0, headers={":status": "200"}, stream_ended=False)
+        )
+
+    @pytest.mark.parametrize("state", [QuicConnectionState.CLOSING, QuicConnectionState.DRAINING])
+    async def test_handle_orphan_stream_data_during_closing(
+        self, handler: WebTransportProtocolHandler, mock_quic: MagicMock, state: QuicConnectionState
+    ) -> None:
+        mock_quic._state = state
+        handler._config.pending_event_ttl = 0
+        event = WebTransportStreamDataReceived(stream_id=4, session_id=99, data=b"", stream_ended=True)
+        await handler._handle_webtransport_stream_data(event=event)
+
+    async def test_handle_orphan_stream_data_without_buffering(
+        self, handler: WebTransportProtocolHandler, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        handler._config.pending_event_ttl = 0
+        event = WebTransportStreamDataReceived(stream_id=4, session_id=99, data=b"", stream_ended=True)
+
+        with caplog.at_level(logging.ERROR):
+            await handler._handle_webtransport_stream_data(event=event)
+
+        assert "No session mapping found" in caplog.text
+
+    async def test_handle_stream_reset_on_data_stream(self, handler: WebTransportProtocolHandler) -> None:
+        handler._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
+        await handler.handle_quic_event(event=StreamReset(stream_id=4, error_code=123))
+        assert 4 not in handler._streams
+
+    async def test_handle_stream_reset_on_non_session_stream(self, handler: WebTransportProtocolHandler) -> None:
+        reset_event = StreamReset(stream_id=999, error_code=123)
+        closed_spy = AsyncMock()
+        handler.on(event_type=EventType.SESSION_CLOSED, handler=closed_spy)
+
+        await handler.handle_quic_event(event=reset_event)
+
+        closed_spy.assert_not_called()
+
+    async def test_read_stream_complete_reentrant_handler(self, handler: WebTransportProtocolHandler) -> None:
+        future = asyncio.get_running_loop().create_future()
+        chunks: list[bytes] = []
+        handler_event: Event | None = None
+
+        async def data_handler(event: Event) -> None:
+            nonlocal handler_event
+            if future.done():
+                return
+            handler_event = event
+            if event.data and event.data.get("data"):
+                chunks.append(event.data.get("data", b""))
+            if event.data and event.data.get("end_stream"):
+                future.set_result(None)
+
+        handler.on(event_type="stream_data_received:4", handler=data_handler)
+
+        await handler.emit(
+            event_type="stream_data_received:4",
+            data={"data": b"part1", "end_stream": True},
+        )
+        await asyncio.sleep(0)
+
+        assert future.done()
+        assert handler_event is not None
+        if handler_event:
+            await data_handler(handler_event)
+        assert b"".join(chunks) == b"part1"
+
+    async def test_teardown_with_no_h3_engine(self, mock_quic: MagicMock) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
+        handler._h3 = None  # type: ignore[assignment]
+        await handler.close()
+
+    async def test_update_flow_control_with_window_disabled(
+        self, handler: WebTransportProtocolHandler, mock_h3_engine: MagicMock
+    ) -> None:
+        session_info = WebTransportSessionInfo(
+            session_id="s1",
+            stream_id=0,
+            state=SessionState.CONNECTED,
+            path="/",
+            created_at=123.0,
+            local_max_streams_bidi=100,
+            local_max_streams_uni=100,
+        )
+        handler._sessions["s1"] = session_info
+        handler._config.flow_control_window_size = 0
+
+        await handler._update_local_flow_control(session_id="s1")
+
+        mock_h3_engine.send_capsule.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "update_func_name",
+        ["_update_stream_state_on_receive_end", "_update_stream_state_on_send_end"],
+    )
+    async def test_update_stream_state_with_invalid_id(
+        self, handler: WebTransportProtocolHandler, update_func_name: str
+    ) -> None:
+        update_func = getattr(handler, update_func_name)
+        update_func(stream_id=999)
+
+    async def test_create_unidirectional_stream_on_first_data(self, handler: WebTransportProtocolHandler) -> None:
+        session_info = WebTransportSessionInfo(
+            session_id="session-1234", stream_id=0, state=SessionState.CONNECTING, path="/", created_at=123.0
+        )
+        handler._register_session(session_id="session-1234", session_info=session_info)
+        event = WebTransportStreamDataReceived(stream_id=3, session_id=0, data=b"hello", stream_ended=True)
+        opened_spy = AsyncMock()
+        handler.on(event_type=EventType.STREAM_OPENED, handler=opened_spy)
+
+        await handler._handle_webtransport_stream_data(event=event)
+
+        opened_spy.assert_called_once()
+        stream_info = handler._streams[3]
+        assert stream_info.direction == StreamDirection.RECEIVE_ONLY
+        assert session_info.peer_streams_uni_opened == 1
+
+
+@pytest.mark.asyncio
+class TestFinalCoveragePush:
+    async def test_abort_send_only_stream(
+        self, handler: WebTransportProtocolHandler, mock_quic: MagicMock, mocker: MockerFixture
+    ) -> None:
+        mock_stream = MagicMock()
+        mock_stream.sender._reset_error_code = None
+        mock_quic._streams[1] = mock_stream
+        mocker.patch(
+            "pywebtransport.protocol.handler.protocol_utils.can_send_data_on_stream",
+            return_value=True,
+        )
+        mocker.patch(
+            "pywebtransport.protocol.handler.protocol_utils.can_receive_data_on_stream",
+            return_value=False,
+        )
+
+        handler.abort_stream(stream_id=1, error_code=1)
+
+        mock_quic.reset_stream.assert_called_once()
+        mock_quic.stop_stream.assert_not_called()
+
+    async def test_close_with_completed_cleanup_task(self, mock_quic: MagicMock, mock_h3_engine: MagicMock) -> None:
+        handler = WebTransportProtocolHandler(quic_connection=mock_quic)
+        handler.connection_established()
+        assert handler._cleanup_pending_events_task is not None
+
+        async def dummy_coro() -> None:
+            pass
+
+        handler._cleanup_pending_events_task = asyncio.create_task(dummy_coro())
+        await asyncio.sleep(0)
+
+        await handler.close()
+
+    async def test_send_blocked_capsule_on_send_data(
+        self,
+        handler: WebTransportProtocolHandler,
+        mock_h3_engine: MagicMock,
+    ) -> None:
+        session_info = WebTransportSessionInfo(
+            session_id="s1", stream_id=0, state=SessionState.CONNECTED, path="/", created_at=123.0
+        )
+        session_info.peer_max_data = 10
+        handler._sessions["s1"] = session_info
+        handler._register_stream(session_id="s1", stream_id=4, direction=StreamDirection.BIDIRECTIONAL)
+
+        with pytest.raises(FlowControlError):
+            handler.send_webtransport_stream_data(stream_id=4, data=b"x" * 11)
+
+        mock_h3_engine.send_capsule.assert_called_once()
+        kwargs = mock_h3_engine.send_capsule.call_args.kwargs
+        buf = Buffer(data=kwargs["capsule_data"])
+        capsule_type = buf.pull_uint_var()
+        assert capsule_type == constants.WT_DATA_BLOCKED_TYPE
+
+    @pytest.mark.parametrize("state", [StreamState.HALF_CLOSED_LOCAL, StreamState.HALF_CLOSED_REMOTE])
+    async def test_update_stream_state_to_closed(
+        self, handler: WebTransportProtocolHandler, state: StreamState
+    ) -> None:
+        session_info = WebTransportSessionInfo(
+            session_id="session-1234",
+            stream_id=0,
+            state=SessionState.CONNECTED,
+            path="/",
+            created_at=123.0,
+        )
+        handler._sessions["session-1234"] = session_info
+        stream_info = handler._register_stream(
+            session_id="session-1234", stream_id=4, direction=StreamDirection.BIDIRECTIONAL
+        )
+        stream_info.state = state
+
+        if state == StreamState.HALF_CLOSED_LOCAL:
+            handler._update_stream_state_on_receive_end(stream_id=4)
+        else:
+            handler.send_webtransport_stream_data(stream_id=4, data=b"", end_stream=True)
+        assert 4 not in handler._streams

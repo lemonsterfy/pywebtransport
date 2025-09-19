@@ -35,8 +35,14 @@ For more detailed instructions, including virtual environments and platform-spec
 # server.py
 import asyncio
 
-from pywebtransport import ServerApp, ServerConfig, WebTransportSession, WebTransportStream
-from pywebtransport.exceptions import ConnectionError, SessionError
+from pywebtransport import (
+    ConnectionError,
+    ServerApp,
+    ServerConfig,
+    SessionError,
+    WebTransportSession,
+    WebTransportStream,
+)
 from pywebtransport.utils import generate_self_signed_cert
 
 generate_self_signed_cert(hostname="localhost")
