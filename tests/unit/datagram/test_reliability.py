@@ -73,6 +73,17 @@ class TestDatagramReliabilityLayer:
         mock_close.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_context_manager_with_exception(self, mocker: MockerFixture, mock_transport: Any) -> None:
+        reliability_layer = DatagramReliabilityLayer(datagram_transport=mock_transport)
+        mock_close = mocker.patch.object(reliability_layer, "close", new_callable=mocker.AsyncMock)
+
+        with pytest.raises(ValueError, match="test exception"):
+            async with reliability_layer:
+                raise ValueError("test exception")
+
+        mock_close.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_close(self, mock_transport: Any, reliability_layer: DatagramReliabilityLayer) -> None:
         async def dummy_task_coro() -> None:
             await asyncio.sleep(30)
@@ -236,6 +247,22 @@ class TestDatagramReliabilityLayer:
         layer._start_background_tasks()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method_name, kwargs",
+        [
+            ("_handle_ack_message", {"payload": b"123"}),
+            ("_handle_data_message", {"payload": b"\x00\x00\x00\x01data"}),
+            ("_on_datagram_received", {"event": Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"data"})}),
+        ],
+    )
+    async def test_internal_handlers_do_nothing_before_activation(
+        self, mock_transport: Any, method_name: str, kwargs: dict[str, Any]
+    ) -> None:
+        layer = DatagramReliabilityLayer(datagram_transport=mock_transport)
+        method = getattr(layer, method_name)
+        await method(**kwargs)
+
+    @pytest.mark.asyncio
     async def test_on_datagram_received_routes_correctly(
         self, mocker: MockerFixture, reliability_layer: DatagramReliabilityLayer
     ) -> None:
@@ -277,7 +304,7 @@ class TestDatagramReliabilityLayer:
         self, mocker: MockerFixture, reliability_layer: DatagramReliabilityLayer
     ) -> None:
         mock_handle_ack = mocker.patch.object(reliability_layer, "_handle_ack_message")
-        malformed_event = Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"\x05ACK" + b"12"})
+        malformed_event = Event(type=EventType.DATAGRAM_RECEIVED, data={"data": b"\xff"})
 
         await reliability_layer._on_datagram_received(event=malformed_event)
 
@@ -362,6 +389,15 @@ class TestDatagramReliabilityLayer:
         await reliability_layer._handle_ack_message(payload=b"not-a-number")
         await reliability_layer._handle_ack_message(payload=str(seq + 1).encode("utf-8"))
         assert not reliability_layer._pending_acks
+
+    @pytest.mark.asyncio
+    async def test_retry_loop_continues_on_no_work(
+        self, mocker: MockerFixture, reliability_layer: DatagramReliabilityLayer
+    ) -> None:
+        mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
+        assert not reliability_layer._pending_acks
+
+        await reliability_layer._retry_loop()
 
     @pytest.mark.asyncio
     async def test_retry_loop_retries_unacked_message(

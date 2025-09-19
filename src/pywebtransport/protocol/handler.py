@@ -551,7 +551,7 @@ class WebTransportProtocolHandler(EventEmitter):
             if self._pending_events_count >= self._config.max_total_pending_events:
                 logger.warning("Global pending event buffer full (%d), dropping datagram.", self._pending_events_count)
                 return
-            if len(self._pending_events[event.stream_id]) >= self._config.max_pending_events_per_session:
+            if len(self._pending_events.get(event.stream_id, [])) >= self._config.max_pending_events_per_session:
                 logger.warning("Pending event buffer full for session stream %d, dropping datagram.", event.stream_id)
                 return
 
@@ -676,6 +676,8 @@ class WebTransportProtocolHandler(EventEmitter):
                 },
             )
             self._cleanup_session(session_id=session_id)
+        else:
+            self._cleanup_stream(stream_id=event.stream_id)
 
     async def _handle_webtransport_stream_data(self, *, event: WebTransportStreamDataReceived) -> None:
         """Handle data received on a WebTransport data stream."""
@@ -696,7 +698,7 @@ class WebTransportProtocolHandler(EventEmitter):
                     )
                     self.abort_stream(stream_id=stream_id, error_code=ErrorCodes.WT_BUFFERED_STREAM_REJECTED)
                     return
-                if len(self._pending_events[session_stream_id]) >= self._config.max_pending_events_per_session:
+                if len(self._pending_events.get(session_stream_id, [])) >= self._config.max_pending_events_per_session:
                     logger.warning(
                         "Pending event buffer full for session stream %d, rejecting stream %d.",
                         session_stream_id,
@@ -753,7 +755,6 @@ class WebTransportProtocolHandler(EventEmitter):
 
         try:
             raw_data = event.capsule_data
-            raw_data_len = len(raw_data)
             buf = Buffer(data=raw_data)
 
             match event.capsule_type:
@@ -795,7 +796,15 @@ class WebTransportProtocolHandler(EventEmitter):
                         raise ProtocolError("Flow control limit decreased for MAX_STREAMS_UNI")
                 case constants.CLOSE_WEBTRANSPORT_SESSION_TYPE:
                     app_code = buf.pull_uint32()
-                    reason = buf.pull_bytes(raw_data_len - buf.tell()).decode("utf-8", errors="ignore")
+                    reason_bytes = buf.pull_bytes(len(raw_data) - buf.tell())
+                    try:
+                        reason = reason_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        logger.warning(
+                            "Received CLOSE_SESSION capsule for session %s with invalid UTF-8 reason string.",
+                            session_id,
+                        )
+                        reason = reason_bytes.decode("utf-8", errors="replace")
                     logger.info(
                         "Received CLOSE_SESSION capsule: code=%d reason=%s",
                         app_code,
@@ -818,7 +827,7 @@ class WebTransportProtocolHandler(EventEmitter):
                         data={"session_id": session_id},
                     )
 
-        except (BufferReadError, UnicodeDecodeError):
+        except BufferReadError:
             logger.warning("Could not parse flow control capsule for session %s", session_id)
 
     async def _on_settings_received(self, event: Event) -> None:

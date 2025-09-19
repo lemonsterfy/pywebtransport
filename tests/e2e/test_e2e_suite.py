@@ -11,57 +11,43 @@ import pytest
 from pywebtransport import ClientConfig, ClientError, WebTransportClient
 
 from .test_01_basic_connection import test_basic_connection as run_01_basic_connection
-from .test_02_simple_stream import (
-    test_multiple_messages as run_02_multiple_messages,
-    test_simple_echo as run_02_simple_echo,
-    test_stream_creation as run_02_stream_creation,
-)
-from .test_03_concurrent_streams import (
-    test_concurrent_streams as run_03_concurrent_streams,
-    test_sequential_streams as run_03_sequential_streams,
-    test_stream_lifecycle as run_03_stream_lifecycle,
-    test_stream_stress as run_03_stream_stress,
-)
-from .test_04_data_transfer import (
-    test_binary_data as run_04_binary_data,
-    test_chunked_transfer as run_04_chunked_transfer,
-    test_medium_data as run_04_medium_data,
-    test_performance_benchmark as run_04_performance_benchmark,
-    test_small_data as run_04_small_data,
-)
-from .test_05_datagrams import (
-    test_basic_datagram as run_05_basic_datagram,
-    test_datagram_burst as run_05_datagram_burst,
-    test_datagram_priority as run_05_datagram_priority,
-    test_datagram_queue_behavior as run_05_datagram_queue_behavior,
-    test_datagram_sizes as run_05_datagram_sizes,
-    test_datagram_ttl as run_05_datagram_ttl,
-    test_json_datagrams as run_05_json_datagrams,
-    test_multiple_datagrams as run_05_multiple_datagrams,
-)
-from .test_06_error_handling import (
-    test_connection_timeout as run_06_connection_timeout,
-    test_datagram_errors as run_06_datagram_errors,
-    test_invalid_server_address as run_06_invalid_address,
-    test_malformed_operations as run_06_malformed_operations,
-    test_read_timeout as run_06_read_timeout,
-    test_resource_exhaustion as run_06_resource_exhaustion,
-    test_session_closure_handling as run_06_session_closure,
-    test_stream_errors as run_06_stream_errors,
-)
-from .test_07_advanced_features import (
-    test_client_statistics as run_07_client_statistics,
-    test_connection_info as run_07_connection_info,
-    test_datagram_statistics as run_07_datagram_statistics,
-    test_performance_monitoring as run_07_performance_monitoring,
-    test_session_lifecycle_events as run_07_session_lifecycle_events,
-    test_session_statistics as run_07_session_statistics,
-    test_stream_management as run_07_stream_management,
-)
-from .test_08_structured_messaging import (
-    test_json_messaging as run_08_json_messaging,
-    test_msgpack_messaging as run_08_msgpack_messaging,
-)
+from .test_02_simple_stream import test_multiple_messages as run_02_multiple_messages
+from .test_02_simple_stream import test_simple_echo as run_02_simple_echo
+from .test_02_simple_stream import test_stream_creation as run_02_stream_creation
+from .test_03_concurrent_streams import test_concurrent_streams as run_03_concurrent_streams
+from .test_03_concurrent_streams import test_sequential_streams as run_03_sequential_streams
+from .test_03_concurrent_streams import test_stream_lifecycle as run_03_stream_lifecycle
+from .test_03_concurrent_streams import test_stream_stress as run_03_stream_stress
+from .test_04_data_transfer import test_binary_data as run_04_binary_data
+from .test_04_data_transfer import test_chunked_transfer as run_04_chunked_transfer
+from .test_04_data_transfer import test_medium_data as run_04_medium_data
+from .test_04_data_transfer import test_performance_benchmark as run_04_performance_benchmark
+from .test_04_data_transfer import test_small_data as run_04_small_data
+from .test_05_datagrams import test_basic_datagram as run_05_basic_datagram
+from .test_05_datagrams import test_datagram_burst as run_05_datagram_burst
+from .test_05_datagrams import test_datagram_priority as run_05_datagram_priority
+from .test_05_datagrams import test_datagram_queue_behavior as run_05_datagram_queue_behavior
+from .test_05_datagrams import test_datagram_sizes as run_05_datagram_sizes
+from .test_05_datagrams import test_datagram_ttl as run_05_datagram_ttl
+from .test_05_datagrams import test_json_datagrams as run_05_json_datagrams
+from .test_05_datagrams import test_multiple_datagrams as run_05_multiple_datagrams
+from .test_06_error_handling import test_connection_timeout as run_06_connection_timeout
+from .test_06_error_handling import test_datagram_errors as run_06_datagram_errors
+from .test_06_error_handling import test_invalid_server_address as run_06_invalid_address
+from .test_06_error_handling import test_malformed_operations as run_06_malformed_operations
+from .test_06_error_handling import test_read_timeout as run_06_read_timeout
+from .test_06_error_handling import test_resource_exhaustion as run_06_resource_exhaustion
+from .test_06_error_handling import test_session_closure_handling as run_06_session_closure
+from .test_06_error_handling import test_stream_errors as run_06_stream_errors
+from .test_07_advanced_features import test_client_statistics as run_07_client_statistics
+from .test_07_advanced_features import test_connection_info as run_07_connection_info
+from .test_07_advanced_features import test_datagram_statistics as run_07_datagram_statistics
+from .test_07_advanced_features import test_performance_monitoring as run_07_performance_monitoring
+from .test_07_advanced_features import test_session_lifecycle_events as run_07_session_lifecycle_events
+from .test_07_advanced_features import test_session_statistics as run_07_session_statistics
+from .test_07_advanced_features import test_stream_management as run_07_stream_management
+from .test_08_structured_messaging import test_json_messaging as run_08_json_messaging
+from .test_08_structured_messaging import test_msgpack_messaging as run_08_msgpack_messaging
 
 
 async def _is_server_ready() -> bool:

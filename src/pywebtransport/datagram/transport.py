@@ -588,9 +588,14 @@ class WebTransportDatagramTransport(EventEmitter):
         if self._incoming_queue is None:
             raise DatagramError("Internal state error: queue is None despite transport being initialized.")
 
-        start_time = time.time()
-        datagram = await self._incoming_queue.get(timeout=timeout)
-        receive_time = time.time() - start_time
+        try:
+            start_time = time.time()
+            datagram = await self._incoming_queue.get(timeout=timeout)
+            receive_time = time.time() - start_time
+        except TimeoutError as e:
+            raise e
+        except Exception as e:
+            raise DatagramError(f"Failed to receive datagram with metadata: {e}") from e
 
         self._update_receive_stats(datagram=datagram, receive_time=receive_time)
         return {
@@ -641,6 +646,11 @@ class WebTransportDatagramTransport(EventEmitter):
 
     async def send_multiple(self, *, datagrams: list[Data], priority: int = 0, ttl: float | None = None) -> int:
         """Send multiple datagrams and return the number successfully sent."""
+        if not self._is_initialized:
+            raise DatagramError(
+                "WebTransportDatagramTransport is not initialized. Its factory "
+                "should call 'await transport.initialize()' before use."
+            )
         sent_count = 0
         for data in datagrams:
             try:

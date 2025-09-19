@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from aioquic.asyncio.protocol import QuicConnectionProtocol
-from aioquic.quic.events import StreamDataReceived
+from aioquic.quic.connection import QuicConnection
 from pytest_mock import MockerFixture
 
 from pywebtransport import (
@@ -49,6 +49,7 @@ def mock_loop(mocker: MockerFixture) -> Any:
     mock_protocol_instance = mocker.MagicMock()
     loop.create_datagram_endpoint = mocker.AsyncMock(return_value=(mock_endpoint, mock_protocol_instance))
     loop.time.return_value = 1000.0
+    loop.call_at = mocker.MagicMock()
     loop.call_later.return_value = mocker.MagicMock()
     return loop
 
@@ -205,25 +206,41 @@ class TestWebTransportConnection:
 
         assert connection.is_closing is expected
 
-    def test_info_property_full(self, connection: WebTransportConnection, mock_quic_connection: Any) -> None:
-        mock_quic_connection._packets_sent = 500
-        mock_quic_connection._packets_received = 400
-        connection._quic_connection = mock_quic_connection
-
+    def test_info_property_scenarios(
+        self,
+        connection: WebTransportConnection,
+        mock_quic_connection: Any,
+        mock_protocol_handler: Any,
+    ) -> None:
         info = connection.info
-
-        assert info.packets_sent == 500
-        assert info.packets_received == 400
-
-    def test_info_property_minimal(self, connection: WebTransportConnection) -> None:
-        info = connection.info
-
         assert info.bytes_sent == 0
         assert info.packets_sent == 0
 
-    def test_address_properties_no_transport(self, connection: WebTransportConnection) -> None:
+        mock_quic_connection._packets_sent = 500
+        mock_quic_connection._packets_received = 400
+        connection._quic_connection = mock_quic_connection
+        info = connection.info
+        assert info.packets_sent == 500
+        assert info.packets_received == 400
+        assert info.bytes_sent == 0
+
+        connection._protocol_handler = mock_protocol_handler
+        info = connection.info
+        assert info.packets_sent == 500
+        assert info.bytes_sent == 1024
+
+    def test_address_properties(self, connection: WebTransportConnection, mocker: MockerFixture) -> None:
         assert connection.local_address is None
         assert connection.remote_address is None
+
+        mock_transport = mocker.MagicMock()
+        mock_transport.get_extra_info.side_effect = lambda name, default=None: {
+            "sockname": ("127.0.0.1", 12345),
+            "peername": ("1.1.1.1", 443),
+        }.get(name, default)
+        connection._transport = mock_transport
+        assert connection.local_address == ("127.0.0.1", 12345)
+        assert connection.remote_address == ("1.1.1.1", 443)
 
     def test_string_representation(self, connection: WebTransportConnection, mocker: MockerFixture) -> None:
         assert "remote=unknown" in str(connection)
@@ -281,6 +298,7 @@ class TestWebTransportConnection:
         connection._heartbeat_task = mock_task
         timer_handle = mocker.patch.object(connection, "_timer_handle", new=mocker.MagicMock())
         connection._quic_connection = mock_quic_connection
+        connection._closed_future = asyncio.Future()
 
         await connection.close(code=1, reason="test")
 
@@ -293,7 +311,6 @@ class TestWebTransportConnection:
         mock_emit.assert_awaited_with(
             event_type=EventType.CONNECTION_CLOSED, data={"connection_id": connection.connection_id}
         )
-        assert connection._closed_future is not None
         assert connection._closed_future.done()
 
     @pytest.mark.asyncio
@@ -395,6 +412,22 @@ class TestWebTransportConnection:
         assert connection._transport is mock_transport
         mock_record_activity.assert_called_once()
         mock_protocol.set_connection.assert_called_once_with(connection=connection)
+
+    @pytest.mark.asyncio
+    async def test_accept_protocol_without_set_connection(
+        self, mock_server_config: ServerConfig, mocker: MockerFixture
+    ) -> None:
+        connection = WebTransportConnection(config=mock_server_config)
+        mock_transport = mocker.create_autospec(asyncio.DatagramTransport)
+        mock_protocol = mocker.create_autospec(QuicConnectionProtocol, instance=True)
+        mock_protocol._quic = mocker.MagicMock()
+        mock_protocol._quic.get_timer.return_value = None
+        mocker.patch.object(connection, "_start_background_tasks")
+
+        await connection.accept(transport=mock_transport, protocol=mock_protocol)
+
+        assert connection.is_connected
+        assert not hasattr(mock_protocol, "set_connection") or not mock_protocol.set_connection.called
 
     @pytest.mark.asyncio
     async def test_accept_already_started(self, mock_server_config: ServerConfig, mocker: MockerFixture) -> None:
@@ -527,6 +560,27 @@ class TestWebTransportConnection:
         mock_transmit.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_heartbeat_loop_no_quic(self, connection: WebTransportConnection, mocker: MockerFixture) -> None:
+        def run_loop_and_set_quic_to_none() -> Generator[bool, None, None]:
+            yield True
+            connection._quic_connection = None
+            yield True
+            yield False
+
+        side_effect_gen = run_loop_and_set_quic_to_none()
+        mocker.patch.object(
+            WebTransportConnection, "is_connected", new_callable=mocker.PropertyMock, side_effect=side_effect_gen
+        )
+        mock_transmit = mocker.patch.object(connection, "_transmit")
+        mock_quic = mocker.create_autospec(QuicConnection, instance=True)
+        connection._quic_connection = mock_quic
+
+        await connection._heartbeat_loop()
+
+        mock_quic.send_ping.assert_called_once_with(uid=1)
+        mock_transmit.assert_called()
+
+    @pytest.mark.asyncio
     async def test_heartbeat_loop_exception(
         self, connection: WebTransportConnection, mock_quic_connection: Any, mocker: MockerFixture
     ) -> None:
@@ -539,6 +593,25 @@ class TestWebTransportConnection:
         await connection._heartbeat_loop()
 
         mock_quic_connection.send_ping.assert_called_once()
+
+    def test_schedule_transmit_logic(
+        self, connection: WebTransportConnection, mock_quic_connection: Any, mock_loop: Any
+    ) -> None:
+        connection._quic_connection = mock_quic_connection
+
+        mock_quic_connection.get_timer.return_value = 1001.0
+        connection._schedule_transmit()
+        mock_loop.call_at.assert_called_once_with(when=1001.0, callback=connection._transmit)
+
+        connection._schedule_transmit()
+        assert connection._timer_handle is not None
+        mock_timer_handle: Any = mock_loop.call_at.return_value
+        mock_timer_handle.cancel.assert_called_once()
+
+        mock_loop.call_at.reset_mock()
+        connection._state = ConnectionState.CLOSED
+        connection._schedule_transmit()
+        mock_loop.call_at.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_transmit_fails(
@@ -609,26 +682,6 @@ class TestWebTransportConnection:
             await connection._initiate_webtransport_handshake(path="/")
 
     @pytest.mark.asyncio
-    async def test_client_protocol_event_loop_exceptions(
-        self,
-        connection: WebTransportConnection,
-        mocker: MockerFixture,
-        mock_protocol_handler: Any,
-        mock_loop: Any,
-        mock_utils_create_quic_config: MagicMock,
-    ) -> None:
-        protocol_instance = mocker.MagicMock(spec=QuicConnectionProtocol)
-        mock_loop.create_datagram_endpoint.return_value = (mocker.MagicMock(), protocol_instance)
-
-        with pytest.raises(ConnectionError):
-            await connection.connect(host="localhost", port=4433)
-
-        mock_protocol_handler.handle_quic_event.side_effect = ValueError("handler error")
-        event = StreamDataReceived(stream_id=0, data=b"", end_stream=False)
-        with pytest.raises(ValueError, match="handler error"):
-            await mock_protocol_handler.handle_quic_event(event=event)
-
-    @pytest.mark.asyncio
     async def test_client_protocol_connection_lost(
         self,
         connection: WebTransportConnection,
@@ -646,6 +699,7 @@ class TestWebTransportConnection:
 
         mock_loop.create_datagram_endpoint.side_effect = endpoint_factory_executor
         mock_on_lost = mocker.patch.object(connection, "_on_connection_lost")
+        mocker.patch.object(connection, "_start_background_tasks")
 
         with pytest.raises(ConnectionError):
             await connection.connect(host="localhost", port=4433)

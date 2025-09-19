@@ -25,8 +25,14 @@ Create a file named `server.py`:
 # server.py
 import asyncio
 
-from pywebtransport import ServerApp, ServerConfig, WebTransportSession, WebTransportStream
-from pywebtransport.exceptions import ConnectionError, SessionError
+from pywebtransport import (
+    ConnectionError,
+    ServerApp,
+    ServerConfig,
+    SessionError,
+    WebTransportSession,
+    WebTransportStream,
+)
 from pywebtransport.utils import generate_self_signed_cert
 
 # For local development, we can generate a self-signed certificate.
