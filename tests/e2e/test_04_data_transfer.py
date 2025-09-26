@@ -1,6 +1,4 @@
-"""
-E2E test for WebTransport data transfer.
-"""
+"""E2E test for WebTransport data transfer."""
 
 import asyncio
 import logging
@@ -27,13 +25,13 @@ logger = logging.getLogger("test_data_transfer")
 
 
 def generate_test_data(*, size: int) -> bytes:
-    """Generates a block of test data of a specified size."""
+    """Generate a block of test data of a specified size."""
     pattern = b"WebTransport Test Data 1234567890 " * (size // 34 + 1)
     return pattern[:size]
 
 
 async def test_small_data() -> bool:
-    """Tests small data transfers (< 1KB)."""
+    """Test small data transfers (< 1KB)."""
     logger.info("--- Test 04A: Small Data Transfer ---")
     test_sizes = [10, 100, 500, 1000]
     config = ClientConfig.create(
@@ -73,7 +71,7 @@ async def test_small_data() -> bool:
 
 
 async def test_medium_data() -> bool:
-    """Tests medium data transfers (1KB - 64KB)."""
+    """Test medium data transfers (1KB - 64KB)."""
     logger.info("--- Test 04B: Medium Data Transfer ---")
     test_sizes = [1024, 4096, 16384, 65536]
     config = ClientConfig.create(
@@ -114,7 +112,7 @@ async def test_medium_data() -> bool:
 
 
 async def test_chunked_transfer() -> bool:
-    """Tests transferring data in multiple chunks using stream.write()."""
+    """Test transferring data in multiple chunks using stream.write()."""
     logger.info("--- Test 04C: Chunked Transfer ---")
     total_size = 32768
     chunk_size = 4096
@@ -159,7 +157,7 @@ async def test_chunked_transfer() -> bool:
 
 
 async def test_binary_data() -> bool:
-    """Tests the transfer of raw binary data to ensure no corruption."""
+    """Test the transfer of raw binary data to ensure no corruption."""
     logger.info("--- Test 04D: Binary Data Transfer ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -196,7 +194,7 @@ async def test_binary_data() -> bool:
 
 
 async def test_performance_benchmark() -> bool:
-    """Performs a simple performance benchmark with a 1MB payload."""
+    """Perform a simple performance benchmark with a 1MB payload."""
     logger.info("--- Test 04E: Performance Benchmark (1MB) ---")
     test_size = 1024 * 1024
     config = ClientConfig.create(
@@ -240,7 +238,7 @@ async def test_performance_benchmark() -> bool:
 
 
 async def main() -> int:
-    """Main entry point for the data transfer tests."""
+    """Run the main entry point for the data transfer tests."""
     logger.info("--- Starting Test 04: Data Transfer ---")
 
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
@@ -271,11 +269,9 @@ async def main() -> int:
 
     if passed == total:
         logger.info("TEST 04 PASSED: All data transfer tests successful!")
-        logger.info("Ready to proceed to Test 05")
         return 0
     else:
         logger.error("TEST 04 FAILED: Some data transfer tests failed!")
-        logger.error("Please fix the issues before proceeding")
         return 1
 
 

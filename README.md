@@ -11,10 +11,12 @@ The canonical, async-native WebTransport stack for Python.
 
 ## Features
 
+## Features
+
 - **Full Async Support**: Built from the ground up on asyncio for high-performance, non-blocking I/O.
 - **High-Level Frameworks**: Includes a ServerApp with routing and middleware, and a versatile WebTransportClient with helpers for pooling, auto-reconnection, and proxying.
+- **Advanced Messaging**: Built-in managers for Pub/Sub and RPC (JSON-RPC 2.0 compliant), plus pluggable serializers (`JSON`, `MsgPack`, `Protobuf`) for structured data.
 - **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
-- **Structured Messaging**: Pluggable JSON, MsgPack, and Protobuf serializers for sending and receiving structured data objects over streams and datagrams.
 - **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and monitoring.
 - **Event-Driven Architecture**: A powerful EventEmitter and EventBus system for decoupled, asynchronous communication between components.
 - **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.

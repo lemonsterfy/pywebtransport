@@ -1,6 +1,4 @@
-"""
-WebTransport Connection Subpackage.
-"""
+"""WebTransport Connection Subpackage."""
 
 from .connection import ConnectionInfo, WebTransportConnection
 from .load_balancer import ConnectionLoadBalancer

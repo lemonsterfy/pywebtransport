@@ -17,7 +17,6 @@ The core class representing a single WebTransport connection.
 
 - **`async def accept(self, *, transport: asyncio.DatagramTransport, protocol: QuicConnectionProtocol) -> None`**: Accepts an incoming server connection.
 - **`async def close(self, *, code: int = 0, reason: str = "") -> None`**: Gracefully closes the connection.
-- **`async def connect(self, *, host: str, port: int, path: str = "/") -> None`**: Establishes a client connection.
 - **`async def diagnose_issues(self) -> dict[str, Any]`**: Runs checks and returns a dictionary of potential issues and recommendations.
 - **`def get_ready_session_id(self) -> SessionId | None`**: Gets the ID of the first available ready session, if any.
 - **`def get_summary(self) -> dict[str, Any]`**: Returns a structured summary of the connection for monitoring.
@@ -48,7 +47,7 @@ Manages the lifecycle of multiple `WebTransportConnection` objects.
 
 ### Constructor
 
-- **`def __init__(self, *, max_connections: int = 3000, ...)`**: Initializes the connection manager.
+- **`def __init__(self, *, max_connections: int = 3000, ...) -> None`**: Initializes the connection manager.
 
 ### Instance Methods
 
@@ -70,7 +69,7 @@ Manages a pool of reusable connections to reduce latency from connection setup.
 
 ### Constructor
 
-- **`def __init__(self, *, max_size: int = 10, max_idle_time: float = 300.0, cleanup_interval: float = 60.0)`**: Initializes the connection pool.
+- **`def __init__(self, *, max_size: int = 10, max_idle_time: float = 300.0, cleanup_interval: float = 60.0) -> None`**: Initializes the connection pool.
 
 ### Instance Methods
 
@@ -87,7 +86,7 @@ Distributes connection requests across a list of target servers and performs hea
 
 ### Constructor
 
-- **`def __init__(self, targets: list[tuple[str, int]], *, health_check_interval: float = 30.0, health_check_timeout: float = 5.0)`**: Initializes the load balancer.
+- **`def __init__(self, targets: list[tuple[str, int]], *, health_check_interval: float = 30.0, health_check_timeout: float = 5.0) -> None`**: Initializes the load balancer.
 
 ### Instance Methods
 

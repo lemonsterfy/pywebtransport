@@ -1,11 +1,9 @@
-"""
-MsgPack Serializer for WebTransport.
-"""
+"""MsgPack Serializer for WebTransport."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, fields, is_dataclass
-from typing import Any, Type, cast, get_args, get_origin
+from typing import Any, cast, get_args, get_origin
 
 from pywebtransport.exceptions import ConfigurationError, SerializationError
 from pywebtransport.types import Serializer
@@ -27,7 +25,7 @@ class MsgPackSerializer(Serializer):
         *,
         pack_kwargs: dict[str, Any] | None = None,
         unpack_kwargs: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the MsgPack serializer."""
         if msgpack is None:
             raise ConfigurationError(
@@ -111,7 +109,7 @@ class MsgPackSerializer(Serializer):
 
         return data
 
-    def _from_dict_to_dataclass(self, *, data: dict[str, Any], cls: Type[Any]) -> Any:
+    def _from_dict_to_dataclass(self, *, data: dict[str, Any], cls: type[Any]) -> Any:
         """Recursively convert a dictionary to a dataclass instance."""
         constructor_args = {}
 

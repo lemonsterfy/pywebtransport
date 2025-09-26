@@ -1,6 +1,4 @@
-"""
-WebTransport stream base classes and core functionality.
-"""
+"""WebTransport stream base classes and core functionality."""
 
 from __future__ import annotations
 
@@ -11,7 +9,7 @@ from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self, Type
+from typing import TYPE_CHECKING, Any, Self
 
 from pywebtransport.constants import DEFAULT_BUFFER_SIZE, MAX_BUFFER_SIZE
 from pywebtransport.events import Event, EventEmitter
@@ -77,7 +75,7 @@ class StreamStats:
 class StreamBuffer:
     """An efficient, deque-based buffer for asynchronous data streams."""
 
-    def __init__(self, *, max_size: int = 65536):
+    def __init__(self, *, max_size: int = 65536) -> None:
         """Initialize the stream buffer."""
         self._max_size = max_size
         self._buffer: deque[bytes] = deque()
@@ -107,7 +105,9 @@ class StreamBuffer:
     async def feed_data(self, *, data: bytes, eof: bool = False) -> None:
         """Asynchronously feed data into the buffer."""
         if self._lock is None or self._data_available is None:
-            raise StreamError("StreamBuffer has not been initialized. Its owner must call 'await buffer.initialize()'.")
+            raise StreamError(
+                message="StreamBuffer has not been initialized. Its owner must call 'await buffer.initialize()'."
+            )
         if self._eof:
             return
 
@@ -123,12 +123,14 @@ class StreamBuffer:
     async def read(self, *, size: int = -1, timeout: float | None = None) -> tuple[bytes, bool]:
         """Asynchronously read data from the buffer."""
         if self._lock is None or self._data_available is None:
-            raise StreamError("StreamBuffer has not been initialized. Its owner must call 'await buffer.initialize()'.")
+            raise StreamError(
+                message="StreamBuffer has not been initialized. Its owner must call 'await buffer.initialize()'."
+            )
 
         async def _read_logic() -> bytes:
             if self._lock is None or self._data_available is None:
                 raise StreamError(
-                    "StreamBuffer has not been initialized. Its owner must call 'await buffer.initialize()'."
+                    message="StreamBuffer has not been initialized. Its owner must call 'await buffer.initialize()'."
                 )
             while True:
                 async with self._lock:
@@ -168,7 +170,7 @@ class StreamBuffer:
             is_eof_after_read = self._eof and not self._buffer
             return data, is_eof_after_read
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Read timeout after {timeout}s") from None
+            raise TimeoutError(message=f"Read timeout after {timeout}s") from None
 
 
 class _StreamBase:
@@ -209,8 +211,10 @@ class _StreamBase:
         """Wait until the stream is fully closed."""
         if not self._is_initialized or self._closed_future is None:
             raise StreamError(
-                f"{self.__class__.__name__} is not initialized."
-                "Its factory should call 'await stream.initialize()' before use."
+                message=(
+                    f"{self.__class__.__name__} is not initialized."
+                    "Its factory should call 'await stream.initialize()' before use."
+                )
             )
         await self._closed_future
 
@@ -260,7 +264,7 @@ class _StreamBase:
 class WebTransportReceiveStream(_StreamBase, EventEmitter):
     """Represents a receive-only WebTransport stream."""
 
-    def __init__(self, *, stream_id: StreamId, session: WebTransportSession):
+    def __init__(self, *, stream_id: StreamId, session: WebTransportSession) -> None:
         """Initialize the receive stream."""
         EventEmitter.__init__(self)
         self._stream_id = stream_id
@@ -288,7 +292,7 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -330,18 +334,20 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
         """Read up to `size` bytes of data from the stream."""
         if not self._is_initialized:
             raise StreamError(
-                f"{self.__class__.__name__} is not initialized."
-                "Its factory should call 'await stream.initialize()' before use."
+                message=(
+                    f"{self.__class__.__name__} is not initialized."
+                    "Its factory should call 'await stream.initialize()' before use."
+                )
             )
         if self.is_closed:
             return b""
         if not self.is_readable:
-            raise StreamError(f"Stream not readable in current state: {self._state}")
+            raise StreamError(message=f"Stream not readable in current state: {self._state}")
 
         start_time = time.time()
         try:
             if self._buffer is None:
-                raise StreamError("Internal state error: buffer is None despite stream being initialized.")
+                raise StreamError(message="Internal state error: buffer is None despite stream being initialized.")
 
             data, is_eof = await self._buffer.read(size=size, timeout=self._read_timeout)
 
@@ -366,7 +372,7 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
             raise
         except Exception as e:
             self._stats.read_errors += 1
-            raise StreamError(f"Read operation failed: {e}") from e
+            raise StreamError(message=f"Read operation failed: {e}") from e
 
     async def read_all(self, *, max_size: int | None = None) -> bytes:
         """Read the entire content of a stream into a single bytes object."""
@@ -378,7 +384,7 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
                 chunks.append(chunk)
                 total_size += len(chunk)
                 if max_size and total_size > max_size:
-                    raise StreamError(f"Stream size exceeds maximum of {max_size} bytes")
+                    raise StreamError(message=f"Stream size exceeds maximum of {max_size} bytes")
             return b"".join(chunks)
         except StreamError as e:
             logger.error("Error reading stream to bytes: %s", e, exc_info=True)
@@ -417,7 +423,7 @@ class WebTransportReceiveStream(_StreamBase, EventEmitter):
     async def readuntil(self, *, separator: bytes = b"\n") -> bytes:
         """Read data from the stream until a separator is found."""
         if not self.is_readable:
-            raise StreamError("Stream not readable.")
+            raise StreamError(message="Stream not readable.")
 
         buffer = bytearray()
         while not buffer.endswith(separator):
@@ -476,7 +482,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
 
     _WRITE_CHUNK_SIZE = 65536
 
-    def __init__(self, *, stream_id: StreamId, session: WebTransportSession):
+    def __init__(self, *, stream_id: StreamId, session: WebTransportSession) -> None:
         """Initialize the send stream."""
         EventEmitter.__init__(self)
         self._stream_id = stream_id
@@ -507,7 +513,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -540,8 +546,10 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
         """Wait until the internal write buffer is empty."""
         if not self._is_initialized or self._flushed_event is None:
             raise StreamError(
-                f"{self.__class__.__name__} is not initialized."
-                "Its factory should call 'await stream.initialize()' before use."
+                message=(
+                    f"{self.__class__.__name__} is not initialized."
+                    "Its factory should call 'await stream.initialize()' before use."
+                )
             )
         if self._write_buffer_size == 0:
             return
@@ -549,7 +557,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
         try:
             await asyncio.wait_for(self._flushed_event.wait(), timeout=self._write_timeout)
         except asyncio.TimeoutError:
-            raise TimeoutError("Flush timeout") from None
+            raise TimeoutError(message="Flush timeout") from None
 
     async def initialize(self) -> None:
         """Initialize asyncio resources for the stream."""
@@ -572,18 +580,20 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
         """Write data to the stream, handling backpressure and chunking."""
         if not self._is_initialized:
             raise StreamError(
-                f"{self.__class__.__name__} is not initialized."
-                "Its factory should call 'await stream.initialize()' before use."
+                message=(
+                    f"{self.__class__.__name__} is not initialized."
+                    "Its factory should call 'await stream.initialize()' before use."
+                )
             )
         if not self.is_writable:
-            raise StreamError(f"Stream not writable in current state: {self._state}")
+            raise StreamError(message=f"Stream not writable in current state: {self._state}")
         if (
             self._write_lock is None
             or self._new_data_event is None
             or self._flushed_event is None
             or self._backpressure_event is None
         ):
-            raise StreamError("Internal state error: events are None despite stream being initialized.")
+            raise StreamError(message="Internal state error: events are None despite stream being initialized.")
 
         data_bytes = ensure_bytes(data=data)
         if not data_bytes and not end_stream:
@@ -682,8 +692,10 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
         """Wait for enough space in the write buffer, handling backpressure."""
         if self._backpressure_event is None or self._write_lock is None:
             raise StreamError(
-                f"{self.__class__.__name__} is not initialized."
-                "Its factory should call 'await stream.initialize()' before use."
+                message=(
+                    f"{self.__class__.__name__} is not initialized."
+                    "Its factory should call 'await stream.initialize()' before use."
+                )
             )
 
         while True:
@@ -697,7 +709,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
             try:
                 await asyncio.wait_for(self._backpressure_event.wait(), timeout=self._write_timeout)
             except asyncio.TimeoutError:
-                raise TimeoutError("Write timeout due to backpressure") from None
+                raise TimeoutError(message="Write timeout due to backpressure") from None
 
     async def _writer_loop(self) -> None:
         """The main loop for the background writer task."""
@@ -708,8 +720,10 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
             or self._backpressure_event is None
         ):
             raise StreamError(
-                f"{self.__class__.__name__} is not initialized."
-                "Its factory should call 'await stream.initialize()' before use."
+                message=(
+                    f"{self.__class__.__name__} is not initialized."
+                    "Its factory should call 'await stream.initialize()' before use."
+                )
             )
 
         try:
@@ -735,7 +749,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                 session = self._session()
                 if not session or not session.protocol_handler or session.is_closed:
                     if future and not future.done():
-                        future.set_exception(StreamError("Session is not available for writing."))
+                        future.set_exception(StreamError(message="Session is not available for writing."))
                     async with self._write_lock:
                         self._write_buffer.popleft()
                     continue
@@ -768,7 +782,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                         try:
                             await asyncio.wait_for(session._data_credit_event.wait(), timeout=self._write_timeout)
                         except asyncio.TimeoutError:
-                            exc = TimeoutError("Timeout waiting for data credit")
+                            exc = TimeoutError(message="Timeout waiting for data credit")
                             if future and not future.done():
                                 future.set_exception(exc)
                             raise exc from None
@@ -795,13 +809,15 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                         item = self._write_buffer.popleft()
                         future = item.get("future")
                         if future and not future.done():
-                            future.set_exception(StreamError("Writer loop terminated before processing this write."))
+                            future.set_exception(
+                                StreamError(message="Writer loop terminated before processing this write.")
+                            )
 
 
 class WebTransportStream(WebTransportReceiveStream, WebTransportSendStream):
     """Represents a bidirectional WebTransport stream."""
 
-    def __init__(self, *, stream_id: StreamId, session: WebTransportSession):
+    def __init__(self, *, stream_id: StreamId, session: WebTransportSession) -> None:
         """Initialize the bidirectional stream."""
         EventEmitter.__init__(self)
         self._stream_id = stream_id
@@ -832,7 +848,7 @@ class WebTransportStream(WebTransportReceiveStream, WebTransportSendStream):
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:

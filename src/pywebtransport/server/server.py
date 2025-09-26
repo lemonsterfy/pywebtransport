@@ -1,6 +1,4 @@
-"""
-WebTransport Server Implementation.
-"""
+"""WebTransport Server Implementation."""
 
 from __future__ import annotations
 
@@ -9,7 +7,7 @@ import weakref
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self, Type, cast
+from typing import Any, Self, cast
 
 from aioquic.asyncio import serve as quic_serve
 from aioquic.asyncio.protocol import QuicConnectionProtocol
@@ -57,7 +55,7 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
     _event_queue: asyncio.Queue[QuicEvent]
     _event_processor_task: asyncio.Task[None] | None
 
-    def __init__(self, server: WebTransportServer, *args: Any, **kwargs: Any):
+    def __init__(self, server: WebTransportServer, *args: Any, **kwargs: Any) -> None:
         """Initialize the server protocol."""
         super().__init__(*args, **kwargs)
         self._server_ref = weakref.ref(server)
@@ -137,7 +135,7 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
 class WebTransportServer(EventEmitter):
     """The main WebTransport server, managing lifecycle and connections."""
 
-    def __init__(self, *, config: ServerConfig | None = None):
+    def __init__(self, *, config: ServerConfig | None = None) -> None:
         """Initialize the WebTransport server."""
         super().__init__()
         self._config = config or ServerConfig.create()
@@ -191,7 +189,7 @@ class WebTransportServer(EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -230,7 +228,7 @@ class WebTransportServer(EventEmitter):
     async def listen(self, *, host: str | None = None, port: int | None = None) -> None:
         """Start the server and begin listening for connections."""
         if self._serving:
-            raise ServerError("Server is already serving")
+            raise ServerError(message="Server is already serving")
 
         bind_host, bind_port = host or self._config.bind_host, port or self._config.bind_port
         logger.info("Starting WebTransport server on %s:%s", bind_host, bind_port)
@@ -251,12 +249,12 @@ class WebTransportServer(EventEmitter):
             logger.info("WebTransport server listening on %s", self.local_address)
         except Exception as e:
             logger.critical("Failed to start server: %s", e, exc_info=True)
-            raise ServerError(f"Failed to start server: {e}") from e
+            raise ServerError(message=f"Failed to start server: {e}") from e
 
     async def serve_forever(self) -> None:
         """Run the server indefinitely until interrupted."""
         if not self._serving or not self._server:
-            raise ServerError("Server is not listening")
+            raise ServerError(message="Server is not listening")
 
         logger.info("Server is running. Press Ctrl+C to stop.")
         try:

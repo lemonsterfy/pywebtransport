@@ -28,6 +28,8 @@ from pywebtransport.constants import (
     DEFAULT_MAX_STREAMS,
     DEFAULT_MAX_TOTAL_PENDING_EVENTS,
     DEFAULT_PENDING_EVENT_TTL,
+    DEFAULT_PROXY_CONNECT_TIMEOUT,
+    DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
     DEFAULT_SERVER_MAX_CONNECTIONS,
     DEFAULT_SERVER_VERIFY_MODE,
     DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
@@ -81,6 +83,8 @@ class TestConstantsValues:
         assert WT_MAX_STREAMS_UNI_TYPE == 0x190B4D40
         assert WT_STREAMS_BLOCKED_BIDI_TYPE == 0x190B4D43
         assert WT_STREAMS_BLOCKED_UNI_TYPE == 0x190B4D44
+        assert DEFAULT_PROXY_CONNECT_TIMEOUT == 10.0
+        assert DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE == 16
         assert DEFAULT_DEBUG is False
         assert DEFAULT_BIND_HOST == "localhost"
         assert DEFAULT_CLIENT_VERIFY_MODE == ssl.CERT_REQUIRED
@@ -138,6 +142,7 @@ class TestDefaults:
         assert config["max_streams"] == DEFAULT_MAX_STREAMS
         assert config["max_total_pending_events"] == DEFAULT_MAX_TOTAL_PENDING_EVENTS
         assert config["pending_event_ttl"] == DEFAULT_PENDING_EVENT_TTL
+        assert config["proxy"] is None
         assert config["stream_flow_control_increment_bidi"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
         assert config["stream_flow_control_increment_uni"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
         assert config["user_agent"] == f"pywebtransport/{project_version}"

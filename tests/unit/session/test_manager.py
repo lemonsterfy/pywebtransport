@@ -7,6 +7,7 @@ from unittest import mock
 from unittest.mock import AsyncMock
 
 import pytest
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import EventType, SessionError, SessionState, WebTransportSession
@@ -16,7 +17,7 @@ FAST_CLEANUP_INTERVAL = 1000.0
 
 
 class TestSessionManager:
-    @pytest.fixture
+    @asyncio_fixture
     async def manager(self) -> AsyncGenerator[SessionManager, None]:
         async with SessionManager(session_cleanup_interval=FAST_CLEANUP_INTERVAL) as mgr:
             yield mgr
@@ -72,6 +73,31 @@ class TestSessionManager:
         assert the_task.done()
         cast(mock.AsyncMock, mock_session.close).assert_awaited_once()
         assert manager.get_session_count() == 0
+
+    @pytest.mark.asyncio
+    async def test_shutdown_is_idempotent(self, mocker: MockerFixture) -> None:
+        async with SessionManager() as manager:
+            mock_close_all = mocker.patch.object(manager, "close_all_sessions", new_callable=mocker.AsyncMock)
+            await manager.shutdown()
+            await manager.shutdown()
+            mock_close_all.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_background_task_failure_triggers_shutdown(self, mocker: MockerFixture) -> None:
+        mocker.patch.object(SessionManager, "_start_cleanup_task")
+        async with SessionManager() as manager:
+            mock_shutdown = mocker.patch.object(manager, "shutdown", new_callable=mocker.AsyncMock)
+
+            async def failing_coro() -> None:
+                raise RuntimeError("Task failed")
+
+            failing_task = asyncio.create_task(failing_coro())
+            callback = manager._on_cleanup_done
+            failing_task.add_done_callback(callback)
+
+            await asyncio.sleep(0.01)
+
+            mock_shutdown.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_shutdown_no_cleanup_task(self, manager: SessionManager) -> None:
@@ -271,8 +297,8 @@ class TestSessionManager:
     async def test_periodic_cleanup_task(self, mocker: MockerFixture) -> None:
         mock_cleanup = mocker.patch.object(SessionManager, "cleanup_closed_sessions", new_callable=mocker.AsyncMock)
 
-        async with SessionManager(session_cleanup_interval=1000):
-            await asyncio.sleep(0)
+        async with SessionManager(session_cleanup_interval=0.001):
+            await asyncio.sleep(0.01)
 
         mock_cleanup.assert_awaited()
 
@@ -300,12 +326,12 @@ class TestSessionManager:
         mock_cleanup.assert_awaited()
 
 
+@pytest.mark.asyncio
 class TestSessionManagerUninitialized:
     @pytest.fixture
     def uninitialized_manager(self) -> SessionManager:
         return SessionManager()
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "method_name, kwargs",
         [

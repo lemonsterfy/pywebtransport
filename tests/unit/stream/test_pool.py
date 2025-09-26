@@ -92,7 +92,7 @@ class TestStreamPool:
 
     @pytest.mark.asyncio
     async def test_get_stream_creation_failure_updates_count(self, mock_session: Any) -> None:
-        mock_session.create_bidirectional_stream.side_effect = StreamError("Failed to create")
+        mock_session.create_bidirectional_stream.side_effect = StreamError(message="Failed to create")
         async with StreamPool(session=mock_session, pool_size=1) as pool:
             if pool._maintenance_task:
                 pool._maintenance_task.cancel()
@@ -265,8 +265,12 @@ class TestStreamPool:
         s1, s2, s3 = mock_stream_factory(), mock_stream_factory(), mock_stream_factory()
         effects = {
             "all_success": [s1, s2, s3],
-            "partial_failure": [s1, StreamError("Creation failed"), s3],
-            "total_failure": [StreamError("Fail 1"), StreamError("Fail 2"), StreamError("Fail 3")],
+            "partial_failure": [s1, StreamError(message="Creation failed"), s3],
+            "total_failure": [
+                StreamError(message="Fail 1"),
+                StreamError(message="Fail 2"),
+                StreamError(message="Fail 3"),
+            ],
         }
         mock_session.create_bidirectional_stream.side_effect = effects[side_effects]
 

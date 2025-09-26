@@ -1,6 +1,4 @@
-"""
-WebTransport Middleware Framework.
-"""
+"""WebTransport Middleware Framework."""
 
 from __future__ import annotations
 
@@ -65,7 +63,7 @@ class RateLimiter:
         max_requests: int = 100,
         window_seconds: int = 60,
         cleanup_interval: int = 300,
-    ):
+    ) -> None:
         """Initialize the rate limiter."""
         self._max_requests = max_requests
         self._window_seconds = window_seconds

@@ -314,7 +314,7 @@ class TestWebTransportServer:
         mock_webtransport_connection: Any,
         mocker: MockerFixture,
     ) -> None:
-        mock_webtransport_connection.accept.side_effect = ConnectionError("Accept failed")
+        mock_webtransport_connection.accept.side_effect = ConnectionError(message="Accept failed")
 
         await server._handle_new_connection(transport=mocker.MagicMock(), protocol=mocker.MagicMock())
 
@@ -325,7 +325,7 @@ class TestWebTransportServer:
     async def test_handle_new_connection_failure_already_closed(
         self, server: WebTransportServer, mock_webtransport_connection: Any, mocker: MockerFixture
     ) -> None:
-        mock_webtransport_connection.accept.side_effect = ConnectionError("Accept failed")
+        mock_webtransport_connection.accept.side_effect = ConnectionError(message="Accept failed")
         type(mock_webtransport_connection).is_closed = mocker.PropertyMock(return_value=True)
 
         await server._handle_new_connection(transport=mocker.MagicMock(), protocol=mocker.MagicMock())
@@ -339,7 +339,7 @@ class TestWebTransportServer:
     ) -> None:
         mock_transport = mocker.MagicMock()
         mock_transport.close.side_effect = OSError("Transport busy")
-        mock_webtransport_connection.accept.side_effect = ConnectionError("Accept failed")
+        mock_webtransport_connection.accept.side_effect = ConnectionError(message="Accept failed")
 
         await server._handle_new_connection(transport=mock_transport, protocol=mocker.MagicMock())
 

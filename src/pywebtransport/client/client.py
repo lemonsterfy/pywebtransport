@@ -1,13 +1,11 @@
-"""
-WebTransport Client Implementation.
-"""
+"""WebTransport Client Implementation."""
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self, Type
+from typing import TYPE_CHECKING, Any, Self
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection import ConnectionManager, WebTransportConnection
@@ -76,7 +74,7 @@ class ClientStats:
 class WebTransportClient(EventEmitter):
     """A client for establishing WebTransport connections and sessions."""
 
-    def __init__(self, *, config: ClientConfig | None = None):
+    def __init__(self, *, config: ClientConfig | None = None) -> None:
         """Initialize the WebTransport client."""
         super().__init__()
         self._config = config or ClientConfig.create()
@@ -126,7 +124,7 @@ class WebTransportClient(EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:

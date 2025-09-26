@@ -1,6 +1,4 @@
-"""
-Core Library Utilities.
-"""
+"""Core Library Utilities."""
 
 from __future__ import annotations
 
@@ -17,7 +15,7 @@ from collections.abc import Callable, Coroutine
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self, Type, TypeVar
+from typing import Any, Self, TypeVar
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -77,7 +75,7 @@ T = TypeVar("T")
 class Timer:
     """A simple context manager for performance measurement."""
 
-    def __init__(self, *, name: str = "timer"):
+    def __init__(self, *, name: str = "timer") -> None:
         """Initialize the timer."""
         self.name = name
         self.start_time: float | None = None
@@ -98,7 +96,7 @@ class Timer:
 
     def __exit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -321,7 +319,7 @@ def load_certificate(*, certfile: str, keyfile: str) -> ssl.SSLContext:
         context.load_cert_chain(certfile=certfile, keyfile=keyfile)
         return context
     except Exception as e:
-        raise CertificateError(f"Failed to load certificate: {e}")
+        raise CertificateError(message=f"Failed to load certificate: {e}")
 
 
 def merge_configs(*, base_config: dict[str, Any], override_config: dict[str, Any]) -> dict[str, Any]:
@@ -379,7 +377,7 @@ async def resolve_address(*, host: str, port: int, family: int = socket.AF_UNSPE
         family, type_, proto, canonname, sockaddr = result[0]
         return (sockaddr[0], sockaddr[1])
     except OSError as e:
-        raise ConfigurationError(f"Failed to resolve address {host}:{port}: {e}")
+        raise ConfigurationError(message=f"Failed to resolve address {host}:{port}: {e}")
 
 
 async def run_with_timeout(*, coro: Coroutine[Any, Any, T], timeout: float, default_value: T | None = None) -> T | None:
@@ -476,4 +474,4 @@ async def wait_for_condition(
         try:
             await asyncio.wait_for(_waiter(), timeout=timeout)
         except asyncio.TimeoutError as e:
-            raise TimeoutError(f"Condition not met within {timeout}s timeout") from e
+            raise TimeoutError(message=f"Condition not met within {timeout}s timeout") from e

@@ -1,6 +1,4 @@
-"""
-Performance benchmark for WebTransport stream throughput.
-"""
+"""Performance benchmark for WebTransport stream throughput."""
 
 import asyncio
 import ssl

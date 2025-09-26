@@ -1,6 +1,4 @@
-"""
-Integration tests for high-level ServerApp features.
-"""
+"""Integration tests for high-level ServerApp features."""
 
 import asyncio
 

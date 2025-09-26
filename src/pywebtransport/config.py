@@ -1,6 +1,4 @@
-"""
-WebTransport Configuration.
-"""
+"""WebTransport Configuration."""
 
 from __future__ import annotations
 
@@ -46,6 +44,7 @@ from pywebtransport.constants import (
     DEFAULT_MAX_STREAMS_PER_CONNECTION,
     DEFAULT_MAX_TOTAL_PENDING_EVENTS,
     DEFAULT_PENDING_EVENT_TTL,
+    DEFAULT_PROXY_CONNECT_TIMEOUT,
     DEFAULT_READ_TIMEOUT,
     DEFAULT_RETRY_BACKOFF,
     DEFAULT_RETRY_DELAY,
@@ -69,8 +68,18 @@ from pywebtransport.version import __version__
 __all__ = [
     "ClientConfig",
     "ConfigBuilder",
+    "ProxyConfig",
     "ServerConfig",
 ]
+
+
+@dataclass(kw_only=True)
+class ProxyConfig:
+    """Configuration for connecting through an HTTP proxy."""
+
+    url: str
+    headers: Headers = field(default_factory=dict)
+    connect_timeout: float = DEFAULT_PROXY_CONNECT_TIMEOUT
 
 
 @dataclass(kw_only=True)
@@ -108,6 +117,7 @@ class ClientConfig:
     max_streams: int = DEFAULT_MAX_STREAMS
     max_total_pending_events: int = DEFAULT_MAX_TOTAL_PENDING_EVENTS
     pending_event_ttl: float = DEFAULT_PENDING_EVENT_TTL
+    proxy: ProxyConfig | None = None
     read_timeout: float | None = DEFAULT_READ_TIMEOUT
     retry_backoff: float = DEFAULT_RETRY_BACKOFF
     retry_delay: float = DEFAULT_RETRY_DELAY
@@ -241,6 +251,12 @@ class ClientConfig:
             _validate_timeout(timeout=self.write_timeout)
         except ValueError as e:
             raise invalid_config(key="timeout", value=str(e), reason="invalid timeout value") from e
+
+        if self.proxy:
+            try:
+                _validate_timeout(timeout=self.proxy.connect_timeout)
+            except ValueError as e:
+                raise invalid_config(key="proxy.connect_timeout", value=str(e), reason="invalid timeout value") from e
 
         if self.flow_control_window_size <= 0:
             raise invalid_config(
@@ -608,7 +624,7 @@ class ServerConfig:
 class ConfigBuilder:
     """A builder for fluently creating client or server configurations."""
 
-    def __init__(self, *, config_type: str = "client"):
+    def __init__(self, *, config_type: str = "client") -> None:
         """Initialize the configuration builder."""
         self.config_type = config_type
         self._config_dict: dict[str, Any] = {}
@@ -616,7 +632,7 @@ class ConfigBuilder:
     def bind(self, *, host: str, port: int) -> Self:
         """Set the bind host and port (server only)."""
         if self.config_type != "server":
-            raise ConfigurationError("bind() can only be used with server config")
+            raise ConfigurationError(message="bind() can only be used with server config")
 
         self._config_dict["bind_host"] = host
         self._config_dict["bind_port"] = port
@@ -630,7 +646,7 @@ class ConfigBuilder:
             case "server":
                 return ServerConfig.create(**self._config_dict)
             case _:
-                raise ConfigurationError(f"Unknown config type: {self.config_type}")
+                raise ConfigurationError(message=f"Unknown config type: {self.config_type}")
 
     def debug(self, *, enabled: bool = True, log_level: str = "DEBUG") -> Self:
         """Set debug and logging settings."""

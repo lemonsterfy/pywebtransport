@@ -1,6 +1,4 @@
-"""
-Asynchronous Event System.
-"""
+"""Asynchronous Event System."""
 
 from __future__ import annotations
 
@@ -127,7 +125,7 @@ class Event:
 class EventEmitter:
     """An emitter for handling and dispatching events asynchronously."""
 
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize the event emitter."""
         if getattr(self, "_emitter_initialized", False):
             return

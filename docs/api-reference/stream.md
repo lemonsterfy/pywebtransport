@@ -8,6 +8,8 @@ This document provides a reference for the `pywebtransport.stream` subpackage, w
 
 Represents a bidirectional WebTransport stream that can be both read from and written to. It inherits all methods and properties from `WebTransportReceiveStream` and `WebTransportSendStream`.
 
+**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` or `StreamManager` (e.g., via `session.create_bidirectional_stream()` or `session.incoming_streams()`).
+
 ### Instance Methods
 
 - **`async def close(self) -> None`**: Gracefully closes the stream's write side by sending a `FIN` bit.
@@ -17,6 +19,8 @@ Represents a bidirectional WebTransport stream that can be both read from and wr
 ## WebTransportSendStream Class
 
 Represents a unidirectional (send-only) WebTransport stream.
+
+**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` or `StreamManager`.
 
 ### Properties
 
@@ -34,6 +38,8 @@ Represents a unidirectional (send-only) WebTransport stream.
 ## WebTransportReceiveStream Class
 
 Represents a unidirectional (receive-only) WebTransport stream.
+
+**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` or `StreamManager`.
 
 ### Properties
 
@@ -56,10 +62,6 @@ A high-level wrapper for sending and receiving structured Python objects over a 
 
 **Note on Usage**: This class is not instantiated directly but through `WebTransportSession.create_structured_stream()`.
 
-### Constructor
-
-- **`def __init__(self, *, stream: WebTransportStream, serializer: Serializer, registry: dict[int, Type[Any]])`**: Initializes the structured stream.
-
 ### Properties
 
 - `is_closed` (`bool`): `True` if the underlying stream is fully closed.
@@ -81,7 +83,7 @@ Manages the lifecycle of all streams within a `WebTransportSession`, enforcing c
 
 ### Constructor
 
-- **`def __init__(self, session: WebTransportSession, *, max_streams: int = 100, stream_cleanup_interval: float = 15.0)`**: Initializes the stream manager.
+- **`def __init__(self, session: WebTransportSession, *, max_streams: int = 100, stream_cleanup_interval: float = 15.0) -> None`**: Initializes the stream manager.
 
 ### Instance Methods
 
@@ -99,7 +101,7 @@ Manages a pool of reusable `WebTransportStream` objects to reduce the latency of
 
 ### Constructor
 
-- **`def __init__(self, session: WebTransportSession, *, pool_size: int = 10, maintenance_interval: float = 60.0)`**: Initializes the stream pool.
+- **`def __init__(self, session: WebTransportSession, *, pool_size: int = 10, maintenance_interval: float = 60.0) -> None`**: Initializes the stream pool.
 
 ### Instance Methods
 
@@ -140,9 +142,7 @@ A dataclass holding statistics for a single stream.
 
 An internal, deque-based buffer for asynchronous read operations.
 
-### Constructor
-
-- **`def __init__(self, *, max_size: int = 65536)`**: Initializes the stream buffer.
+**Note on Usage**: This is an internal class and not intended for direct use.
 
 ## Utility Functions
 

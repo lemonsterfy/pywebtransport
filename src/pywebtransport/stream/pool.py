@@ -1,12 +1,10 @@
-"""
-WebTransport stream pooling for efficient stream reuse.
-"""
+"""WebTransport stream pooling for efficient stream reuse."""
 
 from __future__ import annotations
 
 import asyncio
 from types import TracebackType
-from typing import TYPE_CHECKING, Self, Type
+from typing import TYPE_CHECKING, Self
 
 from pywebtransport.exceptions import StreamError
 from pywebtransport.stream.stream import WebTransportStream
@@ -30,7 +28,7 @@ class StreamPool:
         *,
         pool_size: int = 10,
         maintenance_interval: float = 60.0,
-    ):
+    ) -> None:
         """Initialize the stream pool."""
         if pool_size <= 0:
             raise ValueError("Pool size must be a positive integer.")
@@ -61,7 +59,7 @@ class StreamPool:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -72,8 +70,10 @@ class StreamPool:
         """Close all idle streams and shut down the pool."""
         if self._condition is None:
             raise StreamError(
-                "StreamPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "StreamPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         if self._maintenance_task and not self._maintenance_task.done():
@@ -106,8 +106,10 @@ class StreamPool:
         """Get a stream from the pool, creating a new one if necessary."""
         if self._condition is None:
             raise StreamError(
-                "StreamPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "StreamPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._condition:
@@ -129,7 +131,7 @@ class StreamPool:
                 try:
                     await asyncio.wait_for(self._condition.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
-                    raise StreamError(f"Timeout waiting for a stream from the pool after {timeout}s.") from None
+                    raise StreamError(message=f"Timeout waiting for a stream from the pool after {timeout}s.") from None
 
         try:
             logger.debug("Creating new stream as pool was empty or depleted.")
@@ -144,8 +146,10 @@ class StreamPool:
         """Return a stream to the pool for potential reuse."""
         if self._condition is None:
             raise StreamError(
-                "StreamPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "StreamPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         should_close = stream.is_closed

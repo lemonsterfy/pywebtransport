@@ -13,7 +13,7 @@ from pywebtransport.server.utils import _echo_datagrams, _echo_single_stream, _e
 
 
 class FakeDatagramTransport:
-    def __init__(self, *, mocker: MockerFixture):
+    def __init__(self, *, mocker: MockerFixture) -> None:
         self._mocker = mocker
         self.send_mock = self._mocker.AsyncMock()
         self.receive_mock = self._mocker.AsyncMock()
@@ -27,7 +27,7 @@ class FakeDatagramTransport:
 
 
 class FakeWebTransportSession:
-    def __init__(self, *, mocker: MockerFixture):
+    def __init__(self, *, mocker: MockerFixture) -> None:
         self._mocker = mocker
         self._datagram_transport = FakeDatagramTransport(mocker=self._mocker)
         self._fake_incoming_streams: list[WebTransportStream] = []
@@ -148,7 +148,7 @@ class TestHandlers:
     async def test_health_check_handler_send_fails(self, mocker: MockerFixture, mock_session: Any) -> None:
         fake_session = cast(FakeWebTransportSession, mock_session)
         mock_logger = mocker.patch("pywebtransport.server.utils.logger")
-        error = ConnectionError("Send failed")
+        error = ConnectionError(message="Send failed")
         fake_session._datagram_transport.send_mock.side_effect = error
 
         await health_check_handler(session=mock_session)

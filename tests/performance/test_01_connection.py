@@ -1,6 +1,4 @@
-"""
-Performance benchmark for WebTransport connection establishment.
-"""
+"""Performance benchmark for WebTransport connection establishment."""
 
 import asyncio
 import logging

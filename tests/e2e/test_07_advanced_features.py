@@ -1,6 +1,4 @@
-"""
-E2E test for advanced WebTransport features.
-"""
+"""E2E test for advanced WebTransport features."""
 
 import asyncio
 import logging
@@ -27,7 +25,7 @@ logger = logging.getLogger("test_advanced_features")
 
 
 async def test_session_statistics() -> bool:
-    """Tests the retrieval and correctness of session-level statistics."""
+    """Test the retrieval and correctness of session-level statistics."""
     logger.info("--- Test 07A: Session Statistics ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -72,7 +70,7 @@ async def test_session_statistics() -> bool:
 
 
 async def test_connection_info() -> bool:
-    """Tests the retrieval of underlying connection information."""
+    """Test the retrieval of underlying connection information."""
     logger.info("--- Test 07B: Connection Information ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -109,7 +107,7 @@ async def test_connection_info() -> bool:
 
 
 async def test_client_statistics() -> bool:
-    """Tests the retrieval of client-wide statistics across multiple connections."""
+    """Test the retrieval of client-wide statistics across multiple connections."""
     logger.info("--- Test 07C: Client-Wide Statistics ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -147,7 +145,7 @@ async def test_client_statistics() -> bool:
 
 
 async def test_stream_management() -> bool:
-    """Tests advanced stream management features."""
+    """Test advanced stream management features."""
     logger.info("--- Test 07D: Stream Management ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -193,7 +191,7 @@ async def test_stream_management() -> bool:
 
 
 async def test_datagram_statistics() -> bool:
-    """Tests retrieval of detailed statistics for the datagram transport."""
+    """Test retrieval of detailed statistics for the datagram transport."""
     logger.info("--- Test 07E: Datagram Statistics ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -231,7 +229,7 @@ async def test_datagram_statistics() -> bool:
 
 
 async def test_performance_monitoring() -> bool:
-    """Tests a simple performance monitoring loop over multiple transfers."""
+    """Test a simple performance monitoring loop over multiple transfers."""
     logger.info("--- Test 07F: Performance Monitoring ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -266,7 +264,7 @@ async def test_performance_monitoring() -> bool:
 
 
 async def test_session_lifecycle_events() -> bool:
-    """Tests the basic session lifecycle event flow."""
+    """Test the basic session lifecycle event flow."""
     logger.info("--- Test 07G: Session Lifecycle Events ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -297,7 +295,7 @@ async def test_session_lifecycle_events() -> bool:
 
 
 async def main() -> int:
-    """Main entry point for the advanced features test suite."""
+    """Run the main entry point for the advanced features test suite."""
     logger.info("--- Starting Test 07: Advanced Features ---")
 
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
@@ -309,7 +307,6 @@ async def main() -> int:
         ("Performance Monitoring", test_performance_monitoring),
         ("Session Lifecycle Events", test_session_lifecycle_events),
     ]
-
     passed = 0
     total = len(tests)
 
@@ -331,11 +328,9 @@ async def main() -> int:
 
     if passed == total:
         logger.info("TEST 07 PASSED: All advanced features tests successful!")
-        logger.info("Ready to proceed to Test 08")
         return 0
     else:
         logger.error("TEST 07 FAILED: Some advanced features tests failed!")
-        logger.error("Please fix the issues before proceeding")
         return 1
 
 

@@ -1,13 +1,11 @@
-"""
-WebTransport Application Framework.
-"""
+"""WebTransport Application Framework."""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
 from types import TracebackType
-from typing import Any, Self, Type, TypeVar
+from typing import Any, Self, TypeVar
 
 from pywebtransport.config import ServerConfig
 from pywebtransport.connection import WebTransportConnection
@@ -29,7 +27,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 class ServerApp:
     """A high-level WebTransport application with routing and middleware."""
 
-    def __init__(self, *, config: ServerConfig | None = None):
+    def __init__(self, *, config: ServerConfig | None = None) -> None:
         """Initialize the server application."""
         self._server = WebTransportServer(config=config)
         self._router = RequestRouter()
@@ -53,7 +51,7 @@ class ServerApp:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:

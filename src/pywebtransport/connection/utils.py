@@ -1,6 +1,4 @@
-"""
-WebTransport connection utility functions.
-"""
+"""WebTransport connection utility functions."""
 
 from __future__ import annotations
 
@@ -54,7 +52,7 @@ async def connect_with_retry(
                 await asyncio.sleep(delay)
             else:
                 logger.error("All %d connection attempts failed", max_retries + 1)
-    raise ConnectionError(f"Failed to connect after {max_retries + 1} attempts: {last_error}")
+    raise ConnectionError(message=f"Failed to connect after {max_retries + 1} attempts: {last_error}")
 
 
 async def create_multiple_connections(
@@ -104,7 +102,7 @@ async def ensure_connection(
     if connection.is_connected:
         return connection
     if not reconnect:
-        raise ConnectionError("Connection not active and reconnect disabled")
+        raise ConnectionError(message="Connection not active and reconnect disabled")
 
     logger.info("Reconnecting to %s:%s", host, port)
     await connection.close()

@@ -10,6 +10,10 @@ The primary high-level framework for building WebTransport applications.
 
 **Note on Usage**: `ServerApp` must be used as an asynchronous context manager (`async with ...`).
 
+### Constructor
+
+- **`def __init__(self, *, config: ServerConfig | None = None) -> None`**: Initializes the server application.
+
 ### Properties
 
 - `server` (`WebTransportServer`): The underlying `WebTransportServer` instance.
@@ -33,7 +37,7 @@ The core server class that manages the QUIC transport and connection lifecycle.
 
 ### Constructor
 
-- **`def __init__(self, *, config: ServerConfig | None = None)`**: Initializes the server.
+- **`def __init__(self, *, config: ServerConfig | None = None) -> None`**: Initializes the server.
 
 ### Properties
 
@@ -55,6 +59,10 @@ The core server class that manages the QUIC transport and connection lifecycle.
 
 Manages the mapping of session paths to handlers.
 
+### Constructor
+
+- **`def __init__(self) -> None`**: Initializes the request router.
+
 ### Instance Methods
 
 - **`def add_pattern_route(self, *, pattern: str, handler: SessionHandler) -> None`**: Adds a route for a regular expression pattern.
@@ -69,6 +77,10 @@ Manages the mapping of session paths to handlers.
 ## MiddlewareManager Class
 
 Manages the execution chain of middleware for incoming sessions.
+
+### Constructor
+
+- **`def __init__(self) -> None`**: Initializes the middleware manager.
 
 ### Instance Methods
 
@@ -85,7 +97,7 @@ Manages the lifecycle of multiple `WebTransportServer` instances.
 
 ### Constructor
 
-- **`def __init__(self, *, configs: list[ServerConfig])`**: Initializes the server cluster.
+- **`def __init__(self, *, configs: list[ServerConfig]) -> None`**: Initializes the server cluster.
 
 ### Properties
 
@@ -109,7 +121,7 @@ Monitors the performance of a `WebTransportServer` instance.
 
 ### Constructor
 
-- **`def __init__(self, server: WebTransportServer, *, monitoring_interval: float = 30.0)`**: Initializes the server monitor.
+- **`def __init__(self, server: WebTransportServer, *, monitoring_interval: float = 30.0) -> None`**: Initializes the server monitor.
 
 ### Properties
 

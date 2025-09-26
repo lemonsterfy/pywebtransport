@@ -1,6 +1,4 @@
-"""
-E2E test for WebTransport datagram functionality.
-"""
+"""E2E test for WebTransport datagram functionality."""
 
 import asyncio
 import logging
@@ -27,7 +25,7 @@ logger = logging.getLogger("test_datagrams")
 
 
 async def test_basic_datagram() -> bool:
-    """Tests sending a single datagram and receiving its echo."""
+    """Test sending a single datagram and receiving its echo."""
     logger.info("--- Test 05A: Basic Datagram Echo ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -68,7 +66,7 @@ async def test_basic_datagram() -> bool:
 
 
 async def test_multiple_datagrams() -> bool:
-    """Tests sending multiple datagrams sequentially."""
+    """Test sending multiple datagrams sequentially."""
     logger.info("--- Test 05B: Multiple Datagrams ---")
     num_datagrams = 10
     config = ClientConfig.create(
@@ -103,7 +101,7 @@ async def test_multiple_datagrams() -> bool:
 
 
 async def test_datagram_sizes() -> bool:
-    """Tests sending datagrams of various sizes, including oversized ones."""
+    """Test sending datagrams of various sizes, including oversized ones."""
     logger.info("--- Test 05C: Datagram Size Limits ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -138,7 +136,7 @@ async def test_datagram_sizes() -> bool:
 
 
 async def test_datagram_priority() -> bool:
-    """Tests sending datagrams with different priority levels (conceptual)."""
+    """Test sending datagrams with different priority levels (conceptual)."""
     logger.info("--- Test 05D: Datagram Priority ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -166,7 +164,7 @@ async def test_datagram_priority() -> bool:
 
 
 async def test_datagram_ttl() -> bool:
-    """Tests sending datagrams with a Time-To-Live (TTL) (conceptual)."""
+    """Test sending datagrams with a Time-To-Live (TTL) (conceptual)."""
     logger.info("--- Test 05E: Datagram TTL ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -193,7 +191,7 @@ async def test_datagram_ttl() -> bool:
 
 
 async def test_json_datagrams() -> bool:
-    """Tests sending datagrams with JSON-formatted payloads."""
+    """Test sending datagrams with JSON-formatted payloads."""
     logger.info("--- Test 05F: JSON Datagrams ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -227,7 +225,7 @@ async def test_json_datagrams() -> bool:
 
 
 async def test_datagram_burst() -> bool:
-    """Tests a burst of datagrams sent concurrently."""
+    """Test a burst of datagrams sent concurrently."""
     logger.info("--- Test 05G: Datagram Burst ---")
     burst_size = 50
     config = ClientConfig.create(
@@ -258,7 +256,7 @@ async def test_datagram_burst() -> bool:
 
 
 async def test_datagram_queue_behavior() -> bool:
-    """Tests the inspection of datagram send/receive queues."""
+    """Test the inspection of datagram send/receive queues."""
     logger.info("--- Test 05H: Datagram Queue Behavior ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -288,7 +286,7 @@ async def test_datagram_queue_behavior() -> bool:
 
 
 async def main() -> int:
-    """Main entry point for the datagrams test suite."""
+    """Run the main entry point for the datagrams test suite."""
     logger.info("--- Starting Test 05: Datagrams ---")
 
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
@@ -323,11 +321,9 @@ async def main() -> int:
 
     if passed == total:
         logger.info("TEST 05 PASSED: All datagram tests successful!")
-        logger.info("Ready to proceed to Test 06")
         return 0
     else:
         logger.error("TEST 05 FAILED: Some datagram tests failed!")
-        logger.error("Please fix the issues before proceeding")
         return 1
 
 

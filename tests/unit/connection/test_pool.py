@@ -83,7 +83,10 @@ class TestConnectionPool:
             stale_conn.is_connected = False
             pool._pool[pool_key].append((stale_conn, time.time()))
             pool._total_connections[pool_key] = 1
-            mocker.patch("pywebtransport.connection.pool.WebTransportConnection.connect")
+            mocker.patch(
+                "pywebtransport.connection.pool.WebTransportConnection.create_client",
+                return_value=mock_connection_factory(),
+            )
 
             await pool.get_connection(config=ClientConfig(), host="127.0.0.1", port=4433)
 
@@ -93,8 +96,8 @@ class TestConnectionPool:
     @pytest.mark.asyncio
     async def test_get_connection_creation_failure_updates_count(self, mocker: MockerFixture) -> None:
         mocker.patch(
-            "pywebtransport.connection.pool.WebTransportConnection.connect",
-            side_effect=ConnectionError("Failed to connect"),
+            "pywebtransport.connection.pool.WebTransportConnection.create_client",
+            side_effect=ConnectionError(message="Failed to connect"),
         )
         async with ConnectionPool() as pool:
             pool_key = "localhost:1234"
@@ -143,9 +146,8 @@ class TestConnectionPool:
     async def test_get_connection_concurrent_respects_max_size(self, mocker: MockerFixture) -> None:
         created_connections: list[Any] = []
 
-        def connection_factory(*args: Any, **kwargs: Any) -> Any:
+        async def connection_factory(*args: Any, **kwargs: Any) -> Any:
             new_conn = mocker.create_autospec(WebTransportConnection, instance=True)
-            new_conn.connect = mocker.AsyncMock()
             new_conn.close = mocker.AsyncMock()
             new_conn.is_connected = True
             new_conn.remote_address = ("localhost", 1234)
@@ -153,7 +155,7 @@ class TestConnectionPool:
             return new_conn
 
         mocker.patch(
-            "pywebtransport.connection.pool.WebTransportConnection",
+            "pywebtransport.connection.pool.WebTransportConnection.create_client",
             side_effect=connection_factory,
         )
 
@@ -241,7 +243,7 @@ class TestConnectionPool:
     @pytest.mark.asyncio
     async def test_cleanup_task_crashes_safely(self, mocker: MockerFixture, caplog: Any) -> None:
         async with ConnectionPool() as pool:
-            mocker.patch("asyncio.sleep", new_callable=AsyncMock)
+            mocker.patch("asyncio.sleep", side_effect=[None, StopIteration])
             mocker.patch(
                 "pywebtransport.connection.pool.time.time",
                 side_effect=[ValueError("Time is broken"), time.time()],

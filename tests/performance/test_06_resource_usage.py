@@ -1,6 +1,4 @@
-"""
-Tests for server resource usage under various connection loads.
-"""
+"""Tests for server resource usage under various connection loads."""
 
 import asyncio
 import json

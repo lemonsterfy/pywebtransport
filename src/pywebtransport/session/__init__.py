@@ -1,6 +1,4 @@
-"""
-WebTransport Session Subpackage.
-"""
+"""WebTransport Session Subpackage."""
 
 from .manager import SessionManager
 from .session import SessionStats, WebTransportSession

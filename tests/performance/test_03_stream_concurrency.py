@@ -1,6 +1,4 @@
-"""
-Performance benchmark for concurrent WebTransport stream creation and usage.
-"""
+"""Performance benchmark for concurrent WebTransport stream creation and usage."""
 
 import asyncio
 import logging

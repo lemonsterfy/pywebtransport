@@ -1,6 +1,4 @@
-"""
-WebTransport Server Subpackage.
-"""
+"""WebTransport Server Subpackage."""
 
 from .app import ServerApp
 from .cluster import ServerCluster

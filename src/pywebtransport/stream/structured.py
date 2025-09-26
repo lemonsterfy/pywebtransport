@@ -1,12 +1,10 @@
-"""
-High-level structured data stream for WebTransport.
-"""
+"""High-level structured data stream for WebTransport."""
 
 from __future__ import annotations
 
 import asyncio
 import struct
-from typing import TYPE_CHECKING, Any, Type
+from typing import TYPE_CHECKING, Any
 
 from pywebtransport.exceptions import SerializationError, StreamError
 from pywebtransport.types import Serializer
@@ -29,8 +27,8 @@ class StructuredStream:
         *,
         stream: WebTransportStream,
         serializer: Serializer,
-        registry: dict[int, Type[Any]],
-    ):
+        registry: dict[int, type[Any]],
+    ) -> None:
         """Initialize the structured stream."""
         self._stream = stream
         self._serializer = serializer
@@ -56,18 +54,20 @@ class StructuredStream:
         try:
             header_bytes = await self._stream.readexactly(n=self._HEADER_SIZE)
         except asyncio.IncompleteReadError as e:
-            raise StreamError("Stream closed while waiting for message header.") from e
+            raise StreamError(message="Stream closed while waiting for message header.") from e
 
         type_id, payload_len = struct.unpack(self._HEADER_FORMAT, header_bytes)
         message_class = self._registry.get(type_id)
         if message_class is None:
-            raise SerializationError(f"Received unknown message type ID: {type_id}")
+            raise SerializationError(message=f"Received unknown message type ID: {type_id}")
 
         try:
             payload = await self._stream.readexactly(n=payload_len)
         except asyncio.IncompleteReadError as e:
             raise StreamError(
-                f"Stream closed prematurely while reading payload of size {payload_len} " f"for type ID {type_id}."
+                message=(
+                    f"Stream closed prematurely while reading payload of size {payload_len} " f"for type ID {type_id}."
+                )
             ) from e
 
         return self._serializer.deserialize(data=payload, obj_type=message_class)
@@ -77,7 +77,7 @@ class StructuredStream:
         obj_type = type(obj)
         type_id = self._class_to_id.get(obj_type)
         if type_id is None:
-            raise SerializationError(f"Object of type '{obj_type.__name__}' is not registered.")
+            raise SerializationError(message=f"Object of type '{obj_type.__name__}' is not registered.")
 
         payload = self._serializer.serialize(obj=obj)
         payload_len = len(payload)

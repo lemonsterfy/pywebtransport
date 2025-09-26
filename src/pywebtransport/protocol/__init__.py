@@ -1,6 +1,4 @@
-"""
-WebTransport Protocol Subpackage.
-"""
+"""WebTransport Protocol Subpackage."""
 
 from .handler import WebTransportProtocolHandler
 from .session_info import StreamInfo, WebTransportSessionInfo

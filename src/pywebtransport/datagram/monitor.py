@@ -1,13 +1,11 @@
-"""
-WebTransport Datagram Performance Monitor.
-"""
+"""WebTransport Datagram Performance Monitor."""
 
 from __future__ import annotations
 
 import asyncio
 from collections import deque
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self, Type
+from typing import TYPE_CHECKING, Any, Self
 
 from pywebtransport.utils import get_logger, get_timestamp
 
@@ -33,7 +31,7 @@ class DatagramMonitor:
         queue_size_threshold: float = 0.9,
         success_rate_threshold: float = 0.8,
         trend_analysis_window: int = 10,
-    ):
+    ) -> None:
         """Initialize the datagram performance monitor."""
         self._transport = datagram_transport
         self._interval = monitoring_interval
@@ -80,7 +78,7 @@ class DatagramMonitor:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:

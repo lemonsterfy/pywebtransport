@@ -8,24 +8,15 @@ This document provides a reference for the `pywebtransport.client` subpackage, w
 
 The foundational class for establishing WebTransport connections and creating sessions.
 
-**Note on Usage**: The client must be used as an asynchronous context manager (`async with ...`). To instantiate a client, choose the method that best fits your use case:
+**Note on Usage**: The client must be used as an asynchronous context manager (`async with ...`).
 
-- For a **standard, non-reconnecting client**, it is recommended to use the constructor directly:
+### Constructor
 
-  ```python
-  async with WebTransportClient(config=config) as client:
-      ...
-  ```
-
-- To create a client whose behavior is **driven by configuration** (especially for enabling auto-reconnection), use the `WebTransportClient.create()` smart factory:
-  ```python
-  async with WebTransportClient.create(url=url, config=config) as client:
-      ...
-  ```
+- **`def __init__(self, *, config: ClientConfig | None = None) -> None`**: Initializes the WebTransport client with a given configuration.
 
 ### Class Methods
 
-- **`def create(*, url: URL, config: ClientConfig | None = None) -> WebTransportClient | ReconnectingClient`**: Smart factory method to create a client. If `config.auto_reconnect` is set to `True`, this method returns a `ReconnectingClient` instance. Otherwise, it returns a standard `WebTransportClient` instance.
+- **`def create(*, url: URL, config: ClientConfig | None = None) -> WebTransportClient | ReconnectingClient`**: Smart factory that returns a `ReconnectingClient` if `config.auto_reconnect` is `True`, otherwise a standard `WebTransportClient`.
 
 ### Instance Methods
 
@@ -49,7 +40,7 @@ Manages a pool of `WebTransportClient` instances to distribute concurrent `conne
 
 ### Constructor
 
-- **`def __init__(self, *, configs: list[ClientConfig | None])`**: Initializes the client pool with a list of configurations.
+- **`def __init__(self, *, configs: list[ClientConfig | None]) -> None`**: Initializes the client pool with a list of configurations.
 
 ### Instance Methods
 
@@ -66,7 +57,7 @@ Manages pools of reusable `WebTransportSession` objects, keyed by endpoint URL, 
 
 ### Constructor
 
-- **`def __init__(self, *, config: ClientConfig | None = None, pool_size: int = 10, cleanup_interval: float = 60.0)`**: Initializes the session pool.
+- **`def __init__(self, *, config: ClientConfig | None = None, pool_size: int = 10, cleanup_interval: float = 60.0) -> None`**: Initializes the session pool.
 
 ### Instance Methods
 
@@ -82,7 +73,7 @@ Maintains a persistent connection to a single URL, automatically reconnecting ba
 
 ### Constructor
 
-- **`def __init__(self, *, url: URL, config: ClientConfig)`**: Initializes the reconnecting client.
+- **`def __init__(self, *, url: URL, config: ClientConfig) -> None`**: Initializes the reconnecting client.
 
 ### Class Methods
 
@@ -90,27 +81,12 @@ Maintains a persistent connection to a single URL, automatically reconnecting ba
 
 ### Instance Methods
 
-- **`async def get_session(self, *, wait_timeout: float = 5.0) -> WebTransportSession | None`**: Returns the currently active session, waiting up to `wait_timeout` seconds if not immediately available. Returns `None` if the timeout is reached.
+- **`async def get_session(self, *, wait_timeout: float = 5.0) -> WebTransportSession | None`**: Returns the currently active session, waiting up to `wait_timeout` seconds if not immediately available.
 - **`async def close(self) -> None`**: Closes the reconnecting client and all its resources.
 
 ### Properties
 
 - `is_connected` (`bool`): `True` if the client currently has a ready session.
-
-## WebTransportProxy Class
-
-Tunnels WebTransport connections through an HTTP proxy that supports the `CONNECT` method.
-
-**Note on Usage**: `WebTransportProxy` must be used as an asynchronous context manager (`async with ...`).
-
-### Constructor
-
-- **`def __init__(self, *, proxy_url: URL, config: ClientConfig | None = None)`**: Initializes the proxy client.
-
-### Instance Methods
-
-- **`async def connect_through_proxy(self, *, target_url: URL, proxy_headers: Headers | None = None, timeout: float = 10.0) -> WebTransportStream`**: Establishes a raw tunnel to the target URL.
-- **`async def close(self) -> None`**: Closes the proxy client and the main session to the proxy server.
 
 ## WebTransportBrowser Class
 
@@ -120,7 +96,7 @@ A stateful, browser-like client that manages a single active session and navigat
 
 ### Constructor
 
-- **`def __init__(self, *, config: ClientConfig | None = None)`**: Initializes the browser-like client.
+- **`def __init__(self, *, config: ClientConfig | None = None) -> None`**: Initializes the browser-like client.
 
 ### Instance Methods
 
@@ -143,7 +119,7 @@ Periodically collects metrics and checks for performance alerts on a `WebTranspo
 
 ### Constructor
 
-- **`def __init__(self, client: WebTransportClient, *, monitoring_interval: float = 30.0)`**: Initializes the monitor for a given client.
+- **`def __init__(self, client: WebTransportClient, *, monitoring_interval: float = 30.0) -> None`**: Initializes the monitor for a given client.
 
 ### Instance Methods
 
@@ -159,7 +135,7 @@ A dataclass that holds aggregated statistics for a `WebTransportClient`.
 
 ### Attributes
 
-- `created_at` (`float`): Timestamp when the client was created. `Default: current timestamp.`
+- `created_at` (`float`): Timestamp when the client was created. `Default: current timestamp`.
 - `connections_attempted` (`int`): Total connections attempted. `Default: 0`.
 - `connections_successful` (`int`): Total successful connections. `Default: 0`.
 - `connections_failed` (`int`): Total failed connections. `Default: 0`.

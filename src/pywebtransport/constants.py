@@ -1,15 +1,17 @@
-"""
-WebTransport Constants and Defaults.
-"""
+"""WebTransport Constants and Defaults."""
 
 from __future__ import annotations
 
 import ssl
 from enum import IntEnum
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from pywebtransport.types import Headers
 from pywebtransport.version import __version__
+
+if TYPE_CHECKING:
+    from pywebtransport.config import ProxyConfig
+
 
 __all__ = [
     "ALPN_H3",
@@ -55,6 +57,8 @@ __all__ = [
     "DEFAULT_MAX_TOTAL_PENDING_EVENTS",
     "DEFAULT_PENDING_EVENT_TTL",
     "DEFAULT_PORT",
+    "DEFAULT_PROXY_CONNECT_TIMEOUT",
+    "DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE",
     "DEFAULT_READ_TIMEOUT",
     "DEFAULT_RETRY_BACKOFF",
     "DEFAULT_RETRY_DELAY",
@@ -210,6 +214,8 @@ DEFAULT_MAX_STREAMS_PER_CONNECTION: int = 100
 DEFAULT_MAX_TOTAL_PENDING_EVENTS: int = 1000
 DEFAULT_PENDING_EVENT_TTL: float = 5.0
 DEFAULT_PORT: int = 80
+DEFAULT_PROXY_CONNECT_TIMEOUT: float = 10.0
+DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE: int = 16
 DEFAULT_READ_TIMEOUT: float = 60.0
 DEFAULT_RETRY_BACKOFF: float = 2.0
 DEFAULT_RETRY_DELAY: float = 1.0
@@ -316,6 +322,7 @@ class ClientConfigDefaults(TypedDict):
     max_streams: int
     max_total_pending_events: int
     pending_event_ttl: float
+    proxy: ProxyConfig | None
     read_timeout: float | None
     retry_backoff: float
     retry_delay: float
@@ -404,6 +411,7 @@ _DEFAULT_CLIENT_CONFIG: ClientConfigDefaults = {
     "max_streams": DEFAULT_MAX_STREAMS,
     "max_total_pending_events": DEFAULT_MAX_TOTAL_PENDING_EVENTS,
     "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
+    "proxy": None,
     "read_timeout": DEFAULT_READ_TIMEOUT,
     "retry_backoff": DEFAULT_RETRY_BACKOFF,
     "retry_delay": DEFAULT_RETRY_DELAY,

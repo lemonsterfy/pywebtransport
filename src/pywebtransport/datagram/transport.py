@@ -1,6 +1,4 @@
-"""
-WebTransport Datagram Transport.
-"""
+"""WebTransport Datagram Transport."""
 
 from __future__ import annotations
 
@@ -12,7 +10,7 @@ import weakref
 from collections import deque
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self, Type, cast
+from typing import TYPE_CHECKING, Any, Self, cast
 
 from pywebtransport.events import Event, EventEmitter, EventType
 from pywebtransport.exceptions import DatagramError, TimeoutError, datagram_too_large
@@ -159,7 +157,7 @@ class DatagramStats:
 class DatagramQueue:
     """A priority queue for datagrams with size and TTL limits."""
 
-    def __init__(self, *, max_size: int = 1000, max_age: float | None = None):
+    def __init__(self, *, max_size: int = 1000, max_age: float | None = None) -> None:
         """Initialize the datagram queue."""
         self._max_size = max_size
         self._max_age = max_age
@@ -194,13 +192,13 @@ class DatagramQueue:
         """Get a datagram from the queue, waiting if it's empty."""
         if self._lock is None or self._not_empty is None:
             raise DatagramError(
-                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+                message="DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
             )
 
         async def _wait_for_item() -> DatagramMessage:
             if self._lock is None or self._not_empty is None:
                 raise DatagramError(
-                    "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+                    message="DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
                 )
 
             while True:
@@ -217,13 +215,13 @@ class DatagramQueue:
         try:
             return await asyncio.wait_for(_wait_for_item(), timeout=timeout)
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Datagram get timeout after {timeout}s") from None
+            raise TimeoutError(message=f"Datagram get timeout after {timeout}s") from None
 
     async def get_nowait(self) -> DatagramMessage | None:
         """Get a datagram from the queue without blocking."""
         if self._lock is None or self._not_empty is None:
             raise DatagramError(
-                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+                message="DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
             )
 
         async with self._lock:
@@ -240,7 +238,7 @@ class DatagramQueue:
         """Add a datagram to the queue, applying priority and size limits."""
         if self._lock is None or self._not_empty is None:
             raise DatagramError(
-                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+                message="DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
             )
 
         if datagram.is_expired:
@@ -264,7 +262,7 @@ class DatagramQueue:
         """Add a datagram to the queue without blocking."""
         if self._lock is None or self._not_empty is None:
             raise DatagramError(
-                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+                message="DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
             )
 
         if datagram.is_expired:
@@ -288,7 +286,7 @@ class DatagramQueue:
         """Safely clear all items from the queue."""
         if self._lock is None or self._not_empty is None:
             raise DatagramError(
-                "DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
+                message="DatagramQueue has not been initialized. Its owner must call 'await queue.initialize()'."
             )
 
         async with self._lock:
@@ -364,7 +362,7 @@ class WebTransportDatagramTransport(EventEmitter):
         *,
         high_water_mark: int = 100,
         sender_get_timeout: float = 1.0,
-    ):
+    ) -> None:
         """Initialize the datagram duplex transport."""
         super().__init__()
         self._session = weakref.ref(session)
@@ -475,7 +473,7 @@ class WebTransportDatagramTransport(EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -524,13 +522,15 @@ class WebTransportDatagramTransport(EventEmitter):
         """Receive a single datagram."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         if self.is_closed:
-            raise DatagramError("Datagram transport is closed.")
+            raise DatagramError(message="Datagram transport is closed.")
         if self._incoming_queue is None:
-            raise DatagramError("Internal state error: queue is None despite transport being initialized.")
+            raise DatagramError(message="Internal state error: queue is None despite transport being initialized.")
 
         start_time = time.time()
         datagram = await self._incoming_queue.get(timeout=timeout)
@@ -554,11 +554,11 @@ class WebTransportDatagramTransport(EventEmitter):
             data = await self.receive(timeout=timeout)
             return json.loads(data.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            raise DatagramError(f"Failed to parse JSON datagram: {e}") from e
+            raise DatagramError(message=f"Failed to parse JSON datagram: {e}") from e
         except TimeoutError as e:
             raise e
         except Exception as e:
-            raise DatagramError(f"Failed to receive JSON datagram: {e}") from e
+            raise DatagramError(message=f"Failed to receive JSON datagram: {e}") from e
 
     async def receive_multiple(self, *, max_count: int = 10, timeout: float | None = None) -> list[bytes]:
         """Receive multiple datagrams in a batch."""
@@ -580,13 +580,15 @@ class WebTransportDatagramTransport(EventEmitter):
         """Receive a datagram along with its metadata."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         if self.is_closed:
-            raise DatagramError("Datagram transport is closed.")
+            raise DatagramError(message="Datagram transport is closed.")
         if self._incoming_queue is None:
-            raise DatagramError("Internal state error: queue is None despite transport being initialized.")
+            raise DatagramError(message="Internal state error: queue is None despite transport being initialized.")
 
         try:
             start_time = time.time()
@@ -595,7 +597,7 @@ class WebTransportDatagramTransport(EventEmitter):
         except TimeoutError as e:
             raise e
         except Exception as e:
-            raise DatagramError(f"Failed to receive datagram with metadata: {e}") from e
+            raise DatagramError(message=f"Failed to receive datagram with metadata: {e}") from e
 
         self._update_receive_stats(datagram=datagram, receive_time=receive_time)
         return {
@@ -607,13 +609,17 @@ class WebTransportDatagramTransport(EventEmitter):
         """Send a datagram with a given priority and TTL."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         if self.is_closed:
-            raise DatagramError("Datagram transport is closed.")
+            raise DatagramError(message="Datagram transport is closed.")
         if self._sequence_lock is None or self._outgoing_queue is None:
-            raise DatagramError("Internal state error: lock or queue is None despite transport being initialized.")
+            raise DatagramError(
+                message="Internal state error: lock or queue is None despite transport being initialized."
+            )
 
         data_bytes = ensure_bytes(data=data)
         if len(data_bytes) > self.max_datagram_size:
@@ -628,7 +634,7 @@ class WebTransportDatagramTransport(EventEmitter):
 
         if not success:
             self._stats.send_drops += 1
-            raise DatagramError("Outgoing datagram queue full or datagram expired")
+            raise DatagramError(message="Outgoing datagram queue full or datagram expired")
 
         self._stats.datagrams_sent += 1
         self._stats.bytes_sent += datagram.size
@@ -642,14 +648,16 @@ class WebTransportDatagramTransport(EventEmitter):
             json_data = json.dumps(obj=data, separators=(",", ":")).encode("utf-8")
             await self.send(data=json_data, priority=priority, ttl=ttl)
         except TypeError as e:
-            raise DatagramError(f"Failed to serialize JSON datagram: {e}") from e
+            raise DatagramError(message=f"Failed to serialize JSON datagram: {e}") from e
 
     async def send_multiple(self, *, datagrams: list[Data], priority: int = 0, ttl: float | None = None) -> int:
         """Send multiple datagrams and return the number successfully sent."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         sent_count = 0
         for data in datagrams:
@@ -665,8 +673,10 @@ class WebTransportDatagramTransport(EventEmitter):
         """Clear the receive buffer and return the number of cleared datagrams."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         if self._incoming_queue is None:
             return 0
@@ -679,8 +689,10 @@ class WebTransportDatagramTransport(EventEmitter):
         """Clear the send buffer and return the number of cleared datagrams."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         if self._outgoing_queue is None:
             return 0
@@ -771,8 +783,10 @@ class WebTransportDatagramTransport(EventEmitter):
         """Run a task that sends periodic heartbeat datagrams."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         return asyncio.create_task(self._heartbeat_loop(interval=interval))
 
@@ -780,8 +794,10 @@ class WebTransportDatagramTransport(EventEmitter):
         """Try to receive a datagram without blocking."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         if self.is_closed or self._incoming_queue is None:
             return None
@@ -796,8 +812,10 @@ class WebTransportDatagramTransport(EventEmitter):
         """Try to send a datagram without blocking."""
         if not self._is_initialized:
             raise DatagramError(
-                "WebTransportDatagramTransport is not initialized. Its factory "
-                "should call 'await transport.initialize()' before use."
+                message=(
+                    "WebTransportDatagramTransport is not initialized. Its factory "
+                    "should call 'await transport.initialize()' before use."
+                )
             )
         if self.is_closed:
             return False
@@ -868,21 +886,21 @@ class WebTransportDatagramTransport(EventEmitter):
         try:
             data = await self.receive(timeout=timeout)
             if len(data) < 1:
-                raise DatagramError("Datagram too short for frame header")
+                raise DatagramError(message="Datagram too short for frame header")
 
             type_length = data[0]
             if len(data) < 1 + type_length:
-                raise DatagramError("Datagram too short for type header content")
+                raise DatagramError(message="Datagram too short for type header content")
 
             message_type = data[1 : 1 + type_length].decode("utf-8")
             payload = data[1 + type_length :]
             return message_type, payload
         except (UnicodeDecodeError, IndexError) as e:
-            raise DatagramError(f"Failed to parse framed datagram: {e}") from e
+            raise DatagramError(message=f"Failed to parse framed datagram: {e}") from e
         except TimeoutError as e:
             raise e
         except Exception as e:
-            raise DatagramError(f"Failed to receive framed datagram: {e}") from e
+            raise DatagramError(message=f"Failed to receive framed datagram: {e}") from e
 
     async def _sender_loop(self) -> None:
         """Continuously send datagrams from the outgoing queue."""
@@ -932,7 +950,7 @@ class WebTransportDatagramTransport(EventEmitter):
         """Send a simple length-prefixed datagram for internal use."""
         type_bytes = message_type.encode("utf-8")
         if len(type_bytes) > 255:
-            raise DatagramError("Message type too long (max 255 bytes)")
+            raise DatagramError(message="Message type too long (max 255 bytes)")
 
         frame = struct.pack("!B", len(type_bytes)) + type_bytes + payload
         await self.send(data=frame, priority=priority, ttl=ttl)

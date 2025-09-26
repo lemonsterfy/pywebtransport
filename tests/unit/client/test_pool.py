@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from _pytest.logging import LogCaptureFixture
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ClientConfig, ClientError, WebTransportClient, WebTransportSession
@@ -32,7 +33,7 @@ class TestClientPool:
         client.connect = mocker.AsyncMock()
         return client
 
-    @pytest.fixture
+    @asyncio_fixture
     async def pool(self, mock_client_constructor: Any) -> AsyncGenerator[ClientPool, None]:
         pool_instance = ClientPool.create(num_clients=3)
         async with pool_instance as activated_pool:
@@ -127,7 +128,7 @@ class TestClientPool:
         successful_client.connect = mocker.AsyncMock(return_value=mock_session)
         failing_client = mocker.create_autospec(WebTransportClient, instance=True)
         failing_client.__aenter__ = mocker.AsyncMock(return_value=failing_client)
-        failing_client.connect = mocker.AsyncMock(side_effect=ClientError("Connection failed"))
+        failing_client.connect = mocker.AsyncMock(side_effect=ClientError(message="Connection failed"))
         mocker.patch(
             "pywebtransport.client.pool.WebTransportClient",
             side_effect=[successful_client, failing_client],

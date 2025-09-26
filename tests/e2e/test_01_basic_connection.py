@@ -1,6 +1,4 @@
-"""
-E2E test for basic WebTransport connections.
-"""
+"""E2E test for basic WebTransport connections."""
 
 import asyncio
 import logging
@@ -27,7 +25,7 @@ logger = logging.getLogger("test_basic_connection")
 
 
 async def test_server_reachability() -> bool:
-    """Performs a pre-check for server reachability via a simple UDP packet."""
+    """Perform a pre-check for server reachability via a simple UDP packet."""
     logger.info("Pre-check: Testing server reachability...")
 
     try:
@@ -48,7 +46,7 @@ async def test_server_reachability() -> bool:
 
 
 async def test_basic_connection() -> bool:
-    """Tests the establishment of a basic WebTransport connection."""
+    """Test the establishment of a basic WebTransport connection."""
     logger.info("Test 01: Basic WebTransport Connection")
     logger.info("=" * 50)
 
@@ -88,7 +86,6 @@ async def test_basic_connection() -> bool:
             await session.close()
             logger.info("Session closed successfully")
             return True
-
     except (TimeoutError, ConnectionError) as e:
         logger.error("FAILED: Connection error - %s", e)
         logger.error("Possible issues:")
@@ -103,7 +100,7 @@ async def test_basic_connection() -> bool:
 
 
 async def main() -> int:
-    """Main entry point for the basic connection test."""
+    """Run the main entry point for the basic connection test."""
     logger.info("Starting Test 01: Basic Connection")
     logger.info("")
 
@@ -119,11 +116,9 @@ async def main() -> int:
 
     if success:
         logger.info("TEST 01 PASSED: Basic connection successful!")
-        logger.info("Ready to proceed to Test 02")
         return 0
     else:
         logger.error("TEST 01 FAILED: Basic connection failed!")
-        logger.error("Please fix the connection issues before proceeding")
         return 1
 
 

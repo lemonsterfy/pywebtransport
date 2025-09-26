@@ -8,11 +8,7 @@ This document provides a reference for the `pywebtransport.session` subpackage, 
 
 The primary user-facing class that represents a single, long-lived logical connection.
 
-**Note on Usage**: `WebTransportSession` is not instantiated directly but through a `WebTransportConnection`.
-
-### Constructor
-
-- **`def __init__(self, connection: WebTransportConnection, *, session_id: SessionId, max_streams: int = 100, ...)`**: Initializes a new session object.
+**Note on Usage**: `WebTransportSession` is not instantiated directly but is typically provided by a `WebTransportClient` or a server application.
 
 ### Properties
 
@@ -23,15 +19,17 @@ The primary user-facing class that represents a single, long-lived logical conne
 - `is_ready` (`bool`): `True` if the session is connected and ready for use.
 - `path` (`str`): The URL path associated with the session.
 - `protocol_handler` (`WebTransportProtocolHandler | None`): The underlying protocol handler.
+- `pubsub` (`PubSubManager`): Lazily accesses the Publish/Subscribe manager for this session.
+- `rpc` (`RpcManager`): Lazily accesses the RPC manager for this session.
 - `session_id` (`SessionId`): The unique ID of the session.
 - `state` (`SessionState`): The current state of the session.
 
 ### Instance Methods
 
-- **`async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None`**: Closes the session.
+- **`async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None`**: Closes the session and all its associated resources.
 - **`async def create_bidirectional_stream(self, *, timeout: float | None = None) -> WebTransportStream`**: Creates and returns a new bidirectional stream.
-- **`async def create_structured_datagram_transport(self, *, serializer: Serializer, registry: dict[int, Type[Any]]) -> StructuredDatagramTransport`**: Creates a new structured datagram transport for sending and receiving objects.
-- **`async def create_structured_stream(self, *, serializer: Serializer, registry: dict[int, Type[Any]], timeout: float | None = None) -> StructuredStream`**: Creates a new structured bidirectional stream for sending and receiving objects.
+- **`async def create_structured_datagram_transport(self, *, serializer: Serializer, registry: dict[int, type[Any]]) -> StructuredDatagramTransport`**: Creates a new structured datagram transport for sending and receiving objects.
+- **`async def create_structured_stream(self, *, serializer: Serializer, registry: dict[int, type[Any]], timeout: float | None = None) -> StructuredStream`**: Creates a new structured bidirectional stream for sending and receiving objects.
 - **`async def create_unidirectional_stream(self, *, timeout: float | None = None) -> WebTransportSendStream`**: Creates and returns a new unidirectional (send-only) stream.
 - **`async def debug_state(self) -> dict[str, Any]`**: Returns a detailed, structured snapshot of the session's internal state for debugging.
 - **`async def diagnose_issues(self) -> list[str]`**: Runs checks and returns a list of strings describing potential issues.
@@ -51,7 +49,7 @@ A helper class for managing the lifecycle of multiple `WebTransportSession` obje
 
 ### Constructor
 
-- **`def __init__(self, *, max_sessions: int = 10000, session_cleanup_interval: float = 60.0)`**: Initializes the session manager.
+- **`def __init__(self, *, max_sessions: int = 10000, session_cleanup_interval: float = 60.0) -> None`**: Initializes the session manager.
 
 ### Class Methods
 

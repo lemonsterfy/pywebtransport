@@ -10,15 +10,7 @@ The core class that orchestrates WebTransport sessions and streams over a QUIC c
 
 ### Constructor
 
-- **`def __init__(self, *, quic_connection: QuicConnection, is_client: bool = True, connection: "WebTransportConnection" | None = None)`**: Initializes the protocol handler.
-
-### Properties
-
-- `is_connected` (`bool`): `True` if the underlying connection is established.
-- `connection` (`WebTransportConnection | None`): A weak reference to the parent `WebTransportConnection`.
-- `connection_state` (`ConnectionState`): The current state of the underlying connection.
-- `quic_connection` (`QuicConnection`): The underlying `aioquic` QuicConnection object.
-- `stats` (`dict[str, Any]`: A copy of the protocol handler's statistics.
+- **`def __init__(self, *, quic_connection: QuicConnection, is_client: bool = True, connection: "WebTransportConnection" | None = None) -> None`**: Initializes the protocol handler.
 
 ### Instance Methods
 
@@ -38,7 +30,14 @@ The core class that orchestrates WebTransport sessions and streams over a QUIC c
 - **`def get_session_info(self, *, session_id: SessionId) -> WebTransportSessionInfo | None`**: Gets information about a specific session.
 - **`async def read_stream_complete(self, *, stream_id: StreamId, timeout: float = 30.0) -> bytes`**: Receives all data from a stream until it is ended.
 - **`async def recover_session(self, *, session_id: SessionId, max_retries: int = 3) -> bool`**: Attempts to recover a failed session by creating a new one.
-- **`def write_stream_chunked(self, *, stream_id: StreamId, data: Data, chunk_size: int = 8192) -> int`**: Sends data on a stream in managed chunks.
+
+### Properties
+
+- `is_connected` (`bool`): `True` if the underlying connection is established.
+- `connection` (`WebTransportConnection | None`): A weak reference to the parent `WebTransportConnection`.
+- `connection_state` (`ConnectionState`): The current state of the underlying connection.
+- `quic_connection` (`QuicConnection`): The underlying `aioquic` QuicConnection object.
+- `stats` (`dict[str, Any]`): A copy of the protocol handler's statistics.
 
 ## WebTransportSessionInfo Class
 

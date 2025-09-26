@@ -7,6 +7,7 @@ from unittest import mock
 from unittest.mock import AsyncMock
 
 import pytest
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import StreamError, StreamId, StreamState, WebTransportSendStream, WebTransportStream
@@ -24,7 +25,7 @@ def mock_session(mocker: MockerFixture) -> Any:
 
 
 class TestStreamManager:
-    @pytest.fixture
+    @asyncio_fixture
     async def manager(self, mock_session: Any) -> AsyncGenerator[StreamManager, None]:
         async with StreamManager(session=mock_session) as mgr:
             yield mgr
@@ -90,6 +91,32 @@ class TestStreamManager:
 
         assert the_task.done()
         close_all_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_is_idempotent(self, manager: StreamManager, mocker: MockerFixture) -> None:
+        close_all_mock = mocker.patch.object(manager, "close_all_streams", new_callable=mocker.AsyncMock)
+
+        await manager.shutdown()
+        await manager.shutdown()
+
+        close_all_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_background_task_failure_triggers_shutdown(self, mock_session: Any, mocker: MockerFixture) -> None:
+        mocker.patch.object(StreamManager, "_start_cleanup_task")
+
+        async with StreamManager(session=mock_session) as manager:
+            shutdown_mock = mocker.patch.object(manager, "shutdown", new_callable=mocker.AsyncMock)
+
+            async def failing_coro() -> None:
+                raise RuntimeError("Task failed unexpectedly")
+
+            failing_task = asyncio.create_task(failing_coro())
+            failing_task.add_done_callback(manager._on_cleanup_done)
+
+            await asyncio.sleep(0.01)
+
+            shutdown_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_shutdown_no_task(self, mock_session: Any, mocker: MockerFixture) -> None:
@@ -303,12 +330,12 @@ class TestStreamManager:
         mock_logger_warning.assert_called_once_with("Could not start cleanup task: no running event loop.")
 
 
+@pytest.mark.asyncio
 class TestStreamManagerUninitialized:
     @pytest.fixture
     def uninitialized_manager(self, mock_session: Any) -> StreamManager:
         return StreamManager(session=mock_session)
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "method_name, kwargs",
         [
@@ -329,7 +356,6 @@ class TestStreamManagerUninitialized:
         with pytest.raises(StreamError, match="StreamManager has not been activated"):
             await getattr(uninitialized_manager, method_name)(**kwargs)
 
-    @pytest.mark.asyncio
     async def test_aiter_raises_before_activated(self, uninitialized_manager: StreamManager) -> None:
         with pytest.raises(StreamError, match="StreamManager has not been activated"):
             async for _ in uninitialized_manager:

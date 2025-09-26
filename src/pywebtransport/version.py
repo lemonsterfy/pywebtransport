@@ -1,9 +1,7 @@
-"""
-PyWebTransport Version Information.
-"""
+"""PyWebTransport Version Information."""
 
 from __future__ import annotations
 
 __all__ = ["__version__"]
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"

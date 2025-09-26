@@ -8,7 +8,7 @@ from pytest_mock import MockerFixture
 
 from pywebtransport import CertificateError, ClientConfig, ConfigurationError, ServerConfig
 from pywebtransport import __version__ as real_version
-from pywebtransport.config import ConfigBuilder, _validate_port, _validate_timeout
+from pywebtransport.config import ConfigBuilder, ProxyConfig, _validate_port, _validate_timeout
 from pywebtransport.constants import (
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
@@ -23,6 +23,14 @@ def mock_path_exists(mocker: MockerFixture) -> Any:
     return mocker.patch("pywebtransport.config.Path.exists", return_value=True)
 
 
+class TestProxyConfig:
+    def test_initialization(self) -> None:
+        proxy = ProxyConfig(url="http://proxy.example.com:8080", connect_timeout=5.0)
+        assert proxy.url == "http://proxy.example.com:8080"
+        assert proxy.headers == {}
+        assert proxy.connect_timeout == 5.0
+
+
 class TestClientConfig:
     def test_default_initialization(self) -> None:
         config = ClientConfig()
@@ -35,6 +43,12 @@ class TestClientConfig:
         assert config.auto_reconnect is False
         assert config.flow_control_window_size == DEFAULT_FLOW_CONTROL_WINDOW_SIZE
         assert config.initial_max_data == DEFAULT_INITIAL_MAX_DATA
+        assert config.proxy is None
+
+    def test_initialization_with_proxy(self) -> None:
+        proxy = ProxyConfig(url="http://proxy.com")
+        config = ClientConfig(proxy=proxy)
+        assert config.proxy is proxy
 
     def test_post_init_preserves_user_agent(self) -> None:
         config = ClientConfig(headers={"user-agent": "custom-agent/1.0"})
@@ -76,23 +90,32 @@ class TestClientConfig:
         assert config.verify_mode == ssl.CERT_REQUIRED
 
     def test_copy_method(self) -> None:
-        config1 = ClientConfig()
+        proxy = ProxyConfig(url="http://proxy.com")
+        config1 = ClientConfig(proxy=proxy)
 
         config2 = config1.copy()
         config2.max_retries = 99
+        assert config2.proxy is not None
+        config2.proxy.url = "http://new-proxy.com"
 
         assert config1 is not config2
         assert config1.max_retries != 99
+        assert config1.proxy is not config2.proxy
+        assert config1.proxy is not None
+        assert config1.proxy.url == "http://proxy.com"
 
     def test_update_method(self) -> None:
         config = ClientConfig()
+        proxy = ProxyConfig(url="http://proxy.com")
 
-        new_config = config.update(connect_timeout=15.0, auto_reconnect=True)
+        new_config = config.update(connect_timeout=15.0, auto_reconnect=True, proxy=proxy)
 
         assert new_config.connect_timeout == 15.0
         assert new_config.auto_reconnect is True
+        assert new_config.proxy is proxy
         assert config.connect_timeout == DEFAULT_CONNECT_TIMEOUT
         assert config.auto_reconnect is False
+        assert config.proxy is None
         assert new_config is not config
         with pytest.raises(ConfigurationError, match="unknown configuration key"):
             config.update(unknown_key="value")
@@ -117,13 +140,15 @@ class TestClientConfig:
             config1.merge(other=invalid_value)
 
     def test_to_dict_method(self) -> None:
-        config = ClientConfig(verify_mode=ssl.CERT_OPTIONAL, debug=True, auto_reconnect=True)
+        proxy = ProxyConfig(url="http://proxy.com")
+        config = ClientConfig(verify_mode=ssl.CERT_OPTIONAL, debug=True, auto_reconnect=True, proxy=proxy)
 
         data = config.to_dict()
 
         assert data["verify_mode"] == "CERT_OPTIONAL"
         assert data["debug"] is True
         assert data["auto_reconnect"] is True
+        assert data["proxy"] is proxy
 
     @pytest.mark.parametrize(
         "invalid_attrs, error_match",
@@ -155,6 +180,10 @@ class TestClientConfig:
 
         with pytest.raises(ConfigurationError, match=error_match):
             ClientConfig(**test_config)
+
+    def test_validation_failure_with_proxy(self) -> None:
+        with pytest.raises(ConfigurationError, match="proxy.connect_timeout.*invalid timeout value"):
+            ClientConfig(proxy=ProxyConfig(url="http://p.com", connect_timeout=-5))
 
     @pytest.mark.parametrize(
         "invalid_attrs, error_match",

@@ -1,6 +1,4 @@
-"""
-Server stability and memory leak tests under high connection churn.
-"""
+"""Server stability and memory leak tests under high connection churn."""
 
 import asyncio
 import json
@@ -10,6 +8,7 @@ from collections.abc import AsyncGenerator
 from typing import Any, Final, cast
 
 import pytest
+from pytest_asyncio import fixture as asyncio_fixture
 
 from pywebtransport import ClientConfig, WebTransportClient
 
@@ -58,7 +57,7 @@ async def get_server_resources(*, client: WebTransportClient) -> dict[str, Any]:
 class MemoryMonitor:
     """Monitor and analyze the memory usage of a process over multiple rounds."""
 
-    def __init__(self, measurement_client: WebTransportClient):
+    def __init__(self, measurement_client: WebTransportClient) -> None:
         """Initialize the memory monitor with a dedicated measurement client."""
         self._measurement_client = measurement_client
         self._baselines_kb: list[float] = []
@@ -137,7 +136,7 @@ class TestConnectionChurnStability:
             initial_max_streams_uni=100,
         )
 
-    @pytest.fixture(scope="class")
+    @asyncio_fixture(scope="class")
     async def measurement_client(self, client_config: ClientConfig) -> AsyncGenerator[WebTransportClient, None]:
         """Provide a single, long-lived client for all measurement tasks."""
         client = WebTransportClient(config=client_config)

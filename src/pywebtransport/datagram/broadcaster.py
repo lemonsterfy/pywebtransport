@@ -1,12 +1,10 @@
-"""
-WebTransport Datagram Broadcaster.
-"""
+"""WebTransport Datagram Broadcaster."""
 
 from __future__ import annotations
 
 import asyncio
 from types import TracebackType
-from typing import TYPE_CHECKING, Self, Type
+from typing import TYPE_CHECKING, Self
 
 from pywebtransport.exceptions import DatagramError
 from pywebtransport.types import Data
@@ -41,7 +39,7 @@ class DatagramBroadcaster:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -54,8 +52,10 @@ class DatagramBroadcaster:
         """Add a transport to the broadcast list."""
         if self._lock is None:
             raise DatagramError(
-                "DatagramBroadcaster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "DatagramBroadcaster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             if transport not in self._transports:
@@ -65,8 +65,10 @@ class DatagramBroadcaster:
         """Broadcast a datagram to all registered transports concurrently."""
         if self._lock is None:
             raise DatagramError(
-                "DatagramBroadcaster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "DatagramBroadcaster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         sent_count = 0
@@ -110,8 +112,10 @@ class DatagramBroadcaster:
         """Remove a transport from the broadcast list."""
         if self._lock is None:
             raise DatagramError(
-                "DatagramBroadcaster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "DatagramBroadcaster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             try:
@@ -123,8 +127,10 @@ class DatagramBroadcaster:
         """Get the current number of active transports safely."""
         if self._lock is None:
             raise DatagramError(
-                "DatagramBroadcaster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "DatagramBroadcaster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             return len(self._transports)

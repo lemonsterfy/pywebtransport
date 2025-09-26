@@ -1,13 +1,11 @@
-"""
-WebTransport Pooled Client.
-"""
+"""WebTransport Pooled Client."""
 
 from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
 from types import TracebackType
-from typing import Self, Type
+from typing import Self
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -30,7 +28,7 @@ class PooledClient:
         config: ClientConfig | None = None,
         pool_size: int = 10,
         cleanup_interval: float = 60.0,
-    ):
+    ) -> None:
         """Initialize the pooled client."""
         if pool_size <= 0:
             raise ValueError("pool_size must be a positive integer.")
@@ -64,7 +62,7 @@ class PooledClient:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -75,8 +73,10 @@ class PooledClient:
         """Close all pooled sessions and the underlying client."""
         if self._conditions is None:
             raise ClientError(
-                "PooledClient has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "PooledClient has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         logger.info("Closing PooledClient...")
@@ -114,8 +114,10 @@ class PooledClient:
         """Get a session from the pool or create a new one."""
         if self._conditions is None:
             raise ClientError(
-                "PooledClient has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "PooledClient has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         pool_key = self._get_pool_key(url=url)
@@ -157,8 +159,10 @@ class PooledClient:
         """Return a session to the pool for potential reuse."""
         if self._conditions is None:
             raise ClientError(
-                "PooledClient has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "PooledClient has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         pool_key = self._get_pool_key_from_session(session=session)

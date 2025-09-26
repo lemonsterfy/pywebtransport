@@ -1,12 +1,10 @@
-"""
-WebTransport Server Cluster.
-"""
+"""WebTransport Server Cluster."""
 
 from __future__ import annotations
 
 import asyncio
 from types import TracebackType
-from typing import Any, Self, Type
+from typing import Any, Self
 
 from pywebtransport.config import ServerConfig
 from pywebtransport.exceptions import ServerError
@@ -21,7 +19,7 @@ logger = get_logger(name="server.cluster")
 class ServerCluster:
     """Manages the lifecycle of multiple WebTransport server instances."""
 
-    def __init__(self, *, configs: list[ServerConfig]):
+    def __init__(self, *, configs: list[ServerConfig]) -> None:
         """Initialize the server cluster."""
         self._configs = configs
         self._servers: list[WebTransportServer] = []
@@ -41,7 +39,7 @@ class ServerCluster:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -52,8 +50,10 @@ class ServerCluster:
         """Start all servers in the cluster concurrently."""
         if self._lock is None:
             raise ServerError(
-                "ServerCluster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._lock:
@@ -97,8 +97,10 @@ class ServerCluster:
         """Stop all servers in the cluster concurrently."""
         if self._lock is None:
             raise ServerError(
-                "ServerCluster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         servers_to_stop: list[WebTransportServer] = []
@@ -127,8 +129,10 @@ class ServerCluster:
         """Add and start a new server in the running cluster."""
         if self._lock is None:
             raise ServerError(
-                "ServerCluster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         is_running: bool
@@ -157,8 +161,10 @@ class ServerCluster:
         """Remove and stop a specific server from the cluster by its address."""
         if self._lock is None:
             raise ServerError(
-                "ServerCluster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         server_to_remove: WebTransportServer | None = None
@@ -182,8 +188,10 @@ class ServerCluster:
         """Get deeply aggregated statistics for the entire cluster."""
         if self._lock is None:
             raise ServerError(
-                "ServerCluster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         servers_snapshot: list[WebTransportServer]
@@ -228,8 +236,10 @@ class ServerCluster:
         """Get the number of running servers in the cluster."""
         if self._lock is None:
             raise ServerError(
-                "ServerCluster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             return len(self._servers)
@@ -238,8 +248,10 @@ class ServerCluster:
         """Get a thread-safe copy of all active servers in the cluster."""
         if self._lock is None:
             raise ServerError(
-                "ServerCluster has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             return self._servers.copy()

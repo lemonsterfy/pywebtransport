@@ -1,6 +1,4 @@
-"""
-E2E test for the structured message layer.
-"""
+"""E2E test for the structured message layer."""
 
 import asyncio
 import logging
@@ -9,7 +7,7 @@ import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Final, Type
+from typing import Any, Final
 
 from pywebtransport import ClientConfig, ConnectionError, Serializer, TimeoutError, WebTransportClient
 from pywebtransport.serializer import JSONSerializer, MsgPackSerializer
@@ -45,11 +43,11 @@ class StatusUpdate:
     timestamp: float
 
 
-MESSAGE_REGISTRY: dict[int, Type[Any]] = {1: UserData, 2: StatusUpdate}
+MESSAGE_REGISTRY: dict[int, type[Any]] = {1: UserData, 2: StatusUpdate}
 
 
 async def run_structured_test(*, serializer: Serializer, path: str, serializer_name: str) -> bool:
-    """Core logic for testing a specific serializer end-to-end."""
+    """Run the core logic for testing a specific serializer end-to-end."""
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
@@ -112,20 +110,21 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
 
 
 async def test_json_messaging() -> bool:
-    """Tests the structured message layer using the JSON serializer."""
+    """Test the structured message layer using the JSON serializer."""
     logger.info("--- Test 08A: Structured Messaging (JSON) ---")
     return await run_structured_test(serializer=JSONSerializer(), path="structured-echo/json", serializer_name="json")
 
 
 async def test_msgpack_messaging() -> bool:
-    """Tests the structured message layer using the MsgPack serializer."""
+    """Test the structured message layer using the MsgPack serializer."""
+    logger.info("--- Test 08B: Structured Messaging (MsgPack) ---")
     return await run_structured_test(
         serializer=MsgPackSerializer(), path="structured-echo/msgpack", serializer_name="msgpack"
     )
 
 
 async def main() -> int:
-    """Main entry point for the structured messaging test suite."""
+    """Run the main entry point for the structured messaging test suite."""
     logger.info("--- Starting Test 08: Structured Messaging ---")
 
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [

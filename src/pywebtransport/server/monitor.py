@@ -1,13 +1,11 @@
-"""
-WebTransport Server Monitor.
-"""
+"""WebTransport Server Monitor."""
 
 from __future__ import annotations
 
 import asyncio
 from collections import deque
 from types import TracebackType
-from typing import Any, Self, Type
+from typing import Any, Self
 
 from pywebtransport.server.server import WebTransportServer
 from pywebtransport.utils import get_logger, get_timestamp
@@ -20,7 +18,7 @@ logger = get_logger(name="server.monitor")
 class ServerMonitor:
     """Monitors server performance and health via an async context."""
 
-    def __init__(self, server: WebTransportServer, *, monitoring_interval: float = 30.0):
+    def __init__(self, server: WebTransportServer, *, monitoring_interval: float = 30.0) -> None:
         """Initialize the server monitor."""
         self._server = server
         self._interval = monitoring_interval
@@ -54,7 +52,7 @@ class ServerMonitor:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:

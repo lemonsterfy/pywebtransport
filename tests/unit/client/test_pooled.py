@@ -125,7 +125,7 @@ class TestPooledClient:
 
     @pytest.mark.asyncio
     async def test_get_session_creation_failure_decrements_count(self, mock_underlying_client: Any) -> None:
-        mock_underlying_client.connect.side_effect = ConnectionError("Failed")
+        mock_underlying_client.connect.side_effect = ConnectionError(message="Failed")
 
         async with PooledClient() as pool:
             pool_key = "example.com:443/"

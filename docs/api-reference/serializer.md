@@ -10,7 +10,7 @@ A serializer that encodes and decodes objects using the JSON format.
 
 ### Constructor
 
-- **`def **init**(self, **kwargs: Any)`**: Initializes the JSON serializer. Keyword arguments are passed to `json.dumps`.
+- **`def **init**(self, **kwargs: Any) -> None`**: Initializes the JSON serializer. Keyword arguments are passed to `json.dumps`.
 
 ### Instance Methods
 
@@ -25,7 +25,7 @@ A serializer that encodes and decodes objects using the MessagePack format.
 
 ### Constructor
 
-- **`def __init__(self, *, pack_kwargs: dict[str, Any] | None = None, unpack_kwargs: dict[str, Any] | None = None)`**: Initializes the MsgPack serializer.
+- **`def __init__(self, *, pack_kwargs: dict[str, Any] | None = None, unpack_kwargs: dict[str, Any] | None = None) -> None`**: Initializes the MsgPack serializer.
 
 ### Instance Methods
 
@@ -40,7 +40,7 @@ A serializer that encodes and decodes objects using the Protocol Buffers (Protob
 
 ### Constructor
 
-- **`def __init__(self, *, message_class: Type[Message])`**: Initializes the Protobuf serializer with a specific Protobuf `Message` class.
+- **`def __init__(self, *, message_class: type[Message]) -> None`**: Initializes the Protobuf serializer with a specific Protobuf `Message` class.
 
 ### Instance Methods
 

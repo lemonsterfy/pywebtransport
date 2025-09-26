@@ -1,6 +1,4 @@
-"""
-WebTransport Datagram Reliability Layer.
-"""
+"""WebTransport Datagram Reliability Layer."""
 
 from __future__ import annotations
 
@@ -9,7 +7,7 @@ import struct
 import weakref
 from collections import deque
 from types import TracebackType
-from typing import TYPE_CHECKING, Self, Type
+from typing import TYPE_CHECKING, Self
 
 from pywebtransport.datagram.transport import DatagramMessage, WebTransportDatagramTransport
 from pywebtransport.events import EventType
@@ -41,7 +39,7 @@ class DatagramReliabilityLayer:
         *,
         ack_timeout: float = 2.0,
         max_retries: int = 5,
-    ):
+    ) -> None:
         """Initialize the datagram reliability layer."""
         self._transport = weakref.ref(datagram_transport)
         self._ack_timeout = ack_timeout
@@ -81,7 +79,7 @@ class DatagramReliabilityLayer:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -115,20 +113,22 @@ class DatagramReliabilityLayer:
         """Receive a reliable datagram, waiting if necessary."""
         if self._incoming_queue is None:
             raise DatagramError(
-                "DatagramReliabilityLayer has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "DatagramReliabilityLayer has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         if self._closed:
-            raise DatagramError("Reliability layer is closed.")
+            raise DatagramError(message="Reliability layer is closed.")
         try:
             return await asyncio.wait_for(self._incoming_queue.get(), timeout=timeout)
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Receive timeout after {timeout}s") from None
+            raise TimeoutError(message=f"Receive timeout after {timeout}s") from None
 
     async def send(self, *, data: Data) -> None:
         """Send a datagram with guaranteed delivery."""
         if self._lock is None:
-            raise DatagramError("Reliability layer has not been activated.")
+            raise DatagramError(message="Reliability layer has not been activated.")
 
         transport = self._get_transport()
         data_bytes = ensure_bytes(data=data)
@@ -147,7 +147,7 @@ class DatagramReliabilityLayer:
         """Get the underlying transport or raise an error if it is gone or closed."""
         transport = self._transport()
         if self._closed or not transport or transport.is_closed:
-            raise DatagramError("Reliability layer or underlying transport is closed.")
+            raise DatagramError(message="Reliability layer or underlying transport is closed.")
         return transport
 
     async def _handle_ack_message(self, *, payload: bytes) -> None:

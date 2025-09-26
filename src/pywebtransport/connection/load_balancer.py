@@ -1,6 +1,4 @@
-"""
-Load balancer for WebTransport connections.
-"""
+"""Load balancer for WebTransport connections."""
 
 from __future__ import annotations
 
@@ -8,7 +6,7 @@ import asyncio
 import random
 import time
 from types import TracebackType
-from typing import Any, Self, Type
+from typing import Any, Self
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection.connection import WebTransportConnection
@@ -30,7 +28,7 @@ class ConnectionLoadBalancer:
         *,
         health_check_interval: float = 30.0,
         health_check_timeout: float = 5.0,
-    ):
+    ) -> None:
         """Initialize the connection load balancer."""
         if not targets:
             raise ValueError("Targets list cannot be empty")
@@ -60,7 +58,7 @@ class ConnectionLoadBalancer:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -83,8 +81,10 @@ class ConnectionLoadBalancer:
         """Close all currently managed connections."""
         if self._lock is None:
             raise ConnectionError(
-                "ConnectionLoadBalancer has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionLoadBalancer has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         connections_to_close: list[WebTransportConnection] = []
@@ -118,8 +118,10 @@ class ConnectionLoadBalancer:
         """Get a connection using the specified load balancing strategy."""
         if self._lock is None:
             raise ConnectionError(
-                "ConnectionLoadBalancer has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionLoadBalancer has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         host, port = await self._get_next_target(strategy=strategy)
@@ -178,8 +180,10 @@ class ConnectionLoadBalancer:
         """Get high-level statistics about the load balancer."""
         if self._lock is None:
             raise ConnectionError(
-                "ConnectionLoadBalancer has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionLoadBalancer has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             return {
@@ -193,8 +197,10 @@ class ConnectionLoadBalancer:
         """Get health and performance statistics for all targets."""
         if self._lock is None:
             raise ConnectionError(
-                "ConnectionLoadBalancer has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionLoadBalancer has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             stats = {}
@@ -215,8 +221,10 @@ class ConnectionLoadBalancer:
         """Update the weight for a specific target."""
         if self._lock is None:
             raise ConnectionError(
-                "ConnectionLoadBalancer has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionLoadBalancer has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         target_key = self._get_target_key(host=host, port=port)
         async with self._lock:
@@ -228,8 +236,10 @@ class ConnectionLoadBalancer:
         """Get the next target based on the chosen load balancing strategy."""
         if self._lock is None:
             raise ConnectionError(
-                "ConnectionLoadBalancer has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionLoadBalancer has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         async with self._lock:
             available_targets = [
@@ -238,7 +248,7 @@ class ConnectionLoadBalancer:
                 if self._get_target_key(host=target[0], port=target[1]) not in self._failed_targets
             ]
             if not available_targets:
-                raise ConnectionError("No available targets in the load balancer.")
+                raise ConnectionError(message="No available targets in the load balancer.")
 
             match strategy:
                 case "round_robin":

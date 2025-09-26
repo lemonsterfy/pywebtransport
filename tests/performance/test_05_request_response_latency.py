@@ -1,6 +1,4 @@
-"""
-Performance benchmark for request-response latency.
-"""
+"""Performance benchmark for request-response latency."""
 
 import asyncio
 import logging

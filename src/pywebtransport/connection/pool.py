@@ -1,6 +1,4 @@
-"""
-WebTransport connection pooling implementation.
-"""
+"""WebTransport connection pooling implementation."""
 
 from __future__ import annotations
 
@@ -8,7 +6,7 @@ import asyncio
 import time
 from collections import defaultdict
 from types import TracebackType
-from typing import Any, Self, Type
+from typing import Any, Self
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection.connection import WebTransportConnection
@@ -29,7 +27,7 @@ class ConnectionPool:
         max_size: int = 10,
         max_idle_time: float = 300.0,
         cleanup_interval: float = 60.0,
-    ):
+    ) -> None:
         """Initialize the connection pool."""
         if max_size <= 0:
             raise ValueError("max_size must be a positive integer.")
@@ -50,7 +48,7 @@ class ConnectionPool:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -61,8 +59,10 @@ class ConnectionPool:
         """Close all idle connections and shut down the pool."""
         if self._conditions is None:
             raise ConnectionError(
-                "ConnectionPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         if self._cleanup_task:
@@ -86,11 +86,7 @@ class ConnectionPool:
                     for conn in connections_to_close:
                         tg.create_task(conn.close())
             except* Exception as eg:
-                logger.error(
-                    "Errors occurred while closing pooled connections: %s",
-                    eg.exceptions,
-                    exc_info=eg,
-                )
+                logger.error("Errors occurred while closing pooled connections: %s", eg.exceptions, exc_info=eg)
 
     async def get_connection(
         self,
@@ -103,8 +99,10 @@ class ConnectionPool:
         """Get a connection from the pool or create a new one."""
         if self._conditions is None:
             raise ConnectionError(
-                "ConnectionPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         pool_key = self._get_pool_key(host=host, port=port)
@@ -131,8 +129,7 @@ class ConnectionPool:
 
         try:
             logger.debug("Creating new connection to %s:%s", host, port)
-            connection = WebTransportConnection(config=config)
-            await connection.connect(host=host, port=port, path=path)
+            connection = await WebTransportConnection.create_client(config=config, host=host, port=port, path=path)
             return connection
         except Exception:
             async with condition:
@@ -144,8 +141,10 @@ class ConnectionPool:
         """Return a connection to the pool for potential reuse."""
         if self._conditions is None:
             raise ConnectionError(
-                "ConnectionPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         if not (remote_addr := connection.remote_address):
@@ -166,21 +165,24 @@ class ConnectionPool:
                     condition.notify()
 
         if should_close:
+            await connection.close()
             async with condition:
                 self._total_connections[pool_key] -= 1
                 condition.notify()
-            await connection.close()
 
     def get_stats(self) -> dict[str, Any]:
         """Get current statistics about the connection pool."""
         if self._conditions is None:
             raise ConnectionError(
-                "ConnectionPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ConnectionPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         total_pooled = sum(len(conns) for conns in self._pool.values())
         total_active = sum(self._total_connections.values())
+
         return {
             "total_pooled_connections": total_pooled,
             "total_active_connections": total_active,
@@ -226,11 +228,7 @@ class ConnectionPool:
                             for conn in connections_to_close:
                                 tg.create_task(conn.close())
                     except* Exception as eg:
-                        logger.warning(
-                            "Errors closing idle connections: %s",
-                            eg.exceptions,
-                            exc_info=eg,
-                        )
+                        logger.warning("Errors closing idle connections: %s", eg.exceptions, exc_info=eg)
         except asyncio.CancelledError:
             pass
         except Exception as e:

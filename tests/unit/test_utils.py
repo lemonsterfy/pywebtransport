@@ -6,7 +6,7 @@ import logging
 import socket
 from collections.abc import Coroutine
 from pathlib import Path
-from typing import Any, Type
+from typing import Any
 
 import pytest
 from pytest_mock import MockerFixture
@@ -268,7 +268,7 @@ class TestDataConversionAndFormatting:
 
     def test_ensure_bytes_invalid_type(self) -> None:
         with pytest.raises(TypeError):
-            ensure_bytes(data=123)  # type: ignore
+            ensure_bytes(data=123)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         "data, expected",
@@ -286,7 +286,7 @@ class TestDataConversionAndFormatting:
 
     def test_ensure_str_invalid_type(self) -> None:
         with pytest.raises(TypeError):
-            ensure_str(data=123)  # type: ignore
+            ensure_str(data=123)  # type: ignore[arg-type]
 
     def test_format_bytes(self) -> None:
         short_data = b"short"
@@ -488,7 +488,7 @@ class TestValidationFunctions:
             ("123", False, TypeError),
         ],
     )
-    def test_validate_error_code(self, value: Any, is_valid: bool, exc_type: Type[Exception] | None) -> None:
+    def test_validate_error_code(self, value: Any, is_valid: bool, exc_type: type[Exception] | None) -> None:
         if is_valid:
             validate_error_code(error_code=value)
         else:
@@ -511,7 +511,7 @@ class TestValidationFunctions:
         "value, is_valid, exc_type",
         [("", False, ValueError), (None, False, TypeError), ("some-id", True, None)],
     )
-    def test_validate_session_id(self, value: Any, is_valid: bool, exc_type: Type[Exception] | None) -> None:
+    def test_validate_session_id(self, value: Any, is_valid: bool, exc_type: type[Exception] | None) -> None:
         if is_valid:
             validate_session_id(session_id=value)
         else:

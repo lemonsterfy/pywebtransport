@@ -1,10 +1,8 @@
-"""
-Protocol Buffers (Protobuf) Serializer for WebTransport.
-"""
+"""Protocol Buffers (Protobuf) Serializer for WebTransport."""
 
 from __future__ import annotations
 
-from typing import Any, Type, cast
+from typing import Any, cast
 
 from pywebtransport.exceptions import ConfigurationError, SerializationError
 from pywebtransport.types import Serializer
@@ -22,7 +20,7 @@ __all__ = ["ProtobufSerializer"]
 class ProtobufSerializer(Serializer):
     """A serializer that encodes and decodes objects using the Protobuf format."""
 
-    def __init__(self, *, message_class: Type[Message]):
+    def __init__(self, *, message_class: type[Message]) -> None:
         """Initialize the Protobuf serializer."""
         if Message is None:
             raise ConfigurationError(
@@ -51,7 +49,7 @@ class ProtobufSerializer(Serializer):
     def serialize(self, *, obj: Any) -> bytes:
         """Serialize a Protobuf message object into bytes."""
         if not isinstance(obj, Message):
-            raise SerializationError(f"Object of type {type(obj).__name__} is not a Protobuf Message instance.")
+            raise SerializationError(message=f"Object of type {type(obj).__name__} is not a Protobuf Message instance.")
 
         try:
             return cast(bytes, obj.SerializeToString())

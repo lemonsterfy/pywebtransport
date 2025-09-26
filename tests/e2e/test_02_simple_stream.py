@@ -1,6 +1,4 @@
-"""
-E2E test for simple bidirectional stream operations.
-"""
+"""E2E test for simple bidirectional stream operations."""
 
 import asyncio
 import logging
@@ -26,9 +24,10 @@ logger = logging.getLogger("test_simple_stream")
 
 
 async def test_stream_creation() -> bool:
-    """Tests the ability to create and inspect a bidirectional stream."""
+    """Test the ability to create and inspect a bidirectional stream."""
     logger.info("Test 02A: Stream Creation")
     logger.info("-" * 30)
+
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
@@ -54,7 +53,6 @@ async def test_stream_creation() -> bool:
             await stream.close()
             logger.info("Stream closed.")
             return True
-
     except (TimeoutError, ConnectionError) as e:
         logger.error("FAILURE: Connection failed: %s", e)
         return False
@@ -67,9 +65,10 @@ async def test_stream_creation() -> bool:
 
 
 async def test_simple_echo() -> bool:
-    """Tests sending data and receiving an echo on a single stream."""
+    """Test sending data and receiving an echo on a single stream."""
     logger.info("Test 02B: Simple Echo")
     logger.info("-" * 30)
+
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
@@ -102,7 +101,6 @@ async def test_simple_echo() -> bool:
                 logger.error("   - Expected: %r", expected_response)
                 logger.error("   - Received: %r", response_data)
                 return False
-
     except (TimeoutError, ConnectionError) as e:
         logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
@@ -112,9 +110,10 @@ async def test_simple_echo() -> bool:
 
 
 async def test_multiple_messages() -> bool:
-    """Tests sending multiple messages, each on a separate stream, within one session."""
+    """Test sending multiple messages, each on a separate stream, within one session."""
     logger.info("Test 02C: Multiple Messages")
     logger.info("-" * 30)
+
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
@@ -152,7 +151,6 @@ async def test_multiple_messages() -> bool:
             else:
                 logger.error("FAILURE: Only %d/%d messages were successful.", success_count, len(messages))
                 return False
-
     except (TimeoutError, ConnectionError) as e:
         logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
@@ -162,7 +160,7 @@ async def test_multiple_messages() -> bool:
 
 
 async def main() -> int:
-    """Main entry point for the simple stream operations test."""
+    """Run the main entry point for the simple stream operations test."""
     logger.info("Starting Test 02: Simple Stream Operations")
 
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
@@ -191,11 +189,9 @@ async def main() -> int:
 
     if passed == total:
         logger.info("TEST 02 PASSED: All stream operations successful!")
-        logger.info("Ready to proceed to Test 03")
         return 0
     else:
         logger.error("TEST 02 FAILED: Some stream operations failed!")
-        logger.error("Please fix the issues before proceeding")
         return 1
 
 

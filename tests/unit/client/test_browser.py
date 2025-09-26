@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import pytest
 from _pytest.logging import LogCaptureFixture
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ClientConfig, ClientError, ConnectionError, WebTransportClient, WebTransportSession
@@ -13,7 +14,7 @@ from pywebtransport.client import WebTransportBrowser
 
 
 class TestWebTransportBrowser:
-    @pytest.fixture
+    @asyncio_fixture
     async def browser(self) -> AsyncGenerator[WebTransportBrowser, None]:
         browser_instance = WebTransportBrowser()
         async with browser_instance as activated_browser:
@@ -219,7 +220,7 @@ class TestWebTransportBrowser:
     async def test_navigate_failure_restores_session(
         self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any, caplog: LogCaptureFixture
     ) -> None:
-        cast(Any, mock_underlying_client.connect).side_effect = ConnectionError("Failed")
+        cast(Any, mock_underlying_client.connect).side_effect = ConnectionError(message="Failed")
         browser._current_session = mock_session
         url = "https://b.com"
 

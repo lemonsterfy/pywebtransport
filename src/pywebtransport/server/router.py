@@ -1,6 +1,4 @@
-"""
-WebTransport Request Router.
-"""
+"""WebTransport Request Router."""
 
 from __future__ import annotations
 

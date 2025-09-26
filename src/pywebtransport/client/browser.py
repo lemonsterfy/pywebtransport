@@ -1,12 +1,10 @@
-"""
-WebTransport Browser Client.
-"""
+"""WebTransport Browser Client."""
 
 from __future__ import annotations
 
 import asyncio
 from types import TracebackType
-from typing import Self, Type
+from typing import Self
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -48,7 +46,7 @@ class WebTransportBrowser:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -59,8 +57,10 @@ class WebTransportBrowser:
         """Close the browser, the current session, and all underlying resources."""
         if self._lock is None:
             raise ClientError(
-                "WebTransportBrowser has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "WebTransportBrowser has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._lock:
@@ -77,8 +77,10 @@ class WebTransportBrowser:
         """Go back to the previous entry in the navigation history."""
         if self._lock is None:
             raise ClientError(
-                "WebTransportBrowser has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "WebTransportBrowser has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._lock:
@@ -92,8 +94,10 @@ class WebTransportBrowser:
         """Go forward to the next entry in the navigation history."""
         if self._lock is None:
             raise ClientError(
-                "WebTransportBrowser has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "WebTransportBrowser has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._lock:
@@ -107,8 +111,10 @@ class WebTransportBrowser:
         """Navigate to a URL, creating a new session and clearing forward history."""
         if self._lock is None:
             raise ClientError(
-                "WebTransportBrowser has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "WebTransportBrowser has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._lock:
@@ -128,8 +134,10 @@ class WebTransportBrowser:
         """Refresh the current session by reconnecting to the current URL."""
         if self._lock is None:
             raise ClientError(
-                "WebTransportBrowser has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "WebTransportBrowser has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._lock:
@@ -142,8 +150,10 @@ class WebTransportBrowser:
         """Get a copy of the navigation history."""
         if self._lock is None:
             raise ClientError(
-                "WebTransportBrowser has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "WebTransportBrowser has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
 
         async with self._lock:

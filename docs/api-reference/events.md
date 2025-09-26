@@ -12,7 +12,7 @@ The base data class for all events within the system.
 
 ### Constructor
 
-- **`def __init__(self, *, type: EventType | str, timestamp: float = <factory>, data: EventData | None = None, source: Any | None = None, event_id: str = <factory>)`**: Initializes a new event object.
+- **`def __init__(self, *, type: EventType | str, timestamp: float = <factory>, data: EventData | None = None, source: Any | None = None, event_id: str = <factory>) -> None`**: Initializes a new event object.
 
 ### Attributes
 
@@ -46,6 +46,10 @@ The base data class for all events within the system.
 
 The core class for managing and dispatching events.
 
+### Constructor
+
+- **`def __init__(self, *, max_listeners: int = 100) -> None`**: Initializes the event emitter.
+
 ### Instance Methods
 
 - **`async def close(self) -> None`**: Cancels running tasks and clears all listeners.
@@ -69,6 +73,8 @@ The core class for managing and dispatching events.
 ## EventBus Class
 
 A global, singleton event bus for decoupled, application-wide communication.
+
+**Note on Usage**: The `EventBus` is a singleton and should be accessed via `EventBus.get_instance()` or the `create_event_bus()` factory function.
 
 ### Class Methods
 

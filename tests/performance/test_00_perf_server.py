@@ -1,7 +1,4 @@
-"""
-WebTransport performance test server.
-Provides various handlers for throughput, concurrency, and latency testing.
-"""
+"""WebTransport performance test server."""
 
 import asyncio
 import json

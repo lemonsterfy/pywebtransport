@@ -1,9 +1,7 @@
-"""
-Unit tests for the pywebtransport.serializer.protobuf module.
-"""
+"""Unit tests for the pywebtransport.serializer.protobuf module."""
 
 import sys
-from typing import Any, Type
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,8 +17,7 @@ except ImportError:
 
 
 @pytest.fixture
-def ProtobufSerializer_class() -> Type[Any]:
-    """Fixture to dynamically import the ProtobufSerializer class."""
+def ProtobufSerializer_class() -> type[Any]:
     from pywebtransport.serializer import ProtobufSerializer
 
     return ProtobufSerializer
@@ -28,10 +25,7 @@ def ProtobufSerializer_class() -> Type[Any]:
 
 @pytest.fixture
 def MockMessage(mocker: MockerFixture) -> Any:
-    """
-    Fixture to create a mock Protobuf Message class that is recognized as a
-    valid subclass by the serializer and has a __name__ attribute.
-    """
+
     if Message is None:
         yield type("DummyMessage", (), {})
         return
@@ -55,12 +49,9 @@ def MockMessage(mocker: MockerFixture) -> Any:
 
 @pytest.mark.skipif(Message is None, reason="protobuf library not installed")
 class TestProtobufSerializer:
-    """
-    Test suite for the ProtobufSerializer class.
-    """
 
     def test_init_raises_error_for_invalid_message_class(
-        self, ProtobufSerializer_class: Type[Any], mocker: MockerFixture
+        self, ProtobufSerializer_class: type[Any], mocker: MockerFixture
     ) -> None:
         mocker.patch("pywebtransport.serializer.protobuf.issubclass", return_value=False)
 
@@ -71,12 +62,12 @@ class TestProtobufSerializer:
             ProtobufSerializer_class(message_class=NotAMessage)
         assert "'NotAMessage' is not a valid Protobuf Message class." in str(exc_info.value)
 
-    def test_init_successful(self, ProtobufSerializer_class: Type[Any], MockMessage: MagicMock) -> None:
+    def test_init_successful(self, ProtobufSerializer_class: type[Any], MockMessage: MagicMock) -> None:
         serializer = ProtobufSerializer_class(message_class=MockMessage)
         assert serializer._message_class is MockMessage
 
     def test_serialize_raises_error_for_non_message_instance(
-        self, ProtobufSerializer_class: Type[Any], MockMessage: MagicMock
+        self, ProtobufSerializer_class: type[Any], MockMessage: MagicMock
     ) -> None:
         serializer = ProtobufSerializer_class(message_class=MockMessage)
         obj = "this is just a string"
@@ -86,7 +77,7 @@ class TestProtobufSerializer:
 
     def test_serialize_successful(
         self,
-        ProtobufSerializer_class: Type[Any],
+        ProtobufSerializer_class: type[Any],
         MockMessage: MagicMock,
         mocker: MockerFixture,
     ) -> None:
@@ -103,7 +94,7 @@ class TestProtobufSerializer:
 
     def test_serialize_handles_exception(
         self,
-        ProtobufSerializer_class: Type[Any],
+        ProtobufSerializer_class: type[Any],
         MockMessage: MagicMock,
         mocker: MockerFixture,
     ) -> None:
@@ -117,7 +108,7 @@ class TestProtobufSerializer:
             serializer.serialize(obj=mock_instance)
         assert exc_info.value.__cause__ is original_exception
 
-    def test_deserialize_successful(self, ProtobufSerializer_class: Type[Any], MockMessage: MagicMock) -> None:
+    def test_deserialize_successful(self, ProtobufSerializer_class: type[Any], MockMessage: MagicMock) -> None:
         serializer = ProtobufSerializer_class(message_class=MockMessage)
         mock_instance = MagicMock()
         MockMessage.return_value = mock_instance
@@ -130,7 +121,7 @@ class TestProtobufSerializer:
         assert result is mock_instance
 
     def test_deserialize_handles_decode_error(
-        self, ProtobufSerializer_class: Type[Any], MockMessage: MagicMock
+        self, ProtobufSerializer_class: type[Any], MockMessage: MagicMock
     ) -> None:
         serializer = ProtobufSerializer_class(message_class=MockMessage)
         mock_instance = MagicMock()
@@ -146,10 +137,8 @@ class TestProtobufSerializer:
         assert "Failed to deserialize data into 'MockMessage'" in str(exc_info.value)
         assert exc_info.value.__cause__ is original_exception
 
-    def test_deserialize_ignores_obj_type(self, ProtobufSerializer_class: Type[Any], MockMessage: MagicMock) -> None:
-        """
-        Verify that the obj_type parameter is ignored and does not affect behavior.
-        """
+    def test_deserialize_ignores_obj_type(self, ProtobufSerializer_class: type[Any], MockMessage: MagicMock) -> None:
+
         serializer = ProtobufSerializer_class(message_class=MockMessage)
         mock_instance = MagicMock()
         MockMessage.return_value = mock_instance
@@ -165,9 +154,7 @@ class TestProtobufSerializer:
 def test_init_raises_error_if_protobuf_not_installed(
     mocker: MockerFixture,
 ) -> None:
-    """
-    Verify __init__ raises ConfigurationError if protobuf is not installed.
-    """
+
     mocker.patch.dict("sys.modules", {"google.protobuf.message": None})
     if "pywebtransport.serializer.protobuf" in sys.modules:
         del sys.modules["pywebtransport.serializer.protobuf"]

@@ -1,6 +1,6 @@
 """Unit tests for the pywebtransport.exceptions module."""
 
-from typing import Any, Type
+from typing import Any
 
 import pytest
 
@@ -150,7 +150,7 @@ class TestExceptionClasses:
     )
     def test_subclass_exceptions(
         self,
-        exc_class: Type[WebTransportError],
+        exc_class: type[WebTransportError],
         args: dict[str, Any],
         expected_attrs: dict[str, Any],
         default_code: ErrorCodes,

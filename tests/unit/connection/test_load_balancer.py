@@ -5,13 +5,14 @@ from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import Any
 
 import pytest
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ClientConfig, ConnectionError
 from pywebtransport.connection import ConnectionLoadBalancer, WebTransportConnection
 
 
-@pytest.fixture
+@asyncio_fixture
 async def lb(targets: list[tuple[str, int]]) -> AsyncGenerator[ConnectionLoadBalancer, None]:
     async with ConnectionLoadBalancer(targets=targets) as load_balancer:
         yield load_balancer
@@ -221,7 +222,7 @@ class TestConnectionLoadBalancer:
         mocker.patch.object(lb, "_get_next_target", new_callable=mocker.AsyncMock, return_value=target_to_fail)
         mocker.patch(
             "pywebtransport.connection.load_balancer.WebTransportConnection.create_client",
-            side_effect=ConnectionError("Failed to connect"),
+            side_effect=ConnectionError(message="Failed to connect"),
         )
         target_key = f"{target_to_fail[0]}:{target_to_fail[1]}"
 

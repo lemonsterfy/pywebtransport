@@ -1,6 +1,4 @@
-"""
-WebTransport Stream Subpackage.
-"""
+"""WebTransport Stream Subpackage."""
 
 from .manager import StreamManager
 from .pool import StreamPool

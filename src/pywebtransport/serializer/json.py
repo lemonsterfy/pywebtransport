@@ -1,12 +1,10 @@
-"""
-JSON Serializer for WebTransport.
-"""
+"""JSON Serializer for WebTransport."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, fields, is_dataclass
-from typing import Any, Type, get_args, get_origin
+from typing import Any, get_args, get_origin
 
 from pywebtransport.exceptions import SerializationError
 from pywebtransport.types import Serializer
@@ -17,7 +15,7 @@ __all__ = ["JSONSerializer"]
 class JSONSerializer(Serializer):
     """A serializer that encodes and decodes objects using the JSON format."""
 
-    def __init__(self, **kwargs: Any):
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize the JSON serializer."""
         self._kwargs = kwargs
 
@@ -89,7 +87,7 @@ class JSONSerializer(Serializer):
 
         return data
 
-    def _from_dict_to_dataclass(self, *, data: dict[str, Any], cls: Type[Any]) -> Any:
+    def _from_dict_to_dataclass(self, *, data: dict[str, Any], cls: type[Any]) -> Any:
         """Recursively convert a dictionary to a dataclass instance."""
         constructor_args = {}
 

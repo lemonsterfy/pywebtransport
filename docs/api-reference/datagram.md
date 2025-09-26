@@ -6,13 +6,9 @@ This document provides a reference for the `pywebtransport.datagram` subpackage,
 
 ## WebTransportDatagramTransport Class
 
-The primary interface for sending and receiving WebTransport datagrams, accessed via `session.datagrams`.
+The primary interface for sending and receiving WebTransport datagrams.
 
-**Note on Usage**: `WebTransportDatagramTransport` is initialized automatically upon first access via `await session.datagrams`.
-
-### Constructor
-
-- **`def __init__(self, session: WebTransportSession, *, high_water_mark: int = 100, sender_get_timeout: float = 1.0)`**: Initializes the datagram duplex transport.
+**Note on Usage**: `WebTransportDatagramTransport` is not instantiated directly. It is accessed via the asynchronous property `WebTransportSession.datagrams`.
 
 ### Properties
 
@@ -31,7 +27,7 @@ The primary interface for sending and receiving WebTransport datagrams, accessed
 - `send_sequence` (`int`): The current send sequence number.
 - `session` (`WebTransportSession | None`): A weak reference to the parent session.
 - `session_id` (`SessionId`): The session ID associated with this transport.
-- `stats` (`dict[str, Any]`: A dictionary of all datagram statistics.
+- `stats` (`dict[str, Any]`): A dictionary of all datagram statistics.
 
 ### Instance Methods
 
@@ -59,9 +55,7 @@ The primary interface for sending and receiving WebTransport datagrams, accessed
 
 A high-level wrapper for sending and receiving structured objects over a datagram transport.
 
-### Constructor
-
-- **`def __init__(self, *, datagram_transport: WebTransportDatagramTransport, serializer: Serializer, registry: dict[int, Type[Any]])`**: Initializes the structured datagram transport.
+**Note on Usage**: This class is not instantiated directly but through `WebTransportSession.create_structured_datagram_transport()`.
 
 ### Properties
 
@@ -81,7 +75,7 @@ Adds TCP-like reliability (acknowledgments and retries) over a datagram transpor
 
 ### Constructor
 
-- **`def __init__(self, datagram_transport: WebTransportDatagramTransport, *, ack_timeout: float = 2.0, max_retries: int = 5)`**: Initializes the reliability layer.
+- **`def __init__(self, datagram_transport: WebTransportDatagramTransport, *, ack_timeout: float = 2.0, max_retries: int = 5) -> None`**: Initializes the reliability layer.
 
 ### Class Methods
 
@@ -122,15 +116,15 @@ Monitors the performance of a datagram transport, collecting samples and generat
 
 ### Constructor
 
-- **`def __init__(self, datagram_transport: WebTransportDatagramTransport, *, monitoring_interval: float = 5.0, samples_maxlen: int = 100, ...)`**: Initializes the monitor.
-
-### Properties
-
-- `is_monitoring` (`bool`): `True` if the monitor is active.
+- **`def __init__(self, datagram_transport: WebTransportDatagramTransport, *, monitoring_interval: float = 5.0, samples_maxlen: int = 100, ...) -> None`**: Initializes the monitor.
 
 ### Class Methods
 
 - **`def create(cls, *, datagram_transport: WebTransportDatagramTransport, monitoring_interval: float = 5.0) -> Self`**: Factory method to create a new datagram monitor.
+
+### Properties
+
+- `is_monitoring` (`bool`): `True` if the monitor is active.
 
 ### Instance Methods
 
@@ -192,7 +186,9 @@ An internal representation of a datagram with metadata.
 
 ### DatagramQueue Class
 
-A priority queue with TTL and size limits used internally for buffering.
+An internal, priority queue with TTL and size limits used for buffering.
+
+**Note on Usage**: This is an internal class and not intended for direct use.
 
 ## Utility Functions
 
