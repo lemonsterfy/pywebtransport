@@ -1,6 +1,4 @@
-"""
-Configuration and fixtures for pywebtransport integration tests.
-"""
+"""Configuration and fixtures for pywebtransport integration tests."""
 
 import asyncio
 import socket
@@ -9,7 +7,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-import pytest_asyncio
+from pytest_asyncio import fixture as asyncio_fixture
 
 from pywebtransport import ClientConfig, ServerApp, ServerConfig, WebTransportClient
 from pywebtransport.utils import generate_self_signed_cert
@@ -67,7 +65,7 @@ def server_app(request: pytest.FixtureRequest, server_config: ServerConfig) -> S
     return ServerApp(config=server_config)
 
 
-@pytest_asyncio.fixture
+@asyncio_fixture
 async def server(
     server_app: ServerApp,
 ) -> AsyncGenerator[tuple[str, int], None]:
@@ -89,7 +87,7 @@ async def server(
                 pass
 
 
-@pytest_asyncio.fixture
+@asyncio_fixture
 async def client(client_config: ClientConfig) -> AsyncGenerator[WebTransportClient, None]:
     """Provide a WebTransportClient instance for the duration of a test."""
     async with WebTransportClient(config=client_config) as wt_client:

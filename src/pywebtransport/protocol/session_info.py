@@ -1,6 +1,4 @@
-"""
-WebTransport Session and Stream Information Data Classes.
-"""
+"""WebTransport Session and Stream Information Data Classes."""
 
 from __future__ import annotations
 

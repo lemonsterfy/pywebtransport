@@ -1,13 +1,11 @@
-"""
-WebTransport Client Monitor.
-"""
+"""WebTransport Client Monitor."""
 
 from __future__ import annotations
 
 import asyncio
 from collections import deque
 from types import TracebackType
-from typing import Any, Self, Type
+from typing import Any, Self
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.utils import get_logger, get_timestamp
@@ -20,7 +18,7 @@ logger = get_logger(name="client.monitor")
 class ClientMonitor:
     """Monitors client performance and health via an async context."""
 
-    def __init__(self, client: WebTransportClient, *, monitoring_interval: float = 30.0):
+    def __init__(self, client: WebTransportClient, *, monitoring_interval: float = 30.0) -> None:
         """Initialize the client monitor."""
         if not isinstance(client, WebTransportClient):
             raise TypeError(
@@ -58,7 +56,7 @@ class ClientMonitor:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:

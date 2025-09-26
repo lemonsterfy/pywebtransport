@@ -1,6 +1,4 @@
-"""
-WebTransport Datagram Utilities.
-"""
+"""WebTransport Datagram Utilities."""
 
 from __future__ import annotations
 

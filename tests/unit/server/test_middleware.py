@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from _pytest.logging import LogCaptureFixture
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ServerError, WebTransportSession
@@ -20,12 +21,12 @@ from pywebtransport.server import (
 from pywebtransport.server.middleware import RateLimiter
 
 
+@pytest.mark.asyncio
 class TestMiddlewareManager:
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
         return mocker.create_autospec(WebTransportSession, instance=True)
 
-    @pytest.mark.asyncio
     async def test_add_remove_middleware(self) -> None:
         manager = MiddlewareManager()
         assert manager.get_middleware_count() == 0
@@ -42,7 +43,6 @@ class TestMiddlewareManager:
         manager.remove_middleware(middleware=middleware1)
         assert manager.get_middleware_count() == 0
 
-    @pytest.mark.asyncio
     async def test_process_request_all_pass(self, mock_session: Any, mocker: MockerFixture) -> None:
         manager = MiddlewareManager()
         middleware1 = mocker.AsyncMock(return_value=True)
@@ -56,7 +56,6 @@ class TestMiddlewareManager:
         middleware1.assert_awaited_once_with(session=mock_session)
         middleware2.assert_awaited_once_with(session=mock_session)
 
-    @pytest.mark.asyncio
     async def test_process_request_one_fails(self, mock_session: Any, mocker: MockerFixture) -> None:
         manager = MiddlewareManager()
         middleware1 = mocker.AsyncMock(return_value=True)
@@ -73,7 +72,6 @@ class TestMiddlewareManager:
         middleware2.assert_awaited_once_with(session=mock_session)
         middleware3.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_process_request_exception(
         self, mock_session: Any, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
@@ -168,6 +166,7 @@ class TestMiddlewareFactories:
         assert result is expected_result
 
 
+@pytest.mark.asyncio
 class TestRateLimiter:
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
@@ -175,13 +174,12 @@ class TestRateLimiter:
         session.connection.remote_address = ("1.2.3.4", 12345)
         return session
 
-    @pytest.fixture
+    @asyncio_fixture
     async def rate_limiter(self) -> AsyncGenerator[RateLimiter, None]:
         limiter = RateLimiter(max_requests=2, window_seconds=10)
         async with limiter as activated_limiter:
             yield activated_limiter
 
-    @pytest.mark.asyncio
     async def test_rate_limiting_logic(
         self, mock_session: Any, mocker: MockerFixture, caplog: LogCaptureFixture, rate_limiter: RateLimiter
     ) -> None:
@@ -200,14 +198,12 @@ class TestRateLimiter:
         mock_timestamp.return_value = 110.1
         assert await rate_limiter(session=mock_session) is True
 
-    @pytest.mark.asyncio
     async def test_call_no_remote_address(self, mocker: MockerFixture, rate_limiter: RateLimiter) -> None:
         session = mocker.create_autospec(WebTransportSession, instance=True)
         session.connection.remote_address = None
 
         assert await rate_limiter(session=session) is True
 
-    @pytest.mark.asyncio
     async def test_lifecycle_and_cleanup(self, mocker: MockerFixture, caplog: LogCaptureFixture) -> None:
         caplog.set_level(logging.DEBUG)
         original_sleep = asyncio.sleep
@@ -238,7 +234,6 @@ class TestRateLimiter:
                 assert "active_ip" in rl._requests
                 assert "stale_ip" not in rl._requests
 
-    @pytest.mark.asyncio
     async def test_start_cleanup_task_idempotent(self, mocker: MockerFixture) -> None:
         dummy_coroutine_obj = mocker.MagicMock(name="dummy_coroutine_obj")
         sync_mock_callable = mocker.MagicMock(return_value=dummy_coroutine_obj)
@@ -261,7 +256,6 @@ class TestRateLimiter:
         assert sync_mock_callable.call_count == 2
         assert mock_create_task.call_count == 2
 
-    @pytest.mark.asyncio
     async def test_periodic_cleanup_no_stale_ips(self, mocker: MockerFixture) -> None:
         mocker.patch("asyncio.sleep", side_effect=asyncio.CancelledError)
         mock_timestamp = mocker.patch("pywebtransport.server.middleware.get_timestamp")
@@ -277,7 +271,6 @@ class TestRateLimiter:
 
             assert "active_ip" in rate_limiter._requests
 
-    @pytest.mark.asyncio
     async def test_periodic_cleanup_empty_timestamps(self, mocker: MockerFixture) -> None:
         mocker.patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError])
         mocker.patch("pywebtransport.server.middleware.get_timestamp", return_value=100.0)
@@ -292,7 +285,6 @@ class TestRateLimiter:
 
             assert "empty_ip" not in rate_limiter._requests
 
-    @pytest.mark.asyncio
     async def test_periodic_cleanup_no_lock(self, caplog: LogCaptureFixture) -> None:
         limiter = RateLimiter()
 
@@ -301,7 +293,6 @@ class TestRateLimiter:
 
         assert "RateLimiter cleanup task cannot run without a lock" in caplog.text
 
-    @pytest.mark.asyncio
     async def test_rate_limiter_call_not_activated(self, mock_session: Any) -> None:
         limiter = RateLimiter()
 

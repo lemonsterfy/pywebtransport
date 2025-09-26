@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.client.client module."""
 
 import asyncio
-from typing import Any, Type
+from typing import Any
 
 import pytest
 from pytest_mock import MockerFixture
@@ -310,7 +310,7 @@ class TestWebTransportClient:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("exception_to_raise", [asyncio.TimeoutError, ConnectionRefusedError])
     async def test_connect_fails_during_connection(
-        self, mock_webtransport_connection: Any, exception_to_raise: Type[Exception], mock_create_client: Any
+        self, mock_webtransport_connection: Any, exception_to_raise: type[Exception], mock_create_client: Any
     ) -> None:
         mock_create_client.side_effect = exception_to_raise
         client = WebTransportClient()

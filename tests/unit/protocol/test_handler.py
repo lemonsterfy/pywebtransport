@@ -9,6 +9,7 @@ import pytest
 from aioquic.buffer import Buffer, encode_uint_var
 from aioquic.quic.connection import QuicConnection, QuicConnectionState
 from aioquic.quic.events import QuicEvent, StreamReset
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import (
@@ -45,7 +46,7 @@ def client_config() -> ClientConfig:
     return ClientConfig.create()
 
 
-@pytest.fixture
+@asyncio_fixture
 async def handler(
     mock_quic: MagicMock,
     mock_connection: MagicMock,
@@ -119,7 +120,7 @@ def server_config(mocker: MockerFixture) -> ServerConfig:
 
 @pytest.mark.asyncio
 class TestCapsuleHandling:
-    @pytest.fixture
+    @asyncio_fixture
     async def handler_with_session(self, handler: WebTransportProtocolHandler) -> WebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="session-1234",
@@ -323,7 +324,7 @@ class TestCapsuleHandling:
 
 @pytest.mark.asyncio
 class TestFlowControlUpdates:
-    @pytest.fixture
+    @asyncio_fixture
     async def handler_with_session(self, handler: WebTransportProtocolHandler) -> WebTransportProtocolHandler:
         session_info = WebTransportSessionInfo(
             session_id="session-1234",
@@ -440,7 +441,7 @@ class TestInitialization:
 
 @pytest.mark.asyncio
 class TestStreamStateTransitions:
-    @pytest.fixture
+    @asyncio_fixture
     async def handler_with_stream(
         self, handler: WebTransportProtocolHandler
     ) -> tuple[WebTransportProtocolHandler, StreamInfo]:
@@ -690,7 +691,7 @@ class TestWebTransportProtocolHandlerClient:
 
 @pytest.mark.asyncio
 class TestWebTransportProtocolHandlerCommon:
-    @pytest.fixture
+    @asyncio_fixture
     async def handler_for_close_test(
         self,
         mock_quic: MagicMock,
@@ -1232,7 +1233,7 @@ class TestWebTransportProtocolHandlerCommon:
             handler,
             "create_webtransport_session",
             autospec=True,
-            side_effect=ConnectionError("Failed to connect"),
+            side_effect=ConnectionError(message="Failed to connect"),
         )
         sleep_mock = mocker.patch("asyncio.sleep", new_callable=AsyncMock)
 

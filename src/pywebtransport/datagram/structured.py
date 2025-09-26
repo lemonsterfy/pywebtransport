@@ -1,11 +1,9 @@
-"""
-High-level structured data datagrams for WebTransport.
-"""
+"""High-level structured data datagrams for WebTransport."""
 
 from __future__ import annotations
 
 import struct
-from typing import TYPE_CHECKING, Any, Type
+from typing import TYPE_CHECKING, Any
 
 from pywebtransport.exceptions import SerializationError
 from pywebtransport.types import Serializer
@@ -28,8 +26,8 @@ class StructuredDatagramTransport:
         *,
         datagram_transport: WebTransportDatagramTransport,
         serializer: Serializer,
-        registry: dict[int, Type[Any]],
-    ):
+        registry: dict[int, type[Any]],
+    ) -> None:
         """Initialize the structured datagram transport."""
         self._datagram_transport = datagram_transport
         self._serializer = serializer
@@ -54,7 +52,7 @@ class StructuredDatagramTransport:
         message_class = self._registry.get(type_id)
 
         if message_class is None:
-            raise SerializationError(f"Received unknown message type ID: {type_id}")
+            raise SerializationError(message=f"Received unknown message type ID: {type_id}")
 
         return self._serializer.deserialize(data=payload, obj_type=message_class)
 
@@ -69,7 +67,7 @@ class StructuredDatagramTransport:
         obj_type = type(obj)
         type_id = self._class_to_id.get(obj_type)
         if type_id is None:
-            raise SerializationError(f"Object of type '{obj_type.__name__}' is not registered.")
+            raise SerializationError(message=f"Object of type '{obj_type.__name__}' is not registered.")
 
         header = struct.pack(self._HEADER_FORMAT, type_id)
         payload = self._serializer.serialize(obj=obj)

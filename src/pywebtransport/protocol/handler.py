@@ -1,6 +1,4 @@
-"""
-WebTransport Protocol Handler.
-"""
+"""WebTransport Protocol Handler."""
 
 from __future__ import annotations
 
@@ -59,7 +57,7 @@ class WebTransportProtocolHandler(EventEmitter):
         quic_connection: QuicConnection,
         is_client: bool = True,
         connection: WebTransportConnection | None = None,
-    ):
+    ) -> None:
         """Initialize the WebTransport protocol handler."""
         super().__init__()
         self._quic = quic_connection
@@ -196,11 +194,11 @@ class WebTransportProtocolHandler(EventEmitter):
     def accept_webtransport_session(self, *, stream_id: StreamId, session_id: SessionId) -> None:
         """Accept a pending WebTransport session (server-only)."""
         if self._is_client:
-            raise ProtocolError("Only servers can accept WebTransport sessions")
+            raise ProtocolError(message="Only servers can accept WebTransport sessions")
 
         session_info = self._sessions.get(session_id)
         if not session_info or session_info.stream_id != stream_id:
-            raise ProtocolError(f"No pending session found for stream {stream_id} and id {session_id}")
+            raise ProtocolError(message=f"No pending session found for stream {stream_id} and id {session_id}")
 
         self._h3.send_headers(stream_id=stream_id, headers={":status": "200"})
         session_info.state = SessionState.CONNECTED
@@ -244,11 +242,11 @@ class WebTransportProtocolHandler(EventEmitter):
     ) -> tuple[SessionId, StreamId]:
         """Initiate a new WebTransport session (client-only)."""
         if not self._is_client:
-            raise ProtocolError("Only clients can create WebTransport sessions")
+            raise ProtocolError(message="Only clients can create WebTransport sessions")
 
         if self._peer_max_sessions is not None and len(self._sessions) >= self._peer_max_sessions:
             raise ConnectionError(
-                f"Cannot create new session: server's session limit ({self._peer_max_sessions}) reached."
+                message=f"Cannot create new session: server's session limit ({self._peer_max_sessions}) reached."
             )
 
         session_id = generate_session_id()
@@ -287,17 +285,17 @@ class WebTransportProtocolHandler(EventEmitter):
         """Create a new WebTransport data stream for a session."""
         session_info = self._sessions.get(session_id)
         if not session_info or session_info.state != SessionState.CONNECTED:
-            raise ProtocolError(f"Session {session_id} not found or not ready")
+            raise ProtocolError(message=f"Session {session_id} not found or not ready")
 
         if is_unidirectional:
             if session_info.local_streams_uni_opened >= session_info.peer_max_streams_uni:
                 self._send_blocked_capsule(session_info=session_info, is_unidirectional=True)
-                raise FlowControlError("Unidirectional stream limit reached for session.")
+                raise FlowControlError(message="Unidirectional stream limit reached for session.")
             session_info.local_streams_uni_opened += 1
         else:
             if session_info.local_streams_bidi_opened >= session_info.peer_max_streams_bidi:
                 self._send_blocked_capsule(session_info=session_info, is_unidirectional=False)
-                raise FlowControlError("Bidirectional stream limit reached for session.")
+                raise FlowControlError(message="Bidirectional stream limit reached for session.")
             session_info.local_streams_bidi_opened += 1
 
         stream_id = self._h3.create_webtransport_stream(
@@ -314,7 +312,7 @@ class WebTransportProtocolHandler(EventEmitter):
     ) -> tuple[SessionId, StreamId]:
         """Establish a WebTransport session with a specified timeout."""
         if not self.is_connected:
-            raise ConnectionError("Protocol not connected")
+            raise ConnectionError(message="Protocol not connected")
 
         with Timer(name="establish_session") as timer:
             session_id, stream_id = await asyncio.wait_for(
@@ -369,7 +367,7 @@ class WebTransportProtocolHandler(EventEmitter):
         try:
             await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Timeout waiting for stream {stream_id} to end") from None
+            raise TimeoutError(message=f"Timeout waiting for stream {stream_id} to end") from None
         finally:
             self.off(event_type=event_name, handler=data_handler)
         return b"".join(chunks)
@@ -378,7 +376,7 @@ class WebTransportProtocolHandler(EventEmitter):
         """Send a WebTransport datagram for a session."""
         session_info = self._sessions.get(session_id)
         if not session_info or session_info.state != SessionState.CONNECTED:
-            raise ProtocolError(f"Session {session_id} not found or not ready")
+            raise ProtocolError(message=f"Session {session_id} not found or not ready")
 
         self._h3.send_datagram(stream_id=session_info.stream_id, data=data)
         self._stats["bytes_sent"] += len(data)
@@ -392,16 +390,16 @@ class WebTransportProtocolHandler(EventEmitter):
             StreamState.HALF_CLOSED_LOCAL,
             StreamState.CLOSED,
         ):
-            raise ProtocolError(f"Stream {stream_id} not found or not writable")
+            raise ProtocolError(message=f"Stream {stream_id} not found or not writable")
 
         session_info = self._sessions.get(stream_info.session_id)
         if not session_info:
-            raise ProtocolError(f"No session found for stream {stream_id}")
+            raise ProtocolError(message=f"No session found for stream {stream_id}")
 
         data_len = len(data)
         if session_info.local_data_sent + data_len > session_info.peer_max_data:
             self._send_blocked_capsule(session_info=session_info, is_data=True)
-            raise FlowControlError("Session data limit reached.")
+            raise FlowControlError(message="Session data limit reached.")
         session_info.local_data_sent += data_len
 
         self._h3.send_data(stream_id=stream_id, data=data, end_stream=end_stream)
@@ -767,7 +765,7 @@ class WebTransportProtocolHandler(EventEmitter):
                             data={"session_id": session_id, "max_data": new_limit},
                         )
                     elif new_limit < session_info.peer_max_data:
-                        raise ProtocolError("Flow control limit decreased for MAX_DATA")
+                        raise ProtocolError(message="Flow control limit decreased for MAX_DATA")
                 case constants.WT_MAX_STREAMS_BIDI_TYPE:
                     new_limit = buf.pull_uint_var()
                     if new_limit > session_info.peer_max_streams_bidi:
@@ -780,7 +778,7 @@ class WebTransportProtocolHandler(EventEmitter):
                             },
                         )
                     elif new_limit < session_info.peer_max_streams_bidi:
-                        raise ProtocolError("Flow control limit decreased for MAX_STREAMS_BIDI")
+                        raise ProtocolError(message="Flow control limit decreased for MAX_STREAMS_BIDI")
                 case constants.WT_MAX_STREAMS_UNI_TYPE:
                     new_limit = buf.pull_uint_var()
                     if new_limit > session_info.peer_max_streams_uni:
@@ -793,7 +791,7 @@ class WebTransportProtocolHandler(EventEmitter):
                             },
                         )
                     elif new_limit < session_info.peer_max_streams_uni:
-                        raise ProtocolError("Flow control limit decreased for MAX_STREAMS_UNI")
+                        raise ProtocolError(message="Flow control limit decreased for MAX_STREAMS_UNI")
                 case constants.CLOSE_WEBTRANSPORT_SESSION_TYPE:
                     app_code = buf.pull_uint32()
                     reason_bytes = buf.pull_bytes(len(raw_data) - buf.tell())

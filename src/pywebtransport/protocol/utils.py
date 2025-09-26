@@ -1,6 +1,4 @@
-"""
-WebTransport Protocol Utility Functions.
-"""
+"""WebTransport Protocol Utility Functions."""
 
 from __future__ import annotations
 

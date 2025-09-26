@@ -7,6 +7,7 @@ import sys
 from collections.abc import AsyncGenerator
 
 import pytest
+from pytest_asyncio import fixture as asyncio_fixture
 
 from pywebtransport import ClientConfig, ClientError, WebTransportClient
 
@@ -48,6 +49,16 @@ from .test_07_advanced_features import test_session_statistics as run_07_session
 from .test_07_advanced_features import test_stream_management as run_07_stream_management
 from .test_08_structured_messaging import test_json_messaging as run_08_json_messaging
 from .test_08_structured_messaging import test_msgpack_messaging as run_08_msgpack_messaging
+from .test_09_rpc import test_rpc_basic_add as run_09_basic_add
+from .test_09_rpc import test_rpc_complex_types as run_09_complex_types
+from .test_09_rpc import test_rpc_concurrency as run_09_concurrency
+from .test_09_rpc import test_rpc_error_handling as run_09_error_handling
+from .test_09_rpc import test_rpc_notification as run_09_notification
+from .test_09_rpc import test_rpc_timeout as run_09_timeout
+from .test_10_pubsub import test_pubsub_basic_echo as run_10_basic_echo
+from .test_10_pubsub import test_pubsub_multiple_subscribers as run_10_multiple_subscribers
+from .test_10_pubsub import test_pubsub_multiple_topics as run_10_multiple_topics
+from .test_10_pubsub import test_pubsub_unsubscribe as run_10_unsubscribe
 
 
 async def _is_server_ready() -> bool:
@@ -63,7 +74,7 @@ async def _is_server_ready() -> bool:
     return False
 
 
-@pytest.fixture(scope="function", autouse=True)
+@asyncio_fixture(scope="function", autouse=True)
 async def e2e_server() -> AsyncGenerator[None, None]:
     server_command = [
         sys.executable,
@@ -219,3 +230,33 @@ class TestE2eSuite:
 
     async def test_08_msgpack_messaging(self) -> None:
         assert await run_08_msgpack_messaging() is True, "Structured MsgPack messaging test failed"
+
+    async def test_09_basic_add(self) -> None:
+        assert await run_09_basic_add() is True, "Basic RPC add failed"
+
+    async def test_09_complex_types(self) -> None:
+        assert await run_09_complex_types() is True, "RPC with complex types failed"
+
+    async def test_09_notification(self) -> None:
+        assert await run_09_notification() is True, "RPC notification failed"
+
+    async def test_09_error_handling(self) -> None:
+        assert await run_09_error_handling() is True, "RPC error handling failed"
+
+    async def test_09_concurrency(self) -> None:
+        assert await run_09_concurrency() is True, "RPC concurrency failed"
+
+    async def test_09_timeout(self) -> None:
+        assert await run_09_timeout() is True, "RPC timeout failed"
+
+    async def test_10_basic_echo(self) -> None:
+        assert await run_10_basic_echo() is True, "Basic Pub/Sub echo failed"
+
+    async def test_10_multiple_subscribers(self) -> None:
+        assert await run_10_multiple_subscribers() is True, "Pub/Sub multiple subscribers failed"
+
+    async def test_10_unsubscribe(self) -> None:
+        assert await run_10_unsubscribe() is True, "Pub/Sub unsubscribe failed"
+
+    async def test_10_multiple_topics(self) -> None:
+        assert await run_10_multiple_topics() is True, "Pub/Sub multiple topics failed"

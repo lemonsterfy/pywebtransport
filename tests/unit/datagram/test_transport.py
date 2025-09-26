@@ -8,6 +8,7 @@ from typing import Any, NoReturn
 
 import pytest
 from _pytest.logging import LogCaptureFixture
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import (
@@ -35,7 +36,7 @@ def mock_session(mocker: MockerFixture) -> Any:
     return session
 
 
-@pytest.fixture
+@asyncio_fixture
 async def queue() -> AsyncGenerator[DatagramQueue, None]:
     instance = DatagramQueue(max_size=1000)
     await instance.initialize()
@@ -43,7 +44,7 @@ async def queue() -> AsyncGenerator[DatagramQueue, None]:
     await instance.close()
 
 
-@pytest.fixture
+@asyncio_fixture
 async def transport(mock_session: Any) -> AsyncGenerator[WebTransportDatagramTransport, None]:
     instance = WebTransportDatagramTransport(session=mock_session)
     await instance.initialize()
@@ -791,7 +792,7 @@ class TestWebTransportDatagramTransport:
         self, transport: WebTransportDatagramTransport, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
         mock_send = mocker.patch.object(transport, "send", new_callable=mocker.AsyncMock)
-        mock_send.side_effect = [None, DatagramError("fail"), None]
+        mock_send.side_effect = [None, DatagramError(message="fail"), None]
 
         with caplog.at_level(logging.WARNING):
             count = await transport.send_multiple(datagrams=[b"a", b"b", b"c"])
@@ -826,7 +827,7 @@ class TestWebTransportDatagramTransport:
     @pytest.mark.asyncio
     async def test_receive_timeout(self, transport: WebTransportDatagramTransport, mocker: MockerFixture) -> None:
         assert transport._incoming_queue is not None
-        mocker.patch.object(transport._incoming_queue, "get", side_effect=TimeoutError("timeout"))
+        mocker.patch.object(transport._incoming_queue, "get", side_effect=TimeoutError(message="timeout"))
 
         with pytest.raises(TimeoutError):
             await transport.receive(timeout=0.1)
@@ -836,7 +837,7 @@ class TestWebTransportDatagramTransport:
         self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
         assert transport._incoming_queue is not None
-        mocker.patch.object(transport._incoming_queue, "get", side_effect=TimeoutError("timeout"))
+        mocker.patch.object(transport._incoming_queue, "get", side_effect=TimeoutError(message="timeout"))
 
         with pytest.raises(TimeoutError):
             await transport.receive_with_metadata(timeout=0.1)
@@ -846,7 +847,7 @@ class TestWebTransportDatagramTransport:
         self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
         assert transport._incoming_queue is not None
-        mocker.patch.object(transport._incoming_queue, "get", side_effect=TimeoutError("timeout"))
+        mocker.patch.object(transport._incoming_queue, "get", side_effect=TimeoutError(message="timeout"))
 
         with pytest.raises(TimeoutError):
             await transport.receive_multiple(max_count=5)
@@ -857,7 +858,9 @@ class TestWebTransportDatagramTransport:
     ) -> None:
         assert transport._incoming_queue is not None
         mocker.patch.object(
-            transport._incoming_queue, "get", side_effect=[DatagramMessage(data=b"one"), TimeoutError("timeout")]
+            transport._incoming_queue,
+            "get",
+            side_effect=[DatagramMessage(data=b"one"), TimeoutError(message="timeout")],
         )
         mocker.patch.object(transport._incoming_queue, "get_nowait", return_value=None)
         datagrams = await transport.receive_multiple(max_count=5)
@@ -919,7 +922,7 @@ class TestWebTransportDatagramTransport:
     async def test_receive_json_and_framed_data_timeout(
         self, transport: WebTransportDatagramTransport, mocker: MockerFixture
     ) -> None:
-        mocker.patch.object(transport, "receive", side_effect=TimeoutError("timeout"))
+        mocker.patch.object(transport, "receive", side_effect=TimeoutError(message="timeout"))
 
         with pytest.raises(TimeoutError):
             await transport.receive_json()
@@ -976,7 +979,7 @@ class TestWebTransportDatagramTransport:
             if mock_get.call_count == 1:
                 return datagram_to_send
             transport._closed = True
-            raise TimeoutError("stop loop")
+            raise TimeoutError(message="stop loop")
 
         mock_get.side_effect = get_side_effect
 
@@ -1052,7 +1055,7 @@ class TestWebTransportDatagramTransport:
     async def test_heartbeat_loop_send_error(
         self, transport: WebTransportDatagramTransport, mocker: MockerFixture, caplog: LogCaptureFixture
     ) -> None:
-        mocker.patch.object(transport, "send", side_effect=DatagramError("send failed"))
+        mocker.patch.object(transport, "send", side_effect=DatagramError(message="send failed"))
         asyncio_sleep = mocker.patch.object(asyncio, "sleep", new_callable=mocker.AsyncMock)
         asyncio_sleep.side_effect = asyncio.CancelledError
 

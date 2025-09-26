@@ -1,6 +1,4 @@
-"""
-Integration tests for resource management and error handling.
-"""
+"""Integration tests for resource management and error handling."""
 
 import asyncio
 

@@ -1,12 +1,10 @@
-"""
-WebTransport Reconnecting Client.
-"""
+"""WebTransport Reconnecting Client."""
 
 from __future__ import annotations
 
 import asyncio
 from types import TracebackType
-from typing import Self, Type
+from typing import Self
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -29,7 +27,7 @@ class ReconnectingClient(EventEmitter):
         *,
         url: URL,
         config: ClientConfig,
-    ):
+    ) -> None:
         """Initialize the reconnecting client."""
         super().__init__()
         self._url = url
@@ -58,7 +56,7 @@ class ReconnectingClient(EventEmitter):
     async def __aenter__(self) -> Self:
         """Enter the async context, activating the client and starting the reconnect loop."""
         if self._closed:
-            raise ClientError("Client is already closed")
+            raise ClientError(message="Client is already closed")
         if self._is_initialized:
             return self
 
@@ -72,7 +70,7 @@ class ReconnectingClient(EventEmitter):
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:

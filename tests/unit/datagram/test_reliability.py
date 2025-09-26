@@ -9,6 +9,7 @@ from typing import Any, NoReturn
 
 import pytest
 from _pytest.logging import LogCaptureFixture
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import DatagramError, Event, EventType, TimeoutError, WebTransportDatagramTransport
@@ -28,7 +29,7 @@ class TestDatagramReliabilityLayer:
         transport.is_closed = False
         return transport
 
-    @pytest.fixture
+    @asyncio_fixture
     async def reliability_layer(self, mock_transport: Any) -> AsyncGenerator[DatagramReliabilityLayer, None]:
         layer = DatagramReliabilityLayer(datagram_transport=mock_transport, ack_timeout=0.1, max_retries=2)
         async with layer as activated_layer:
@@ -365,7 +366,7 @@ class TestDatagramReliabilityLayer:
     async def test_handle_data_message_ack_send_fails(
         self, mocker: MockerFixture, mock_transport: Any, reliability_layer: DatagramReliabilityLayer
     ) -> None:
-        mock_transport._send_framed_data.side_effect = DatagramError("Cannot send ACK")
+        mock_transport._send_framed_data.side_effect = DatagramError(message="Cannot send ACK")
         seq = TEST_START_SEQ
         data = b"new data"
         payload = struct.pack("!I", seq) + data
@@ -467,7 +468,7 @@ class TestDatagramReliabilityLayer:
             reliability_layer._pending_acks[seq] = datagram
         mock_time.return_value = datagram.timestamp + reliability_layer._ack_timeout + 0.1
         mock_get_transport = mocker.patch.object(
-            reliability_layer, "_get_transport", side_effect=DatagramError("Transport is gone")
+            reliability_layer, "_get_transport", side_effect=DatagramError(message="Transport is gone")
         )
 
         await reliability_layer._retry_loop()

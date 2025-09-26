@@ -1,6 +1,4 @@
-"""
-Integration tests for data exchange over streams and datagrams.
-"""
+"""Integration tests for data exchange over streams and datagrams."""
 
 import asyncio
 

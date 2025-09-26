@@ -1,6 +1,4 @@
-"""
-WebTransport Server Utilities.
-"""
+"""WebTransport Server Utilities."""
 
 from __future__ import annotations
 

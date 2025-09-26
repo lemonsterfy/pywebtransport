@@ -1,6 +1,4 @@
-"""
-Integration tests for the basic client-server connection lifecycle.
-"""
+"""Integration tests for the basic client-server connection lifecycle."""
 
 import asyncio
 

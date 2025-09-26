@@ -1,6 +1,4 @@
-"""
-WebTransport stream utility functions.
-"""
+"""WebTransport stream utility functions."""
 
 from __future__ import annotations
 

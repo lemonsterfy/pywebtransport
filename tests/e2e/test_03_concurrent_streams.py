@@ -1,6 +1,4 @@
-"""
-E2E test for concurrent WebTransport stream handling.
-"""
+"""E2E test for concurrent WebTransport stream handling."""
 
 import asyncio
 import logging
@@ -34,7 +32,7 @@ logger = logging.getLogger("test_concurrent_streams")
 
 
 async def test_sequential_streams() -> bool:
-    """Tests creating and using multiple streams sequentially in one session."""
+    """Test creating and using multiple streams sequentially in one session."""
     logger.info("--- Test 03A: Sequential Multiple Streams ---")
     num_streams = 3
     config = ClientConfig.create(
@@ -67,7 +65,6 @@ async def test_sequential_streams() -> bool:
 
             logger.info("SUCCESS: All sequential streams worked correctly.")
             return True
-
     except (TimeoutError, ConnectionError) as e:
         logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
@@ -77,7 +74,7 @@ async def test_sequential_streams() -> bool:
 
 
 async def test_concurrent_streams() -> bool:
-    """Tests handling multiple streams concurrently using asyncio tasks."""
+    """Test handling multiple streams concurrently using asyncio tasks."""
     logger.info("--- Test 03B: Concurrent Streams ---")
     num_streams = 10
     config = ClientConfig.create(
@@ -90,7 +87,7 @@ async def test_concurrent_streams() -> bool:
     )
 
     async def stream_task(*, session: WebTransportSession, task_id: int) -> bool:
-        """Defines the work for a single concurrent stream test."""
+        """Define the work for a single concurrent stream test."""
         try:
             stream = await session.create_bidirectional_stream()
             logger.debug("Task %d: Stream created (ID=%s)", task_id, stream.stream_id)
@@ -127,7 +124,6 @@ async def test_concurrent_streams() -> bool:
             else:
                 logger.error("FAILURE: %d/%d concurrent streams failed.", num_streams - success_count, num_streams)
                 return False
-
     except (TimeoutError, ConnectionError) as e:
         logger.error("FAILURE: Test failed due to connection or timeout issue: %s", e)
         return False
@@ -137,7 +133,7 @@ async def test_concurrent_streams() -> bool:
 
 
 async def test_stream_lifecycle() -> bool:
-    """Tests the full lifecycle management of a single stream."""
+    """Test the full lifecycle management of a single stream."""
     logger.info("--- Test 03C: Stream Lifecycle Management ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -168,14 +164,13 @@ async def test_stream_lifecycle() -> bool:
             except Exception as e:
                 logger.error("FAILURE: Unexpected error on second write: %s", e)
                 return False
-
     except Exception as e:
         logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
 async def test_stream_stress() -> bool:
-    """Performs a stress test by rapidly creating and using streams."""
+    """Perform a stress test by rapidly creating and using streams."""
     logger.info("--- Test 03D: Stream Stress Test ---")
     num_iterations = 20
     config = ClientConfig.create(
@@ -207,14 +202,13 @@ async def test_stream_stress() -> bool:
             rate = num_iterations / duration if duration > 0 else float("inf")
             logger.info("SUCCESS: %d stream operations in %.2fs (%.1f ops/s).", num_iterations, duration, rate)
             return True
-
     except Exception as e:
         logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
 
 
 async def main() -> int:
-    """Main entry point for the concurrent streams test."""
+    """Run the main entry point for the concurrent streams test."""
     logger.info("--- Starting Test 03: Concurrent Streams ---")
 
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
@@ -244,11 +238,9 @@ async def main() -> int:
 
     if passed == total:
         logger.info("TEST 03 PASSED: All concurrent stream tests successful!")
-        logger.info("Ready to proceed to Test 04")
         return 0
     else:
         logger.error("TEST 03 FAILED: Some concurrent stream tests failed!")
-        logger.error("Please fix the issues before proceeding")
         return 1
 
 

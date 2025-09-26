@@ -1,6 +1,4 @@
-"""
-Internal event definitions for the WebTransport protocol layer.
-"""
+"""Internal event definitions for the WebTransport protocol layer."""
 
 from __future__ import annotations
 

@@ -1,0 +1,11 @@
+# PyWebTransport Codecov Configuration
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 90%

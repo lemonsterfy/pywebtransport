@@ -1,6 +1,4 @@
-"""
-Performance benchmark for WebTransport datagrams.
-"""
+"""Performance benchmark for WebTransport datagrams."""
 
 import asyncio
 import logging

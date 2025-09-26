@@ -41,6 +41,8 @@ nav:
       - Events: api-reference/events.md
       - Exceptions: api-reference/exceptions.md
       - Protocol: api-reference/protocol.md
+      - Pub/Sub: api-reference/pubsub.md
+      - RPC: api-reference/rpc.md
       - Serializer: api-reference/serializer.md
       - Server: api-reference/server.md
       - Session: api-reference/session.md

@@ -1,6 +1,4 @@
-"""
-WebTransport Datagram Subpackage.
-"""
+"""WebTransport Datagram Subpackage."""
 
 from .broadcaster import DatagramBroadcaster
 from .monitor import DatagramMonitor

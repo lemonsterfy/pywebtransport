@@ -10,6 +10,7 @@ from pywebtransport import ConnectionError, WebTransportClient, WebTransportSess
 from pywebtransport.client import utils as client_utils
 
 
+@pytest.mark.asyncio
 class TestClientUtils:
     URL = "https://example.com"
 
@@ -42,7 +43,6 @@ class TestClientUtils:
             return_value=mock_client,
         )
 
-    @pytest.mark.asyncio
     async def test_benchmark_all_success(self, mocker: MockerFixture, mock_client: Any, mock_session: Any) -> None:
         mock_client.connect.return_value = mock_session
         mocker.patch("pywebtransport.client.utils.get_timestamp", side_effect=[1.0, 1.1, 2.0, 2.2, 3.0, 3.3])
@@ -56,9 +56,8 @@ class TestClientUtils:
         assert results["min_latency"] == pytest.approx(0.1)
         assert results["max_latency"] == pytest.approx(0.3)
 
-    @pytest.mark.asyncio
     async def test_benchmark_partial_failure(self, mocker: MockerFixture, mock_client: Any, mock_session: Any) -> None:
-        mock_client.connect.side_effect = [mock_session, ConnectionError("failed"), mock_session]
+        mock_client.connect.side_effect = [mock_session, ConnectionError(message="failed"), mock_session]
         mocker.patch("pywebtransport.client.utils.get_timestamp", side_effect=[1.0, 1.2, 2.0, 2.4])
 
         results = await client_utils.benchmark_client_performance(url=self.URL, num_requests=3)
@@ -69,9 +68,8 @@ class TestClientUtils:
         assert results["min_latency"] == pytest.approx(0.2)
         assert results["max_latency"] == pytest.approx(0.2)
 
-    @pytest.mark.asyncio
     async def test_benchmark_all_fail(self, mocker: MockerFixture, mock_client: Any) -> None:
-        mock_client.connect.side_effect = ConnectionError("failed")
+        mock_client.connect.side_effect = ConnectionError(message="failed")
 
         results = await client_utils.benchmark_client_performance(url=self.URL, num_requests=2)
 
@@ -79,7 +77,6 @@ class TestClientUtils:
         assert results["failed_requests"] == 2
         assert "avg_latency" not in results
 
-    @pytest.mark.asyncio
     async def test_benchmark_zero_requests(self) -> None:
         results = await client_utils.benchmark_client_performance(url=self.URL, num_requests=0)
 
@@ -88,7 +85,6 @@ class TestClientUtils:
         assert results["failed_requests"] == 0
         assert not results["latencies"]
 
-    @pytest.mark.asyncio
     async def test_benchmark_inner_logic_success(
         self, mocker: MockerFixture, mock_client: Any, mock_session: Any, mock_stream: Any
     ) -> None:
@@ -107,7 +103,6 @@ class TestClientUtils:
         assert results["failed_requests"] == 0
         assert results["latencies"] == [pytest.approx(1.5)]
 
-    @pytest.mark.asyncio
     async def test_benchmark_inner_logic_failure(self, mocker: MockerFixture, mock_client: Any) -> None:
         mock_client.connect.side_effect = IOError("Connection failed")
         mock_logger = mocker.patch("pywebtransport.client.utils.logger.warning")
@@ -120,7 +115,6 @@ class TestClientUtils:
         mock_logger.assert_called_once()
         assert mock_logger.call_args[0][0] == "%d benchmark requests failed."
 
-    @pytest.mark.asyncio
     async def test_connectivity_success(self, mocker: MockerFixture, mock_client: Any, mock_session: Any) -> None:
         mocker.patch("pywebtransport.client.utils.get_timestamp", side_effect=[1000.0, 1001.5])
 
@@ -137,13 +131,12 @@ class TestClientUtils:
         assert results["client_stats"] == mock_client.stats
         mock_session.close.assert_awaited_once()
 
-    @pytest.mark.asyncio
     async def test_connectivity_failure(self, mocker: MockerFixture, mock_client: Any) -> None:
         mocker.patch("pywebtransport.client.utils.get_timestamp")
 
         async def wait_for_side_effect(coro: Awaitable[Any], timeout: float | None) -> NoReturn:
             await coro
-            raise ConnectionError("Failed to connect")
+            raise ConnectionError(message="Failed to connect")
 
         mocker.patch("asyncio.wait_for", side_effect=wait_for_side_effect)
 

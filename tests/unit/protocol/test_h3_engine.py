@@ -237,8 +237,8 @@ class TestWebTransportH3EngineSending:
         assert excinfo.value.error_code == ErrorCodes.H3_STREAM_CREATION_ERROR
 
 
+@pytest.mark.asyncio
 class TestWebTransportH3EngineEventHandling:
-    @pytest.mark.asyncio
     async def test_handle_datagram_received(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         event = DatagramFrameReceived(data=encode_uint_var(0) + b"datagram content")
@@ -249,7 +249,6 @@ class TestWebTransportH3EngineEventHandling:
         assert isinstance(h3_events[0], DatagramReceived)
         assert h3_events[0].data == b"datagram content"
 
-    @pytest.mark.asyncio
     async def test_handle_bidi_webtransport_setup_and_data(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -265,7 +264,6 @@ class TestWebTransportH3EngineEventHandling:
         assert isinstance(h3_events[0], WebTransportStreamDataReceived)
         assert h3_events[0].session_id == 789
 
-    @pytest.mark.asyncio
     async def test_handle_uni_webtransport_setup_and_data(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -279,7 +277,6 @@ class TestWebTransportH3EngineEventHandling:
         assert isinstance(h3_events[0], WebTransportStreamDataReceived)
         assert h3_events[0].session_id == 101
 
-    @pytest.mark.asyncio
     async def test_handle_bidi_stream_parses_capsules_after_headers(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -303,7 +300,6 @@ class TestWebTransportH3EngineEventHandling:
         assert h3_events_capsule[0].capsule_type == constants.WT_MAX_DATA_TYPE
         assert h3_events_capsule[0].capsule_data == capsule_payload
 
-    @pytest.mark.asyncio
     async def test_handle_control_stream_settings(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -319,7 +315,6 @@ class TestWebTransportH3EngineEventHandling:
 
         assert engine._settings_received is True
 
-    @pytest.mark.asyncio
     async def test_handle_control_stream_emits_settings_event(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -343,7 +338,6 @@ class TestWebTransportH3EngineEventHandling:
         received_event = await asyncio.wait_for(event_future, timeout=1.0)
         assert received_event.data == {"settings": settings}
 
-    @pytest.mark.asyncio
     async def test_handle_qpack_streams(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -355,7 +349,6 @@ class TestWebTransportH3EngineEventHandling:
 
         mock_pylsqpack["decoder_instance"].feed_encoder.assert_called_with(b"encoder-data")
 
-    @pytest.mark.asyncio
     async def test_handle_qpack_stream_blocked_and_resumed(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -379,7 +372,6 @@ class TestWebTransportH3EngineEventHandling:
         assert h3_events_resumed[0].headers == {":status": "201"}
         assert stream.blocked is False
 
-    @pytest.mark.asyncio
     async def test_unblocked_stream_reblocks(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -396,7 +388,6 @@ class TestWebTransportH3EngineEventHandling:
         assert not h3_events
         assert stream.blocked is True
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "partial_data", [b"\x41", encode_uint_var(constants.H3_FRAME_TYPE_WEBTRANSPORT_STREAM) + b"\x9f"]
     )
@@ -411,7 +402,6 @@ class TestWebTransportH3EngineEventHandling:
         assert not h3_events
         assert engine._get_or_create_stream(stream_id=CLIENT_BIDI_STREAM_ID).buffer == partial_data
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "partial_data, expected_buffer",
         [(b"\x54", b"\x54"), (encode_uint_var(constants.H3_STREAM_TYPE_WEBTRANSPORT) + b"\x9f", b"\x9f")],
@@ -427,7 +417,6 @@ class TestWebTransportH3EngineEventHandling:
         assert not h3_events
         assert engine._get_or_create_stream(stream_id=CLIENT_UNI_STREAM_ID).buffer == expected_buffer
 
-    @pytest.mark.asyncio
     async def test_partial_non_data_frame(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         headers_frame = encode_frame(frame_type=constants.H3_FRAME_TYPE_HEADERS, frame_data=b"some-header-payload")
@@ -438,7 +427,6 @@ class TestWebTransportH3EngineEventHandling:
         assert not h3_events
         assert engine._get_or_create_stream(stream_id=CLIENT_BIDI_STREAM_ID).buffer == b"some-header-payloa"
 
-    @pytest.mark.asyncio
     async def test_receive_data_on_blocked_stream(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         stream = engine._get_or_create_stream(stream_id=CLIENT_BIDI_STREAM_ID)
@@ -450,7 +438,6 @@ class TestWebTransportH3EngineEventHandling:
         assert not h3_events
         assert stream.buffer == b"some data"
 
-    @pytest.mark.asyncio
     async def test_unblocked_stream_resume_fails_with_protocol_error(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -473,7 +460,6 @@ class TestWebTransportH3EngineEventHandling:
             error_code=ErrorCodes.H3_GENERAL_PROTOCOL_ERROR, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_handle_event_protocol_error(
         self, mock_quic: MagicMock, client_config: ClientConfig, mocker: MagicMock
     ) -> None:
@@ -489,7 +475,6 @@ class TestWebTransportH3EngineEventHandling:
             error_code=ErrorCodes.H3_GENERAL_PROTOCOL_ERROR, reason_phrase=str(error)
         )
 
-    @pytest.mark.asyncio
     async def test_partial_uni_webtransport_data(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         event1 = StreamDataReceived(
@@ -512,7 +497,6 @@ class TestWebTransportH3EngineEventHandling:
         assert h3_events3[0].data == b"uni data"
         assert h3_events3[0].stream_ended is True
 
-    @pytest.mark.asyncio
     async def test_unblocked_stream_with_no_blocked_frame_size(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -527,7 +511,6 @@ class TestWebTransportH3EngineEventHandling:
         with pytest.raises(AssertionError, match="Frame length for logging cannot be None"):
             await engine.handle_event(event=qpack_event)
 
-    @pytest.mark.asyncio
     async def test_unhandled_quic_event_is_ignored(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         event = QuicEvent()
@@ -537,7 +520,6 @@ class TestWebTransportH3EngineEventHandling:
         assert h3_events == []
         assert not mock_quic.close.called
 
-    @pytest.mark.asyncio
     async def test_handle_unknown_uni_stream_type_is_ignored(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -552,8 +534,8 @@ class TestWebTransportH3EngineEventHandling:
         mock_quic.close.assert_not_called()
 
 
+@pytest.mark.asyncio
 class TestWebTransportH3EngineProtocolErrors:
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "frame_type, error_phrase",
         [
@@ -582,7 +564,6 @@ class TestWebTransportH3EngineProtocolErrors:
             error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_data_before_headers_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         data_frame = encode_frame(frame_type=constants.H3_FRAME_TYPE_DATA, frame_data=b"some data")
@@ -597,7 +578,6 @@ class TestWebTransportH3EngineProtocolErrors:
             error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_second_settings_frame_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         settings = {constants.SETTINGS_H3_DATAGRAM: 1}
@@ -618,7 +598,6 @@ class TestWebTransportH3EngineProtocolErrors:
             error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_invalid_settings_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         settings = {constants.SETTINGS_WT_MAX_SESSIONS: 1, constants.SETTINGS_H3_DATAGRAM: 0}
@@ -635,7 +614,6 @@ class TestWebTransportH3EngineProtocolErrors:
         )
         mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_SETTINGS_ERROR, reason_phrase=expected_reason)
 
-    @pytest.mark.asyncio
     async def test_qpack_decompression_failed(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -653,7 +631,6 @@ class TestWebTransportH3EngineProtocolErrors:
             error_code=ErrorCodes.QPACK_DECOMPRESSION_FAILED, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_first_control_frame_not_settings_fails(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -673,7 +650,6 @@ class TestWebTransportH3EngineProtocolErrors:
             error_code=ErrorCodes.H3_MISSING_SETTINGS, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "stream_type",
         [
@@ -698,7 +674,6 @@ class TestWebTransportH3EngineProtocolErrors:
         assert "Only one" in mock_quic.close.call_args.kwargs["reason_phrase"]
         assert mock_quic.close.call_args.kwargs["error_code"] == ErrorCodes.H3_STREAM_CREATION_ERROR
 
-    @pytest.mark.asyncio
     async def test_h3_datagram_without_transport_param_fails(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -721,7 +696,6 @@ class TestWebTransportH3EngineProtocolErrors:
         )
         mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_SETTINGS_ERROR, reason_phrase=expected_reason)
 
-    @pytest.mark.asyncio
     async def test_control_stream_closed_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         control_data = encode_uint_var(constants.H3_STREAM_TYPE_CONTROL)
@@ -738,7 +712,6 @@ class TestWebTransportH3EngineProtocolErrors:
             error_code=ErrorCodes.H3_CLOSED_CRITICAL_STREAM, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "error_fixture, stream_type, reason, error_code",
         [
@@ -779,7 +752,6 @@ class TestWebTransportH3EngineProtocolErrors:
         expected_reason = str(ProtocolError(message=reason, error_code=error_code))
         mock_quic.close.assert_called_once_with(error_code=error_code, reason_phrase=expected_reason)
 
-    @pytest.mark.asyncio
     async def test_handle_malformed_datagram(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         event = DatagramFrameReceived(data=b"\xc0")
@@ -794,7 +766,6 @@ class TestWebTransportH3EngineProtocolErrors:
         )
         mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_DATAGRAM_ERROR, reason_phrase=expected_reason)
 
-    @pytest.mark.asyncio
     async def test_push_promise_frame_is_ignored(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         frame = encode_frame(frame_type=constants.H3_FRAME_TYPE_PUSH_PROMISE, frame_data=b"\x01\x00")
@@ -805,7 +776,6 @@ class TestWebTransportH3EngineProtocolErrors:
         assert not h3_events
         mock_quic.close.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_headers_on_control_stream_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         settings_frame = encode_frame(frame_type=constants.H3_FRAME_TYPE_SETTINGS, frame_data=b"")
@@ -824,7 +794,6 @@ class TestWebTransportH3EngineProtocolErrors:
             error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_unknown_frame_on_control_stream_is_ignored(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -842,8 +811,8 @@ class TestWebTransportH3EngineProtocolErrors:
         mock_quic.close.assert_not_called()
 
 
+@pytest.mark.asyncio
 class TestWebTransportH3EngineHeaderValidation:
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "headers, error_match",
         [
@@ -885,7 +854,6 @@ class TestWebTransportH3EngineHeaderValidation:
         assert re.search(error_match, reason_phrase)
         assert mock_quic.close.call_args.kwargs["error_code"] == ErrorCodes.H3_MESSAGE_ERROR
 
-    @pytest.mark.asyncio
     async def test_invalid_response_headers(
         self, mock_quic: MagicMock, mock_pylsqpack: dict[str, MagicMock], client_config: ClientConfig
     ) -> None:
@@ -903,8 +871,8 @@ class TestWebTransportH3EngineHeaderValidation:
         assert mock_quic.close.call_args.kwargs["error_code"] == ErrorCodes.H3_MESSAGE_ERROR
 
 
+@pytest.mark.asyncio
 class TestWebTransportH3EngineMiscErrors:
-    @pytest.mark.asyncio
     async def test_malformed_settings_frame_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         settings_frame = encode_frame(frame_type=constants.H3_FRAME_TYPE_SETTINGS, frame_data=b"\x06")
@@ -918,7 +886,6 @@ class TestWebTransportH3EngineMiscErrors:
         )
         mock_quic.close.assert_called_once_with(error_code=ErrorCodes.H3_FRAME_ERROR, reason_phrase=expected_reason)
 
-    @pytest.mark.asyncio
     async def test_data_frame_on_capsule_stream_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         stream = engine._get_or_create_stream(stream_id=CLIENT_BIDI_STREAM_ID)
@@ -938,7 +905,6 @@ class TestWebTransportH3EngineMiscErrors:
             error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_invalid_boolean_setting_value(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         settings = {constants.SETTINGS_ENABLE_CONNECT_PROTOCOL: 2}
@@ -954,7 +920,6 @@ class TestWebTransportH3EngineMiscErrors:
         assert "setting must be 1 if present" in mock_quic.close.call_args.kwargs["reason_phrase"]
         assert mock_quic.close.call_args.kwargs["error_code"] == ErrorCodes.H3_SETTINGS_ERROR
 
-    @pytest.mark.asyncio
     async def test_reserved_setting_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         settings = {0x02: 1}
@@ -970,7 +935,6 @@ class TestWebTransportH3EngineMiscErrors:
         assert "Setting identifier 0x2 is reserved" in mock_quic.close.call_args.kwargs["reason_phrase"]
         assert mock_quic.close.call_args.kwargs["error_code"] == ErrorCodes.H3_SETTINGS_ERROR
 
-    @pytest.mark.asyncio
     async def test_handle_event_after_done(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         engine._is_done = True
@@ -981,7 +945,6 @@ class TestWebTransportH3EngineMiscErrors:
         assert not h3_events
         assert not mock_quic.close.called
 
-    @pytest.mark.asyncio
     async def test_headers_on_control_stream_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         settings_frame = encode_frame(frame_type=constants.H3_FRAME_TYPE_SETTINGS, frame_data=b"")
@@ -1000,7 +963,6 @@ class TestWebTransportH3EngineMiscErrors:
             error_code=ErrorCodes.H3_FRAME_UNEXPECTED, reason_phrase=expected_reason
         )
 
-    @pytest.mark.asyncio
     async def test_unknown_frame_on_control_stream_is_ignored(
         self, mock_quic: MagicMock, client_config: ClientConfig
     ) -> None:
@@ -1017,7 +979,6 @@ class TestWebTransportH3EngineMiscErrors:
         assert not h3_events
         mock_quic.close.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_duplicate_setting_fails(self, mock_quic: MagicMock, client_config: ClientConfig) -> None:
         engine = WebTransportH3Engine(quic=mock_quic, config=client_config)
         buf = encode_uint_var(constants.SETTINGS_H3_DATAGRAM) + encode_uint_var(1)

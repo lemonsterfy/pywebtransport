@@ -1,6 +1,4 @@
-"""
-Core Type Definitions.
-"""
+"""Core Type Definitions."""
 
 from __future__ import annotations
 

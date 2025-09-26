@@ -4,7 +4,9 @@ This document provides a comprehensive reference for the type system, covering e
 
 ---
 
-## ConnectionState Class
+## Enumerations
+
+### ConnectionState Class
 
 Enumeration of connection states.
 
@@ -16,7 +18,7 @@ Enumeration of connection states.
 - `FAILED` (`str`): "failed"
 - `DRAINING` (`str`): "draining"
 
-## EventType Class
+### EventType Class
 
 Enumeration of system event types.
 
@@ -43,7 +45,7 @@ Enumeration of system event types.
 - `STREAM_OPENED` (`str`): "stream_opened"
 - `TIMEOUT_ERROR` (`str`): "timeout_error"
 
-## SessionState Class
+### SessionState Class
 
 Enumeration of WebTransport session states.
 
@@ -53,7 +55,7 @@ Enumeration of WebTransport session states.
 - `DRAINING` (`str`): "draining"
 - `CLOSED` (`str`): "closed"
 
-## StreamDirection Class
+### StreamDirection Class
 
 Enumeration of stream directions.
 
@@ -61,7 +63,7 @@ Enumeration of stream directions.
 - `SEND_ONLY` (`str`): "send_only"
 - `RECEIVE_ONLY` (`str`): "receive_only"
 
-## StreamState Class
+### StreamState Class
 
 Enumeration of WebTransport stream states.
 
@@ -74,6 +76,8 @@ Enumeration of WebTransport stream states.
 - `RESET_RECEIVED` (`str`): "reset_received"
 
 ## Type Aliases
+
+### General Types
 
 - `Address` (`tuple[str, int]`): A network address `(host, port)`.
 - `Buffer` (`bytes | bytearray | memoryview`): A low-level buffer type.
@@ -102,7 +106,7 @@ Enumeration of WebTransport stream states.
 - `URLParts` (`tuple[str, int, str]`): A parsed URL `(host, port, path)`.
 - `Weight` (`int`): A weight for resource allocation.
 
-## Handler Types
+### Handler Types
 
 - `ConnectionLostHandler` (`Callable[[WebTransportConnection, Exception | None], Awaitable[None]]`): Handles connection loss events.
 - `DatagramHandler` (`Callable[[bytes], Awaitable[None]]`): Handles incoming datagrams.
@@ -113,56 +117,17 @@ Enumeration of WebTransport stream states.
 - `SessionHandler` (`Callable[[WebTransportSession], Awaitable[None]]`): Handles session-related events.
 - `StreamHandler` (`Callable[[WebTransportStream | WebTransportReceiveStream], Awaitable[None]]`): Handles new incoming streams.
 
-## ClientConfigProtocol Protocol
+## Protocols
+
+### ClientConfigProtocol Protocol
 
 A protocol defining the structure of a client configuration object.
 
 ### Attributes
 
-- `alpn_protocols` (`list[str]`): A list of ALPN protocols to negotiate.
-- `auto_reconnect` (`bool`): Flag to enable or disable client auto-reconnection.
-- `ca_certs` (`str | None`): Path to a CA certificate file for server verification.
-- `certfile` (`str | None`): Path to a certificate file for client authentication.
-- `close_timeout` (`float`): Time in seconds to wait for a graceful connection closure.
-- `congestion_control_algorithm` (`str`): The congestion control algorithm to use.
-- `connect_timeout` (`float`): Time in seconds to wait for connection establishment.
-- `connection_cleanup_interval` (`float`): Interval in seconds for cleaning up closed connections.
-- `connection_idle_check_interval` (`float`): Interval in seconds for checking connection idle status.
-- `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed.
-- `connection_keepalive_timeout` (`float`): Time in seconds for sending keep-alive packets.
-- `debug` (`bool`): Flag to enable or disable debug mode.
-- `flow_control_window_auto_scale` (`bool`): Flag for flow control window auto-scaling.
-- `flow_control_window_size` (`int`): The size of the flow control window.
-- `headers` (`Headers`): Custom headers for the initial connection request.
-- `initial_max_data` (`int`): Initial max data for flow control.
-- `initial_max_streams_bidi` (`int`): Initial max bidirectional streams.
-- `initial_max_streams_uni` (`int`): Initial max unidirectional streams.
-- `keep_alive` (`bool`): Flag to enable or disable TCP keep-alive.
-- `keyfile` (`str | None`): Path to a private key file for client authentication.
-- `log_level` (`str`): The logging level for the client.
-- `max_connections` (`int`): Maximum number of concurrent connections.
-- `max_datagram_size` (`int`): Maximum size in bytes for an outgoing datagram.
-- `max_incoming_streams` (`int`): Maximum number of concurrent incoming streams.
-- `max_pending_events_per_session` (`int`): Maximum buffered events per pending session.
-- `max_retries` (`int`): Maximum number of retries for a failed connection.
-- `max_retry_delay` (`float`): Maximum delay in seconds between connection retries.
-- `max_stream_buffer_size` (`int`): Maximum size in bytes for a stream buffer.
-- `max_streams` (`int`): Maximum number of concurrent streams per connection.
-- `max_total_pending_events` (`int`): Global maximum for buffered events.
-- `pending_event_ttl` (`float`): TTL for buffered events in seconds.
-- `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
-- `retry_backoff` (`float`): The backoff factor for connection retries.
-- `retry_delay` (`float`): Initial delay in seconds between connection retries.
-- `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
-- `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.
-- `stream_creation_timeout` (`float`): Timeout in seconds for creating a new stream.
-- `stream_flow_control_increment_bidi` (`int`): Stream increment for bidirectional flow control.
-- `stream_flow_control_increment_uni` (`int`): Stream increment for unidirectional flow control.
-- `user_agent` (`str`): The User-Agent string for the connection request.
-- `verify_mode` (`ssl.VerifyMode | None`): The SSL verification mode.
-- `write_timeout` (`float | None`): Timeout in seconds for stream write operations.
+- See `ClientConfig` in the **[Configuration API](config.md)** for a complete list of attributes.
 
-## AuthHandlerProtocol Protocol
+### AuthHandlerProtocol Protocol
 
 A protocol for auth handlers.
 
@@ -170,7 +135,7 @@ A protocol for auth handlers.
 
 - **`async def __call__(self, *, headers: Headers) -> bool`**: Processes request headers to authorize a session.
 
-## ConnectionInfoProtocol Protocol
+### ConnectionInfoProtocol Protocol
 
 A protocol for retrieving connection information.
 
@@ -186,7 +151,7 @@ A protocol for retrieving connection information.
 - `datagrams_sent` (`int`): Number of datagrams sent over the connection.
 - `datagrams_received` (`int`): Number of datagrams received over the connection.
 
-## EventEmitterProtocol Protocol
+### EventEmitterProtocol Protocol
 
 A protocol for an event emitter.
 
@@ -196,7 +161,7 @@ A protocol for an event emitter.
 - **`def off(self, *, event_type: EventType, handler: EventHandler | None = None) -> None`**: Unregisters an event handler.
 - **`def on(self, *, event_type: EventType, handler: EventHandler) -> None`**: Registers an event handler.
 
-## MiddlewareProtocol Protocol
+### MiddlewareProtocol Protocol
 
 A protocol for a middleware object.
 
@@ -204,7 +169,7 @@ A protocol for a middleware object.
 
 - **`async def __call__(self, *, session: WebTransportSession) -> bool`**: Processes a session and returns `True` to allow or `False` to reject.
 
-## ReadableStreamProtocol Protocol
+### ReadableStreamProtocol Protocol
 
 A protocol for a readable stream.
 
@@ -216,7 +181,7 @@ A protocol for a readable stream.
 - **`async def readexactly(self, *, n: int) -> bytes`**: Reads exactly `n` bytes from the stream.
 - **`async def readuntil(self, *, separator: bytes = b"\n") -> bytes`**: Reads from the stream until a separator is found.
 
-## Serializer Protocol
+### Serializer Protocol
 
 A protocol for serializing and deserializing structured data.
 
@@ -225,7 +190,7 @@ A protocol for serializing and deserializing structured data.
 - **`def serialize(self, *, obj: Any) -> bytes`**: Serializes an object into bytes.
 - **`def deserialize(self, *, data: bytes, obj_type: Any = None) -> Any`**: Deserializes bytes into an object.
 
-## WritableStreamProtocol Protocol
+### WritableStreamProtocol Protocol
 
 A protocol for a writable stream.
 
@@ -237,56 +202,19 @@ A protocol for a writable stream.
 - **`async def write(self, *, data: Data) -> None`**: Writes data to the stream.
 - **`async def writelines(self, *, lines: list[Data]) -> None`**: Writes multiple lines to the stream.
 
-## BidirectionalStreamProtocol Protocol
+### BidirectionalStreamProtocol Protocol
 
 A protocol for a bidirectional stream. Inherits from `ReadableStreamProtocol` and `WritableStreamProtocol`.
 
-## ServerConfigProtocol Protocol
+### ServerConfigProtocol Protocol
 
 A protocol defining the structure of a server configuration object.
 
 ### Attributes
 
-- `access_log` (`bool`): Flag to enable or disable the access log.
-- `alpn_protocols` (`list[str]`): A list of ALPN protocols to negotiate.
-- `bind_host` (`str`): The host address to bind the server to.
-- `bind_port` (`int`): The port number to bind the server to.
-- `ca_certs` (`str | None`): Path to a CA certificate file for client verification.
-- `certfile` (`str`): Path to the server's certificate file.
-- `congestion_control_algorithm` (`str`): The congestion control algorithm to use.
-- `connection_cleanup_interval` (`float`): Interval in seconds for cleaning up closed connections.
-- `connection_idle_check_interval` (`float`): Interval in seconds for checking connection idle status.
-- `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed.
-- `connection_keepalive_timeout` (`float`): Time in seconds for sending keep-alive packets.
-- `debug` (`bool`): Flag to enable or disable debug mode.
-- `flow_control_window_auto_scale` (`bool`): Flag for flow control window auto-scaling.
-- `flow_control_window_size` (`int`): The size of the flow control window.
-- `initial_max_data` (`int`): Initial max data for flow control.
-- `initial_max_streams_bidi` (`int`): Initial max bidirectional streams.
-- `initial_max_streams_uni` (`int`): Initial max unidirectional streams.
-- `keep_alive` (`bool`): Flag to enable or disable TCP keep-alive.
-- `keyfile` (`str`): Path to the server's private key file.
-- `log_level` (`str`): The logging level for the server.
-- `max_connections` (`int`): Maximum number of concurrent client connections.
-- `max_datagram_size` (`int`): Maximum size in bytes for an outgoing datagram.
-- `max_incoming_streams` (`int`): Maximum number of concurrent incoming streams per session.
-- `max_pending_events_per_session` (`int`): Maximum buffered events per pending session.
-- `max_sessions` (`int`): Maximum number of concurrent sessions per connection.
-- `max_stream_buffer_size` (`int`): Maximum size in bytes for a stream buffer.
-- `max_streams_per_connection` (`int`): Maximum number of concurrent streams per connection.
-- `max_total_pending_events` (`int`): Global maximum for buffered events.
-- `middleware` (`list[Any]`): A list of middleware to apply to incoming sessions.
-- `pending_event_ttl` (`float`): TTL for buffered events in seconds.
-- `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
-- `session_cleanup_interval` (`float`): Interval in seconds for cleaning up closed sessions.
-- `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
-- `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.
-- `stream_flow_control_increment_bidi` (`int`): Stream increment for bidirectional flow control.
-- `stream_flow_control_increment_uni` (`int`): Stream increment for unidirectional flow control.
-- `verify_mode` (`ssl.VerifyMode`): The SSL verification mode for client certificates.
-- `write_timeout` (`float | None`): Timeout in seconds for stream write operations.
+- See `ServerConfig` in the **[Configuration API](config.md)** for a complete list of attributes.
 
-## SessionInfoProtocol Protocol
+### SessionInfoProtocol Protocol
 
 A protocol for retrieving session information.
 
@@ -301,7 +229,7 @@ A protocol for retrieving session information.
 - `bytes_sent` (`int`): Total bytes sent during the session.
 - `bytes_received` (`int`): Total bytes received during the session.
 
-## StreamInfoProtocol Protocol
+### StreamInfoProtocol Protocol
 
 A protocol for retrieving stream information.
 
@@ -315,7 +243,7 @@ A protocol for retrieving stream information.
 - `bytes_sent` (`int`): Total bytes sent on the stream.
 - `bytes_received` (`int`): Total bytes received on the stream.
 
-## WebTransportProtocol Protocol
+### WebTransportProtocol Protocol
 
 A protocol for the underlying WebTransport transport layer.
 

@@ -1,6 +1,4 @@
-"""
-E2E test for WebTransport error handling and edge cases.
-"""
+"""E2E test for WebTransport error handling and edge cases."""
 
 import asyncio
 import logging
@@ -36,7 +34,7 @@ logger = logging.getLogger("test_error_handling")
 
 
 async def test_connection_timeout() -> bool:
-    """Tests the handling of a connection timeout to an unreachable port."""
+    """Test the handling of a connection timeout to an unreachable port."""
     logger.info("--- Test 06A: Connection Timeout ---")
     unreachable_url = f"https://{SERVER_HOST}:9999/"
     config = ClientConfig.create(
@@ -64,7 +62,7 @@ async def test_connection_timeout() -> bool:
 
 
 async def test_invalid_server_address() -> bool:
-    """Tests handling of various invalid server addresses."""
+    """Test handling of various invalid server addresses."""
     logger.info("--- Test 06B: Invalid Server Address ---")
     invalid_urls = [
         "https://invalid-hostname-for-testing.local/",
@@ -95,7 +93,7 @@ async def test_invalid_server_address() -> bool:
 
 
 async def test_stream_errors() -> bool:
-    """Tests error handling for various stream operations."""
+    """Test error handling for various stream operations."""
     logger.info("--- Test 06C: Stream Error Handling ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -130,7 +128,7 @@ async def test_stream_errors() -> bool:
 
 
 async def test_read_timeout() -> bool:
-    """Tests the handling of a stream read timeout."""
+    """Test the handling of a stream read timeout."""
     logger.info("--- Test 06D: Stream Read Timeout ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -163,7 +161,7 @@ async def test_read_timeout() -> bool:
 
 
 async def test_session_closure_handling() -> bool:
-    """Tests that operations on a closed session correctly raise errors."""
+    """Test that operations on a closed session correctly raise errors."""
     logger.info("--- Test 06E: Operations on Closed Session ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -210,7 +208,7 @@ async def test_session_closure_handling() -> bool:
 
 
 async def test_datagram_errors() -> bool:
-    """Tests error handling for datagram operations, like oversized payloads."""
+    """Test error handling for datagram operations, like oversized payloads."""
     logger.info("--- Test 06F: Datagram Error Handling ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -246,7 +244,7 @@ async def test_datagram_errors() -> bool:
 
 
 async def test_resource_exhaustion() -> bool:
-    """Tests handling of resource exhaustion, specifically the stream limit."""
+    """Test handling of resource exhaustion, specifically the stream limit."""
     logger.info("--- Test 06G: Resource Exhaustion (Stream Limit) ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -284,7 +282,7 @@ async def test_resource_exhaustion() -> bool:
 
 
 async def test_malformed_operations() -> bool:
-    """Tests handling of malformed API operations."""
+    """Test handling of malformed API operations."""
     logger.info("--- Test 06H: Malformed Operations ---")
     config = ClientConfig.create(
         verify_mode=ssl.CERT_NONE,
@@ -317,7 +315,7 @@ async def test_malformed_operations() -> bool:
 
 
 async def main() -> int:
-    """Main entry point for the error handling test suite."""
+    """Run the main entry point for the error handling test suite."""
     logger.info("--- Starting Test 06: Error Handling ---")
 
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
@@ -330,7 +328,6 @@ async def main() -> int:
         ("Resource Exhaustion", test_resource_exhaustion),
         ("Malformed Operations", test_malformed_operations),
     ]
-
     passed = 0
     total = len(tests)
 
@@ -352,11 +349,9 @@ async def main() -> int:
 
     if passed == total:
         logger.info("TEST 06 PASSED: All error handling tests successful!")
-        logger.info("Ready to proceed to Test 07")
         return 0
     else:
         logger.error("TEST 06 FAILED: Some error handling tests failed!")
-        logger.error("Please fix the issues before proceeding")
         return 1
 
 

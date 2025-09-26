@@ -1,6 +1,4 @@
-"""
-Unit tests for the pywebtransport.serializer.json module.
-"""
+"""Unit tests for the pywebtransport.serializer.json module."""
 
 import json
 from dataclasses import dataclass
@@ -25,9 +23,6 @@ class ComplexData:
 
 
 class TestJSONSerializer:
-    """
-    Test suite for the JSONSerializer class.
-    """
 
     def test_init_default(self) -> None:
         serializer = JSONSerializer()
@@ -172,7 +167,7 @@ class TestJSONSerializer:
         self,
     ) -> None:
         serializer = JSONSerializer()
-        data = b'{"id": 10}'  # Missing 'name' field
+        data = b'{"id": 10}'
         with pytest.raises(SerializationError) as exc_info:
             serializer.deserialize(data=data, obj_type=SimpleData)
 

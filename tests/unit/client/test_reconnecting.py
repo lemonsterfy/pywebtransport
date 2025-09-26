@@ -157,7 +157,7 @@ class TestReconnectingClient:
             elif event_type == EventType.CONNECTION_LOST:
                 connection_lost.set()
 
-        mock_underlying_client.connect.side_effect = [mock_session, ConnectionError("Reconnect failed")]
+        mock_underlying_client.connect.side_effect = [mock_session, ConnectionError(message="Reconnect failed")]
         mock_session.wait_closed.return_value = None
         mock_emit = mocker.patch.object(ReconnectingClient, "emit", new_callable=mocker.AsyncMock)
         mock_emit.side_effect = emit_side_effect
@@ -187,8 +187,8 @@ class TestReconnectingClient:
         config = ClientConfig(retry_delay=0.1, retry_backoff=2.0, max_retry_delay=1.0)
         client = ReconnectingClient(url=self.URL, config=config)
         mock_underlying_client.connect.side_effect = [
-            TimeoutError("Fail 1"),
-            ConnectionError("Fail 2"),
+            TimeoutError(message="Fail 1"),
+            ConnectionError(message="Fail 2"),
             mock_session,
         ]
 
@@ -211,7 +211,7 @@ class TestReconnectingClient:
         mock_emit.side_effect = lambda *args, **kwargs: failed_event.set()
         config = ClientConfig(max_retries=2, retry_delay=0.01)
         client = ReconnectingClient(url=self.URL, config=config)
-        mock_underlying_client.connect.side_effect = ClientError("Failed")
+        mock_underlying_client.connect.side_effect = ClientError(message="Failed")
 
         async with client:
             await asyncio.wait_for(failed_event.wait(), timeout=1)
@@ -234,7 +234,7 @@ class TestReconnectingClient:
         config = ClientConfig(retry_delay=0.01)
         mocker.patch.object(config, "max_retries", -1)
         client = ReconnectingClient(url=self.URL, config=config)
-        errors = [ConnectionError("Fail")] * 5
+        errors = [ConnectionError(message="Fail")] * 5
         mock_underlying_client.connect.side_effect = [*errors, mock_session]
 
         async with client:

@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.datagram.structured module."""
 
 import struct
-from typing import Any, Type
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -35,7 +35,7 @@ def mock_serializer(mocker: MockerFixture) -> MagicMock:
 
 
 @pytest.fixture
-def registry() -> dict[int, Type[Any]]:
+def registry() -> dict[int, type[Any]]:
     return {1: MockMsgA, 2: MockMsgB}
 
 
@@ -43,7 +43,7 @@ def registry() -> dict[int, Type[Any]]:
 def structured_transport(
     mock_datagram_transport: AsyncMock,
     mock_serializer: MagicMock,
-    registry: dict[int, Type[Any]],
+    registry: dict[int, type[Any]],
 ) -> StructuredDatagramTransport:
     return StructuredDatagramTransport(
         datagram_transport=mock_datagram_transport,
@@ -58,7 +58,7 @@ class TestStructuredDatagramTransport:
         structured_transport: StructuredDatagramTransport,
         mock_datagram_transport: AsyncMock,
         mock_serializer: MagicMock,
-        registry: dict[int, Type[Any]],
+        registry: dict[int, type[Any]],
     ) -> None:
         expected_class_to_id = {MockMsgA: 1, MockMsgB: 2}
 
@@ -67,6 +67,7 @@ class TestStructuredDatagramTransport:
         assert structured_transport._registry is registry
         assert structured_transport._class_to_id == expected_class_to_id
 
+    @pytest.mark.asyncio
     async def test_close_method(
         self,
         structured_transport: StructuredDatagramTransport,
@@ -76,6 +77,7 @@ class TestStructuredDatagramTransport:
 
         mock_datagram_transport.close.assert_awaited_once()
 
+    @pytest.mark.asyncio
     async def test_send_obj_successful(
         self,
         structured_transport: StructuredDatagramTransport,
@@ -93,6 +95,7 @@ class TestStructuredDatagramTransport:
         header = struct.pack("!H", type_id)
         mock_datagram_transport.send.assert_awaited_once_with(data=header + serialized_payload, priority=5, ttl=10.0)
 
+    @pytest.mark.asyncio
     async def test_receive_obj_successful(
         self,
         structured_transport: StructuredDatagramTransport,
@@ -124,6 +127,7 @@ class TestStructuredDatagramTransport:
 
         assert structured_transport.is_closed is closed_status
 
+    @pytest.mark.asyncio
     async def test_send_obj_unregistered_raises_error(
         self,
         structured_transport: StructuredDatagramTransport,
@@ -142,6 +146,7 @@ class TestStructuredDatagramTransport:
         mock_serializer.serialize.assert_not_called()
         mock_datagram_transport.send.assert_not_awaited()
 
+    @pytest.mark.asyncio
     async def test_receive_obj_unknown_type_id_raises_error(
         self,
         structured_transport: StructuredDatagramTransport,

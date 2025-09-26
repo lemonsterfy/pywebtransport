@@ -12,8 +12,8 @@ PyWebTransport provides a comprehensive, production-grade WebTransport implement
 
 - **Full Async Support**: Built from the ground up on `asyncio` for high-performance, non-blocking I/O.
 - **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for pooling, auto-reconnection, and proxying.
+- **Advanced Messaging**: Built-in managers for Pub/Sub and RPC (JSON-RPC 2.0 compliant), plus pluggable serializers (`JSON`, `MsgPack`, `Protobuf`) for structured data.
 - **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
-- **Structured Messaging**: Pluggable `JSON`, `MsgPack`, and `Protobuf` serializers for sending and receiving structured data objects over streams and datagrams.
 - **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and monitoring.
 - **Event-Driven Architecture**: A powerful `EventEmitter` and `EventBus` system for decoupled, asynchronous communication between components.
 - **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
@@ -27,6 +27,8 @@ The primary entry points for building WebTransport applications. These abstracti
 | Module                          | Description                                               | Key Classes                                                 |
 | :------------------------------ | :-------------------------------------------------------- | :---------------------------------------------------------- |
 | **[Client](client.md)**         | High-level client and connection management abstractions. | `WebTransportClient`, `ClientPool`, `ReconnectingClient`    |
+| **[Pub/Sub](pubsub.md)**        | High-level framework for publish/subscribe messaging.     | `PubSubManager`, `Subscription`                             |
+| **[RPC](rpc.md)**               | Framework for Remote Procedure Calls (JSON-RPC 2.0).      | `RpcManager`                                                |
 | **[Server](server.md)**         | High-level server application framework with routing.     | `ServerApp`, `WebTransportServer`, `ServerMonitor`          |
 | **[Serializer](serializer.md)** | Framework for structured data serialization.              | `JSONSerializer`, `MsgPackSerializer`, `ProtobufSerializer` |
 
@@ -39,7 +41,7 @@ Foundational components that provide the core logic and building blocks for the 
 | Module                          | Description                                              | Key Classes                                    |
 | :------------------------------ | :------------------------------------------------------- | :--------------------------------------------- |
 | **[Connection](connection.md)** | Low-level connection management and pooling.             | `WebTransportConnection`, `ConnectionPool`     |
-| **[Datagram](datagram.md)**     | Unreliable, low-latency datagram messaging.              | `WebTransportDatagramDuplexStream`             |
+| **[Datagram](datagram.md)**     | Unreliable, low-latency datagram messaging.              | `WebTransportDatagramTransport`                |
 | **[Protocol](protocol.md)**     | Low-level WebTransport protocol implementation.          | `WebTransportProtocolHandler`                  |
 | **[Session](session.md)**       | Session lifecycle and communication management.          | `WebTransportSession`, `SessionManager`        |
 | **[Stream](stream.md)**         | Reliable, ordered, and multiplexed stream communication. | `WebTransportStream`, `WebTransportSendStream` |

@@ -1,6 +1,4 @@
-"""
-A specialized HTTP/3 protocol engine for WebTransport.
-"""
+"""A specialized HTTP/3 protocol engine for WebTransport."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """Unit tests for the pywebtransport.types module."""
 
 import ssl
-from typing import Any, Type
+from typing import Any
 
 import pytest
 
@@ -304,7 +304,7 @@ class TestRuntimeCheckableProtocols:
         def serialize(self, *, obj: Any) -> bytes:
             return b"serialized"
 
-        def deserialize(self, *, data: bytes, obj_type: Type[Any] | None = None) -> Any:
+        def deserialize(self, *, data: bytes, obj_type: type[Any] | None = None) -> Any:
             return "deserialized"
 
     class BadSerializer:

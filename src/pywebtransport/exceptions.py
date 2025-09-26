@@ -1,10 +1,8 @@
-"""
-WebTransport Exceptions.
-"""
+"""WebTransport Exceptions."""
 
 from __future__ import annotations
 
-from typing import Any, Type
+from typing import Any
 
 from pywebtransport.constants import ErrorCodes
 from pywebtransport.types import SessionState, StreamState
@@ -47,7 +45,7 @@ class WebTransportError(Exception):
         *,
         error_code: int | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the WebTransport error."""
         super().__init__(message)
         self.message = message
@@ -82,7 +80,7 @@ class AuthenticationError(WebTransportError):
         error_code: int | None = None,
         auth_method: str | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the authentication error."""
         super().__init__(
             message=message,
@@ -109,7 +107,7 @@ class CertificateError(WebTransportError):
         certificate_path: str | None = None,
         certificate_error: str | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the certificate error."""
         super().__init__(
             message=message,
@@ -137,7 +135,7 @@ class ClientError(WebTransportError):
         error_code: int | None = None,
         target_url: str | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the client error."""
         super().__init__(
             message=message,
@@ -164,7 +162,7 @@ class ConfigurationError(WebTransportError):
         config_key: str | None = None,
         config_value: Any | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the configuration error."""
         super().__init__(
             message=message,
@@ -192,7 +190,7 @@ class ConnectionError(WebTransportError):
         error_code: int | None = None,
         remote_address: tuple[str, int] | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the connection error."""
         super().__init__(
             message=message,
@@ -219,7 +217,7 @@ class DatagramError(WebTransportError):
         datagram_size: int | None = None,
         max_size: int | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the datagram error."""
         super().__init__(
             message=message,
@@ -249,7 +247,7 @@ class FlowControlError(WebTransportError):
         limit_exceeded: int | None = None,
         current_value: int | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the flow control error."""
         super().__init__(
             message=message,
@@ -279,7 +277,7 @@ class HandshakeError(WebTransportError):
         error_code: int | None = None,
         handshake_stage: str | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the handshake error."""
         super().__init__(
             message=message,
@@ -305,7 +303,7 @@ class ProtocolError(WebTransportError):
         error_code: int | None = None,
         frame_type: int | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the protocol error."""
         super().__init__(
             message=message,
@@ -331,7 +329,7 @@ class ServerError(WebTransportError):
         error_code: int | None = None,
         bind_address: tuple[str, int] | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the server error."""
         super().__init__(
             message=message,
@@ -358,7 +356,7 @@ class SessionError(WebTransportError):
         error_code: int | None = None,
         session_state: SessionState | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the session error."""
         super().__init__(
             message=message,
@@ -387,7 +385,7 @@ class StreamError(WebTransportError):
         error_code: int | None = None,
         stream_state: StreamState | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the stream error."""
         super().__init__(
             message=message,
@@ -422,7 +420,7 @@ class SerializationError(WebTransportError):
         error_code: int | None = None,
         details: dict[str, Any] | None = None,
         original_exception: Exception | None = None,
-    ):
+    ) -> None:
         """Initialize the serialization error."""
         super().__init__(
             message=message,
@@ -449,7 +447,7 @@ class TimeoutError(WebTransportError):
         timeout_duration: float | None = None,
         operation: str | None = None,
         details: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Initialize the timeout error."""
         super().__init__(
             message=message,
@@ -467,7 +465,7 @@ class TimeoutError(WebTransportError):
         return data
 
 
-_ERROR_CATEGORY_MAP: dict[Type[Exception], str] = {
+_ERROR_CATEGORY_MAP: dict[type[Exception], str] = {
     AuthenticationError: "authentication",
     CertificateError: "certificate",
     ClientError: "client",

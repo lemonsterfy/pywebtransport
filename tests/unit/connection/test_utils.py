@@ -26,8 +26,8 @@ def mock_connection(mocker: MockerFixture) -> Any:
     return connection
 
 
+@pytest.mark.asyncio
 class TestConnectionUtils:
-    @pytest.mark.asyncio
     async def test_connect_with_retry_success_first_try(
         self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
@@ -40,14 +40,13 @@ class TestConnectionUtils:
         mock_create.assert_awaited_once()
         mock_sleep.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_connect_with_retry_success_after_retries(
         self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
         mock_create = mocker.patch.object(
             WebTransportConnection,
             "create_client",
-            side_effect=[ConnectionError("fail1"), HandshakeError("fail2"), mock_connection],
+            side_effect=[ConnectionError(message="fail1"), HandshakeError(message="fail2"), mock_connection],
         )
         mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
 
@@ -58,11 +57,10 @@ class TestConnectionUtils:
         assert mock_sleep.await_count == 2
         mock_sleep.assert_has_awaits([mocker.call(0.1), mocker.call(0.2)])
 
-    @pytest.mark.asyncio
     async def test_connect_with_retry_all_attempts_fail(
         self, mock_client_config: ClientConfig, mocker: MockerFixture
     ) -> None:
-        last_error = ConnectionError("last error")
+        last_error = ConnectionError(message="last error")
         mock_create = mocker.patch.object(WebTransportConnection, "create_client", side_effect=last_error)
         mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
         part1 = re.escape("Failed to connect after 4 attempts:")
@@ -74,7 +72,6 @@ class TestConnectionUtils:
 
         assert mock_create.await_count == 4
 
-    @pytest.mark.asyncio
     async def test_create_multiple_connections_all_succeed(
         self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
@@ -88,13 +85,12 @@ class TestConnectionUtils:
         assert "h2:2" in connections
         assert connections["h1:1"] is mock_connection
 
-    @pytest.mark.asyncio
     async def test_create_multiple_connections_some_fail(
         self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
         targets = [("h1", 1), ("h2", 2)]
         mocker.patch.object(
-            WebTransportConnection, "create_client", side_effect=[mock_connection, ConnectionError("failed")]
+            WebTransportConnection, "create_client", side_effect=[mock_connection, ConnectionError(message="failed")]
         )
 
         connections = await connection_utils.create_multiple_connections(config=mock_client_config, targets=targets)
@@ -103,7 +99,6 @@ class TestConnectionUtils:
         assert "h1:1" in connections
         assert "h2:2" not in connections
 
-    @pytest.mark.asyncio
     async def test_create_multiple_connections_taskgroup_failure(
         self, mock_client_config: ClientConfig, mocker: MockerFixture
     ) -> None:
@@ -117,7 +112,6 @@ class TestConnectionUtils:
 
         assert connections == {}
 
-    @pytest.mark.asyncio
     async def test_ensure_connection_already_connected(
         self, mock_client_config: ClientConfig, mock_connection: Any
     ) -> None:
@@ -128,7 +122,6 @@ class TestConnectionUtils:
         assert conn is mock_connection
         mock_connection.close.assert_not_awaited()
 
-    @pytest.mark.asyncio
     async def test_ensure_connection_reconnects(
         self, mock_client_config: ClientConfig, mock_connection: Any, mocker: MockerFixture
     ) -> None:
@@ -144,7 +137,6 @@ class TestConnectionUtils:
         mock_connection.close.assert_awaited_once()
         mock_create.assert_awaited_once_with(config=mock_client_config, host="h", port=1, path="/")
 
-    @pytest.mark.asyncio
     async def test_ensure_connection_reconnect_disabled(
         self, mock_client_config: ClientConfig, mock_connection: Any
     ) -> None:
@@ -155,7 +147,6 @@ class TestConnectionUtils:
                 connection=mock_connection, config=mock_client_config, host="h", port=1, reconnect=False
             )
 
-    @pytest.mark.asyncio
     async def test_test_multiple_connections(self, mocker: MockerFixture) -> None:
         targets = [("h1", 1), ("h2", 2), ("h3", 3)]
         mock_test_tcp = mocker.patch(
@@ -167,7 +158,6 @@ class TestConnectionUtils:
         assert results == {"h1:1": True, "h2:2": False, "h3:3": True}
         assert mock_test_tcp.await_count == 3
 
-    @pytest.mark.asyncio
     async def test_test_multiple_connections_handles_undone_task(self, mocker: MockerFixture) -> None:
         targets = [("h1", 1), ("h2", 2)]
         task1 = MagicMock(spec=asyncio.Task)
@@ -191,7 +181,6 @@ class TestConnectionUtils:
 
         assert results == {"h1:1": True, "h2:2": False}
 
-    @pytest.mark.asyncio
     async def test_test_multiple_connections_taskgroup_failure(self, mocker: MockerFixture) -> None:
         targets = [("h1", 1)]
         mocker.patch("pywebtransport.connection.utils.test_tcp_connection", side_effect=ValueError("TCP test failed"))
@@ -200,7 +189,6 @@ class TestConnectionUtils:
 
         assert results == {"h1:1": False}
 
-    @pytest.mark.asyncio
     async def test_test_tcp_connection_success(self, mocker: MockerFixture) -> None:
         mock_reader = mocker.create_autospec(asyncio.StreamReader, instance=True)
         mock_writer = mocker.create_autospec(asyncio.StreamWriter, instance=True)
@@ -215,7 +203,6 @@ class TestConnectionUtils:
         mock_writer.close.assert_called_once()
         mock_writer.wait_closed.assert_awaited_once()
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize("error", [asyncio.TimeoutError, OSError])
     async def test_test_tcp_connection_failure(self, mocker: MockerFixture, error: Exception) -> None:
         mocker.patch("asyncio.open_connection", side_effect=error)

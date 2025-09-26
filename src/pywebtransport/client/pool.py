@@ -1,12 +1,10 @@
-"""
-WebTransport Client Pool.
-"""
+"""WebTransport Client Pool."""
 
 from __future__ import annotations
 
 import asyncio
 from types import TracebackType
-from typing import Self, Type
+from typing import Self
 
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.config import ClientConfig
@@ -22,7 +20,7 @@ logger = get_logger(name="client.pool")
 class ClientPool:
     """Manages a pool of WebTransportClient instances."""
 
-    def __init__(self, *, configs: list[ClientConfig | None]):
+    def __init__(self, *, configs: list[ClientConfig | None]) -> None:
         """Initialize the client pool."""
         if not configs:
             raise ValueError("ClientPool requires at least one client configuration.")
@@ -70,7 +68,7 @@ class ClientPool:
 
     async def __aexit__(
         self,
-        exc_type: Type[BaseException] | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
@@ -81,8 +79,10 @@ class ClientPool:
         """Close all clients in the pool concurrently."""
         if self._lock is None:
             raise ClientError(
-                "ClientPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ClientPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         if not self._clients:
             return
@@ -106,8 +106,10 @@ class ClientPool:
         """Connect all clients in the pool to a URL concurrently."""
         if self._lock is None:
             raise ClientError(
-                "ClientPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ClientPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         if not self._clients:
             return []
@@ -132,11 +134,13 @@ class ClientPool:
         """Get an active client from the pool using a round-robin strategy."""
         if self._lock is None:
             raise ClientError(
-                "ClientPool has not been activated. It must be used as an "
-                "asynchronous context manager (`async with ...`)."
+                message=(
+                    "ClientPool has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
             )
         if not self._clients:
-            raise ClientError("No clients available. The pool might not have been started or is empty.")
+            raise ClientError(message="No clients available. The pool might not have been started or is empty.")
 
         async with self._lock:
             client = self._clients[self._current_index]

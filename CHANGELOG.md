@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.7.0] - 2025-09-26
+
+This is a major feature release that introduces a high-level application protocol layer with built-in RPC and Publish/Subscribe frameworks. It also unifies the client-side proxy configuration to create a more consistent and powerful API. This version includes significant, repository-wide improvements to code style, type hint consistency, and test suite reliability.
+
+### Added
+
+- **Implemented a built-in RPC Framework** for high-performance, request-response communication. It features a JSON-RPC 2.0-like protocol over a dedicated bidirectional stream and a simple `session.rpc.call()` API.
+- **Implemented a built-in Publish/Subscribe Framework** for efficient, channel-based messaging. It uses a simple text-based protocol over a dedicated stream and offers a Pythonic API with `async with` for subscriptions and `async for` for message consumption.
+- **Added End-to-End Tests and API Documentation** for the new RPC and Pub/Sub frameworks.
+- **Introduced a `.codecov.yml` configuration** to enforce code coverage thresholds.
+
+### Changed
+
+- **Unified the Client-Side Proxy Configuration**. The proxy settings are now integrated directly into `ClientConfig`, providing a single, consistent API. The old, separate `WebTransportProxy` component has been removed.
+- **Enhanced Reliability of All Core Managers**. Refactored `ConnectionManager`, `SessionManager`, and `StreamManager` with a "supervisor" pattern to ensure they shut down safely if a background task fails unexpectedly, preventing resource leaks and improving the stability of long-running applications.
+- **Modernized Codebase with Python Best Practices**:
+  - Standardized all module docstrings to the single-line format (PEP 257).
+  - Enforced `-> None` return type annotation on all `__init__` methods (PEP 484).
+  - Replaced legacy `typing.Type` with the modern built-in `type` generic (PEP 585).
+  - Standardized the instantiation of all custom exception classes to use keyword arguments.
+- **Improved Test Suite Rigor**. Enabled `strict` mode for `pytest-asyncio` to enforce explicit `@pytest.mark.asyncio` markers for all asynchronous tests and fixtures, eliminating ambiguity.
+
 ## [0.6.1] - 2025-09-20
 
 This is a quality and hardening release focused on improving the core protocol handler's stability, refining the developer experience through documentation alignment, and ensuring the reliability of the CI/CD pipeline.
@@ -310,7 +332,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.0...v0.5.1

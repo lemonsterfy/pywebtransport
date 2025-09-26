@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import pytest
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ServerConfig, ServerError
@@ -12,7 +13,7 @@ from pywebtransport.server import ServerCluster, WebTransportServer
 
 
 class TestServerCluster:
-    @pytest.fixture
+    @asyncio_fixture
     async def cluster(
         self, server_configs: list[ServerConfig], mock_webtransport_server_class: Any
     ) -> AsyncGenerator[ServerCluster, None]:

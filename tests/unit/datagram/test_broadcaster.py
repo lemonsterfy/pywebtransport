@@ -7,14 +7,16 @@ from unittest import mock
 
 import pytest
 from _pytest.logging import LogCaptureFixture
+from pytest_asyncio import fixture as asyncio_fixture
 from pytest_mock import MockerFixture
 
 from pywebtransport import ConnectionError, DatagramError, WebTransportDatagramTransport
 from pywebtransport.datagram import DatagramBroadcaster
 
 
+@pytest.mark.asyncio
 class TestDatagramBroadcaster:
-    @pytest.fixture
+    @asyncio_fixture
     async def broadcaster(self) -> AsyncGenerator[DatagramBroadcaster, None]:
         async with DatagramBroadcaster.create() as b:
             yield b
@@ -26,13 +28,11 @@ class TestDatagramBroadcaster:
         type(transport).is_closed = mocker.PropertyMock(return_value=False)
         return transport
 
-    @pytest.mark.asyncio
     async def test_create(self) -> None:
         async with DatagramBroadcaster.create() as b:
             assert isinstance(b, DatagramBroadcaster)
             assert await b.get_transport_count() == 0
 
-    @pytest.mark.asyncio
     async def test_add_transport(self, broadcaster: DatagramBroadcaster, mock_transport: Any) -> None:
         assert await broadcaster.get_transport_count() == 0
 
@@ -40,14 +40,12 @@ class TestDatagramBroadcaster:
 
         assert await broadcaster.get_transport_count() == 1
 
-    @pytest.mark.asyncio
     async def test_add_transport_idempotent(self, broadcaster: DatagramBroadcaster, mock_transport: Any) -> None:
         await broadcaster.add_transport(transport=mock_transport)
         await broadcaster.add_transport(transport=mock_transport)
 
         assert await broadcaster.get_transport_count() == 1
 
-    @pytest.mark.asyncio
     async def test_remove_transport(self, broadcaster: DatagramBroadcaster, mock_transport: Any) -> None:
         await broadcaster.add_transport(transport=mock_transport)
         assert await broadcaster.get_transport_count() == 1
@@ -56,7 +54,6 @@ class TestDatagramBroadcaster:
 
         assert await broadcaster.get_transport_count() == 0
 
-    @pytest.mark.asyncio
     async def test_remove_nonexistent_transport(self, broadcaster: DatagramBroadcaster, mock_transport: Any) -> None:
         assert await broadcaster.get_transport_count() == 0
 
@@ -64,7 +61,6 @@ class TestDatagramBroadcaster:
 
         assert await broadcaster.get_transport_count() == 0
 
-    @pytest.mark.asyncio
     async def test_broadcast_success_all(
         self, broadcaster: DatagramBroadcaster, mock_transport: Any, mocker: MockerFixture
     ) -> None:
@@ -82,13 +78,11 @@ class TestDatagramBroadcaster:
         cast(mock.AsyncMock, transport2.send).assert_awaited_once_with(data=b"ping", priority=1, ttl=10.0)
         assert await broadcaster.get_transport_count() == 2
 
-    @pytest.mark.asyncio
     async def test_broadcast_empty(self, broadcaster: DatagramBroadcaster) -> None:
         sent_count = await broadcaster.broadcast(data=b"data")
 
         assert sent_count == 0
 
-    @pytest.mark.asyncio
     async def test_broadcast_with_pre_closed_transport(
         self, broadcaster: DatagramBroadcaster, mock_transport: Any, mocker: MockerFixture
     ) -> None:
@@ -107,7 +101,6 @@ class TestDatagramBroadcaster:
         cast(mock.AsyncMock, closed_transport.send).assert_not_awaited()
         assert await broadcaster.get_transport_count() == 1
 
-    @pytest.mark.asyncio
     async def test_broadcast_with_send_failure(
         self,
         broadcaster: DatagramBroadcaster,
@@ -117,7 +110,7 @@ class TestDatagramBroadcaster:
     ) -> None:
         healthy_transport = mock_transport
         failing_transport = mocker.create_autospec(WebTransportDatagramTransport, instance=True)
-        failing_transport.send = mocker.AsyncMock(side_effect=ConnectionError("Send failed"))
+        failing_transport.send = mocker.AsyncMock(side_effect=ConnectionError(message="Send failed"))
         type(failing_transport).is_closed = mocker.PropertyMock(return_value=False)
         await broadcaster.add_transport(transport=healthy_transport)
         await broadcaster.add_transport(transport=failing_transport)
@@ -132,7 +125,6 @@ class TestDatagramBroadcaster:
         assert "Failed to broadcast to transport" in caplog.text
         assert "Send failed" in caplog.text
 
-    @pytest.mark.asyncio
     async def test_broadcast_all_fail(
         self, broadcaster: DatagramBroadcaster, mock_transport: Any, mocker: MockerFixture
     ) -> None:
@@ -149,7 +141,6 @@ class TestDatagramBroadcaster:
         assert sent_count == 0
         assert await broadcaster.get_transport_count() == 0
 
-    @pytest.mark.asyncio
     async def test_broadcast_handles_race_condition_on_remove(
         self, broadcaster: DatagramBroadcaster, mock_transport: Any, mocker: MockerFixture
     ) -> None:
@@ -170,7 +161,6 @@ class TestDatagramBroadcaster:
         assert sent_count == 0
         assert await broadcaster.get_transport_count() == 0
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "method_name, kwargs",
         [
@@ -187,7 +177,6 @@ class TestDatagramBroadcaster:
         with pytest.raises(DatagramError, match="has not been activated"):
             await method(**kwargs)
 
-    @pytest.mark.asyncio
     async def test_aexit_uninitialized(self) -> None:
         broadcaster = DatagramBroadcaster.create()
 

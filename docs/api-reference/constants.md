@@ -89,6 +89,8 @@ This module provides module-level constants, error codes, and default configurat
 - `DEFAULT_MAX_TOTAL_PENDING_EVENTS` (`int`): Default global maximum for buffered events. `Default: 1000`.
 - `DEFAULT_PENDING_EVENT_TTL` (`float`): Default TTL for buffered events in seconds. `Default: 5.0`.
 - `DEFAULT_PORT` (`int`): Default port for insecure connections. `Default: 80`.
+- `DEFAULT_PROXY_CONNECT_TIMEOUT` (`float`): Default timeout for establishing a connection through a proxy. `Default: 10.0`.
+- `DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE` (`int`): Default subscription queue size for the Pub/Sub manager. `Default: 16`.
 - `DEFAULT_READ_TIMEOUT` (`float`): Default timeout for stream read operations. `Default: 60.0`.
 - `DEFAULT_RETRY_BACKOFF` (`float`): Default backoff factor for connection retries. `Default: 2.0`.
 - `DEFAULT_RETRY_DELAY` (`float`): Default initial delay for connection retries. `Default: 1.0`.
@@ -199,6 +201,7 @@ A `TypedDict` that defines the structure of a client configuration dictionary.
 - `max_streams` (`int`): Maximum number of concurrent streams per connection.
 - `max_total_pending_events` (`int`): Global maximum for buffered events.
 - `pending_event_ttl` (`float`): TTL for buffered events in seconds.
+- `proxy` (`ProxyConfig | None`): Configuration object for using an HTTP proxy.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
 - `retry_backoff` (`float`): The backoff factor for connection retries.
 - `retry_delay` (`float`): Initial delay in seconds between connection retries.

@@ -1,16 +1,30 @@
 # API Reference: config
 
-This module contains the configuration classes for the client and server.
+This document contains the configuration classes for the client and server.
 
 ---
+
+## ProxyConfig Class
+
+A dataclass that holds all configuration options for an HTTP proxy.
+
+### Constructor
+
+The constructor accepts the following keyword-only arguments:
+
+- `url` (`str`): The complete URL of the proxy server.
+- `headers` (`Headers`): A dictionary of additional headers to send to the proxy. `Default: {}`.
+- `connect_timeout` (`float`): Timeout in seconds for establishing a connection with the proxy. `Default: 10.0`.
 
 ## ClientConfig Class
 
 A dataclass that holds all configuration options for a WebTransport client.
 
-**Note on Usage**: The constructor for `ClientConfig` requires all parameters to be passed as keyword arguments.
+**Note on Usage**: The constructor requires all parameters to be passed as keyword arguments.
 
-### Attributes
+### Constructor
+
+The constructor accepts the following keyword-only arguments:
 
 - `alpn_protocols` (`list[str]`): List of protocols for ALPN negotiation. `Default: ['h3', 'h3-29']`.
 - `auto_reconnect` (`bool`): Enable or disable automatic reconnection on unexpected disconnections. `Default: False`.
@@ -43,6 +57,7 @@ A dataclass that holds all configuration options for a WebTransport client.
 - `max_streams` (`int`): Maximum number of concurrent client-initiated streams. `Default: 100`.
 - `max_total_pending_events` (`int`): Global limit for buffered events across all pending sessions. `Default: 1000`.
 - `pending_event_ttl` (`float`): Time-to-live in seconds for a buffered event. `Default: 5.0`.
+- `proxy` (`ProxyConfig | None`): Configuration for connecting through an HTTP proxy. `Default: None`.
 - `read_timeout` (`float | None`): Timeout for read operations. `Default: 60.0`.
 - `retry_backoff` (`float`): Multiplier for increasing retry delay. `Default: 2.0`.
 - `retry_delay` (`float`): Initial delay between retries in seconds. `Default: 1.0`.
@@ -51,7 +66,7 @@ A dataclass that holds all configuration options for a WebTransport client.
 - `stream_creation_timeout` (`float`): Timeout for creating a new stream. `Default: 10.0`.
 - `stream_flow_control_increment_bidi` (`int`): Number of bidirectional streams to grant when the limit is reached. `Default: 10`.
 - `stream_flow_control_increment_uni` (`int`): Number of unidirectional streams to grant when the limit is reached. `Default: 10`.
-- `user_agent` (`str`): The User-Agent header string.
+- `user_agent` (`str`): The User-Agent header string. `Default: "pywebtransport/<version>"`.
 - `verify_mode` (`ssl.VerifyMode | None`): SSL verification mode. `Default: ssl.CERT_REQUIRED`.
 - `write_timeout` (`float | None`): Timeout for write operations. `Default: 30.0`.
 
@@ -74,9 +89,11 @@ A dataclass that holds all configuration options for a WebTransport client.
 
 A dataclass that holds all configuration options for a WebTransport server.
 
-**Note on Usage**: The constructor for `ServerConfig` requires all parameters to be passed as keyword arguments.
+**Note on Usage**: The constructor requires all parameters to be passed as keyword arguments.
 
-### Attributes
+### Constructor
+
+The constructor accepts the following keyword-only arguments:
 
 - `access_log` (`bool`): Enable or disable access logging. `Default: True`.
 - `alpn_protocols` (`list[str]`): List of protocols for ALPN negotiation. `Default: ['h3', 'h3-29']`.
@@ -139,7 +156,7 @@ A fluent builder for creating `ClientConfig` or `ServerConfig` instances.
 
 ### Constructor
 
-- **`def __init__(self, *, config_type: str = "client")`**: Initializes the builder for "client" or "server".
+- **`def __init__(self, *, config_type: str = "client") -> None`**: Initializes the builder for "client" or "server".
 
 ### Instance Methods
 
@@ -154,6 +171,6 @@ A fluent builder for creating `ClientConfig` or `ServerConfig` instances.
 ## See Also
 
 - **[Constants API](constants.md)**: Review default values and protocol-level constants.
+- **[Client API](client.md)**: Learn how to use the WebTransport client.
 - **[Exceptions API](exceptions.md)**: Understand the library's error and exception hierarchy.
 - **[Types API](types.md)**: Review type definitions and enumerations.
-- **[Protocol API](protocol.md)**: Protocol implementation details.
