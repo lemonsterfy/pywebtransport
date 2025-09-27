@@ -117,6 +117,7 @@ class PubSubManager:
         """Enter the async context, ensuring the manager is initialized."""
         if self._lock is None:
             self._lock = asyncio.Lock()
+
         await self._ensure_initialized()
         return self
 
@@ -231,6 +232,7 @@ class PubSubManager:
 
             if self._stream is None or self._stream.is_closed:
                 raise NotSubscribedError(message="Pub/Sub stream is not available to unsubscribe.")
+
             await self._stream.write(data=b"UNSUB %b\n" % topic.encode())
 
             for sub in self._subscriptions.get(topic, set()):
@@ -257,6 +259,7 @@ class PubSubManager:
                 line = await self._stream.readline()
                 if not line:
                     break
+
                 parts = line.strip().split(b" ", 2)
                 command = parts[0]
 
@@ -294,16 +297,12 @@ class PubSubManager:
             raise
 
     def _on_ingress_done(self, task: asyncio.Task[None]) -> None:
-        """Callback to ensure cleanup is triggered when the ingress task finishes."""
+        """Callback to trigger cleanup when the ingress task finishes."""
         if self._is_closing:
             return
 
         if not task.cancelled():
             if exc := task.exception():
-                logger.error(
-                    "Pub/Sub ingress task finished unexpectedly with an exception: %s.",
-                    exc,
-                    exc_info=exc,
-                )
+                logger.error("Pub/Sub ingress task finished unexpectedly with an exception: %s.", exc, exc_info=exc)
 
         asyncio.create_task(self.close())

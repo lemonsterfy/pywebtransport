@@ -30,6 +30,7 @@ from pywebtransport.constants import (
     DEFAULT_PENDING_EVENT_TTL,
     DEFAULT_PROXY_CONNECT_TIMEOUT,
     DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
+    DEFAULT_RPC_CONCURRENCY_LIMIT,
     DEFAULT_SERVER_MAX_CONNECTIONS,
     DEFAULT_SERVER_VERIFY_MODE,
     DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
@@ -143,6 +144,7 @@ class TestDefaults:
         assert config["max_total_pending_events"] == DEFAULT_MAX_TOTAL_PENDING_EVENTS
         assert config["pending_event_ttl"] == DEFAULT_PENDING_EVENT_TTL
         assert config["proxy"] is None
+        assert config["rpc_concurrency_limit"] == DEFAULT_RPC_CONCURRENCY_LIMIT
         assert config["stream_flow_control_increment_bidi"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
         assert config["stream_flow_control_increment_uni"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
         assert config["user_agent"] == f"pywebtransport/{project_version}"
@@ -174,6 +176,7 @@ class TestDefaults:
         assert config["max_pending_events_per_session"] == DEFAULT_MAX_PENDING_EVENTS_PER_SESSION
         assert config["max_total_pending_events"] == DEFAULT_MAX_TOTAL_PENDING_EVENTS
         assert config["pending_event_ttl"] == DEFAULT_PENDING_EVENT_TTL
+        assert config["rpc_concurrency_limit"] == DEFAULT_RPC_CONCURRENCY_LIMIT
         assert config["stream_flow_control_increment_bidi"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
         assert config["stream_flow_control_increment_uni"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
         assert config["verify_mode"] == DEFAULT_SERVER_VERIFY_MODE

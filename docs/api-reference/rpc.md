@@ -12,13 +12,12 @@ Manages the RPC lifecycle over a single `WebTransportSession`. It provides metho
 
 ### Constructor
 
-- **`def __init__(self, *, session: WebTransportSession, serializer: RpcSerializer | None = None) -> None`**: Initializes the RPC manager for a given session.
+- **`def __init__(self, *, session: WebTransportSession, concurrency_limit: int | None = None) -> None`**: Initializes the RPC manager for a given session. The `concurrency_limit` parameter controls the maximum number of concurrent RPC requests that can be processed.
 
 ### Instance Methods
 
-- **`def register(self, func: Callable, name: str | None = None) -> None`**: Registers a Python function or coroutine to be callable by the remote peer.
-- **`async def call(self, method: str, params: list[Any] | dict[str, Any] | None = None, *, timeout: float | None = 10.0) -> Any`**: Calls a remote method and waits for its result.
-- **`async def notify(self, method: str, params: list[Any] | dict[str, Any] | None = None) -> None`**: Sends a notification to the remote peer (does not wait for a response).
+- **`def register(self, *, func: Callable[..., Any], name: str | None = None) -> None`**: Registers a Python function or coroutine to be callable by the remote peer.
+- **`async def call(self, method: str, *params: Any, timeout: float = 30.0) -> Any`**: Calls a remote method and waits for its result. Parameters should be passed as positional arguments after `method`.
 - **`async def close(self) -> None`**: Closes the manager and stops processing new requests.
 
 ## RPC Exceptions
@@ -32,7 +31,7 @@ These exceptions are available in the `pywebtransport.rpc.exceptions` module.
 
 ## RpcErrorCode Enum
 
-An `IntEnum` that defines the standard JSON-RPC 2.0 error codes.
+An `IntEnum` that defines the standard JSON-RPC 2.0 error codes, available in `pywebtransport.rpc.exceptions`.
 
 ### Attributes
 

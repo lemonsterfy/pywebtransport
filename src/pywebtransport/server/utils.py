@@ -58,12 +58,7 @@ async def echo_handler(session: WebTransportSession) -> None:
             tg.create_task(_echo_datagrams(session=session))
             tg.create_task(_echo_streams(session=session))
     except* Exception as eg:
-        logger.error(
-            "Echo handler error for session %s: %s",
-            session.session_id,
-            eg.exceptions,
-            exc_info=True,
-        )
+        logger.error("Echo handler error for session %s: %s", session.session_id, eg.exceptions, exc_info=True)
 
 
 async def health_check_handler(session: WebTransportSession) -> None:

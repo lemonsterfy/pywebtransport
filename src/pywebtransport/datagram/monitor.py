@@ -64,15 +64,9 @@ class DatagramMonitor:
 
         try:
             self._monitor_task = asyncio.create_task(self._monitor_loop())
-            logger.info(
-                "Datagram monitoring started for session %s...",
-                self._transport.session_id[:12],
-            )
+            logger.info("Datagram monitoring started for session %s...", self._transport.session_id[:12])
         except RuntimeError:
-            logger.error(
-                "Failed to start datagram monitor: No running event loop.",
-                exc_info=True,
-            )
+            logger.error("Failed to start datagram monitor: No running event loop.", exc_info=True)
 
         return self
 
@@ -89,10 +83,7 @@ class DatagramMonitor:
                 await self._monitor_task
             except asyncio.CancelledError:
                 pass
-        logger.info(
-            "Datagram monitoring stopped for session %s...",
-            self._transport.session_id[:12],
-        )
+        logger.info("Datagram monitoring stopped for session %s...", self._transport.session_id[:12])
 
     def get_alerts(self) -> list[dict[str, Any]]:
         """Get a copy of the currently active alerts."""

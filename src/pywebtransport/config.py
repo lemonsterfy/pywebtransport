@@ -48,6 +48,7 @@ from pywebtransport.constants import (
     DEFAULT_READ_TIMEOUT,
     DEFAULT_RETRY_BACKOFF,
     DEFAULT_RETRY_DELAY,
+    DEFAULT_RPC_CONCURRENCY_LIMIT,
     DEFAULT_SERVER_MAX_CONNECTIONS,
     DEFAULT_SERVER_VERIFY_MODE,
     DEFAULT_SESSION_CLEANUP_INTERVAL,
@@ -121,6 +122,7 @@ class ClientConfig:
     read_timeout: float | None = DEFAULT_READ_TIMEOUT
     retry_backoff: float = DEFAULT_RETRY_BACKOFF
     retry_delay: float = DEFAULT_RETRY_DELAY
+    rpc_concurrency_limit: int = DEFAULT_RPC_CONCURRENCY_LIMIT
     stream_buffer_size: int = DEFAULT_BUFFER_SIZE
     stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
     stream_creation_timeout: float = DEFAULT_STREAM_CREATION_TIMEOUT
@@ -329,6 +331,10 @@ class ClientConfig:
             raise invalid_config(key="retry_backoff", value=self.retry_backoff, reason="must be >= 1.0")
         if self.retry_delay <= 0:
             raise invalid_config(key="retry_delay", value=self.retry_delay, reason="must be positive")
+        if self.rpc_concurrency_limit <= 0:
+            raise invalid_config(
+                key="rpc_concurrency_limit", value=self.rpc_concurrency_limit, reason="must be positive"
+            )
 
         if self.ca_certs and not Path(self.ca_certs).exists():
             raise certificate_not_found(path=self.ca_certs)
@@ -386,6 +392,7 @@ class ServerConfig:
     middleware: list[MiddlewareProtocol] = field(default_factory=list)
     pending_event_ttl: float = DEFAULT_PENDING_EVENT_TTL
     read_timeout: float | None = DEFAULT_READ_TIMEOUT
+    rpc_concurrency_limit: int = DEFAULT_RPC_CONCURRENCY_LIMIT
     session_cleanup_interval: float = DEFAULT_SESSION_CLEANUP_INTERVAL
     stream_buffer_size: int = DEFAULT_BUFFER_SIZE
     stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
@@ -599,6 +606,10 @@ class ServerConfig:
                 key="stream_flow_control_increment_uni",
                 value=self.stream_flow_control_increment_uni,
                 reason="must be positive",
+            )
+        if self.rpc_concurrency_limit <= 0:
+            raise invalid_config(
+                key="rpc_concurrency_limit", value=self.rpc_concurrency_limit, reason="must be positive"
             )
 
         if self.ca_certs and not Path(self.ca_certs).exists():

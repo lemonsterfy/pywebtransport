@@ -14,6 +14,7 @@ from pywebtransport.constants import (
     DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
     DEFAULT_INITIAL_MAX_DATA,
     DEFAULT_READ_TIMEOUT,
+    DEFAULT_RPC_CONCURRENCY_LIMIT,
     DEFAULT_SERVER_MAX_CONNECTIONS,
 )
 
@@ -44,6 +45,7 @@ class TestClientConfig:
         assert config.flow_control_window_size == DEFAULT_FLOW_CONTROL_WINDOW_SIZE
         assert config.initial_max_data == DEFAULT_INITIAL_MAX_DATA
         assert config.proxy is None
+        assert config.rpc_concurrency_limit == DEFAULT_RPC_CONCURRENCY_LIMIT
 
     def test_initialization_with_proxy(self) -> None:
         proxy = ProxyConfig(url="http://proxy.com")
@@ -168,6 +170,7 @@ class TestClientConfig:
             ({"max_streams": 0}, "must be positive"),
             ({"max_total_pending_events": 0}, "must be positive"),
             ({"pending_event_ttl": 0}, "invalid timeout value"),
+            ({"rpc_concurrency_limit": 0}, "must be positive"),
             ({"stream_buffer_size": -10}, "must be positive"),
             ({"stream_flow_control_increment_bidi": 0}, "must be positive"),
             ({"stream_flow_control_increment_uni": 0}, "must be positive"),
@@ -229,6 +232,7 @@ class TestServerConfig:
         assert config.congestion_control_algorithm == "cubic"
         assert config.flow_control_window_size == DEFAULT_FLOW_CONTROL_WINDOW_SIZE
         assert config.initial_max_data == DEFAULT_INITIAL_MAX_DATA
+        assert config.rpc_concurrency_limit == DEFAULT_RPC_CONCURRENCY_LIMIT
 
     def test_create_factory_method(self, mocker: MockerFixture) -> None:
         mocker.patch(
@@ -331,6 +335,7 @@ class TestServerConfig:
             ({"max_streams_per_connection": 0}, "must be positive"),
             ({"max_total_pending_events": 0}, "must be positive"),
             ({"pending_event_ttl": -1.0}, "invalid timeout value"),
+            ({"rpc_concurrency_limit": 0}, "must be positive"),
             ({"stream_buffer_size": 0}, "must be positive"),
             ({"stream_flow_control_increment_bidi": 0}, "must be positive"),
             ({"stream_flow_control_increment_uni": 0}, "must be positive"),

@@ -349,21 +349,12 @@ class WebTransportConnection(EventEmitter):
             while self.is_connected:
                 try:
                     rtt = await asyncio.wait_for(self._get_rtt(), timeout=rtt_timeout)
-                    logger.debug(
-                        "Connection %s health check: RTT=%.1fms",
-                        self.connection_id,
-                        rtt * 1000,
-                    )
+                    logger.debug("Connection %s health check: RTT=%.1fms", self.connection_id, rtt * 1000)
                 except asyncio.TimeoutError:
                     logger.warning("Connection %s RTT check timeout", self.connection_id)
                     break
                 except Exception as e:
-                    logger.error(
-                        "Connection %s health check failed: %s",
-                        self.connection_id,
-                        e,
-                        exc_info=True,
-                    )
+                    logger.error("Connection %s health check failed: %s", self.connection_id, e, exc_info=True)
                     break
                 await asyncio.sleep(check_interval)
         except asyncio.CancelledError:
@@ -458,10 +449,7 @@ class WebTransportConnection(EventEmitter):
                 connection._set_state(new_state=ConnectionState.CONNECTED)
                 connection._info.established_at = get_timestamp()
                 logger.info(
-                    "Proxied connection to %s:%s established in %s",
-                    host,
-                    port,
-                    format_duration(seconds=timer.elapsed),
+                    "Proxied connection to %s:%s established in %s", host, port, format_duration(seconds=timer.elapsed)
                 )
         except Exception as e:
             await connection.close(reason=f"Proxied connection failed: {e}")
@@ -519,10 +507,7 @@ class WebTransportConnection(EventEmitter):
                                 await self._owner._protocol_handler.handle_quic_event(event=event)
                             except Exception as e:
                                 logger.error(
-                                    "Error handling QUIC event for %s: %s",
-                                    self._owner.connection_id,
-                                    e,
-                                    exc_info=True,
+                                    "Error handling QUIC event for %s: %s", self._owner.connection_id, e, exc_info=True
                                 )
                 except asyncio.CancelledError:
                     pass

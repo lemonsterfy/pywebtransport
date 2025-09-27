@@ -377,9 +377,7 @@ class TestManagerLifecycleAndCleanup:
             await asyncio.sleep(0.05)
         mock_cleanup.assert_awaited()
         mock_logger.error.assert_called_with(
-            "Connection cleanup cycle failed: %s",
-            test_exception,
-            exc_info=test_exception,
+            "Connection cleanup cycle failed: %s", test_exception, exc_info=test_exception
         )
 
 
@@ -439,9 +437,7 @@ class TestIdleConnectionManagement:
         async with ConnectionManager(connection_idle_check_interval=0.01) as _:
             await asyncio.sleep(0.05)
         mock_logger.error.assert_called_with(
-            "Idle connection check cycle failed: %s",
-            test_exception,
-            exc_info=test_exception,
+            "Idle connection check cycle failed: %s", test_exception, exc_info=test_exception
         )
 
     async def test_idle_check_close_error_handling(self, mocker: MockerFixture, mock_logger: Any) -> None:

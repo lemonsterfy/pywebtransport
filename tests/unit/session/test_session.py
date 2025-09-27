@@ -305,7 +305,9 @@ class TestWebTransportSession:
         rpc_manager1 = session.rpc
         rpc_manager2 = session.rpc
 
-        mock_rpc_manager_class.assert_called_once_with(session=session)
+        mock_rpc_manager_class.assert_called_once_with(
+            session=session, concurrency_limit=session._config.rpc_concurrency_limit
+        )
         assert rpc_manager1 is mock_rpc_manager_class.return_value
         assert rpc_manager2 is rpc_manager1
         assert hasattr(session, "_rpc_manager")

@@ -62,6 +62,7 @@ __all__ = [
     "DEFAULT_READ_TIMEOUT",
     "DEFAULT_RETRY_BACKOFF",
     "DEFAULT_RETRY_DELAY",
+    "DEFAULT_RPC_CONCURRENCY_LIMIT",
     "DEFAULT_SECURE_PORT",
     "DEFAULT_SERVER_MAX_CONNECTIONS",
     "DEFAULT_SERVER_VERIFY_MODE",
@@ -219,6 +220,7 @@ DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE: int = 16
 DEFAULT_READ_TIMEOUT: float = 60.0
 DEFAULT_RETRY_BACKOFF: float = 2.0
 DEFAULT_RETRY_DELAY: float = 1.0
+DEFAULT_RPC_CONCURRENCY_LIMIT: int = 100
 DEFAULT_SECURE_PORT: int = 443
 DEFAULT_SERVER_MAX_CONNECTIONS: int = 3000
 DEFAULT_SERVER_VERIFY_MODE: ssl.VerifyMode = ssl.CERT_NONE
@@ -326,6 +328,7 @@ class ClientConfigDefaults(TypedDict):
     read_timeout: float | None
     retry_backoff: float
     retry_delay: float
+    rpc_concurrency_limit: int
     stream_buffer_size: int
     stream_cleanup_interval: float
     stream_creation_timeout: float
@@ -370,6 +373,7 @@ class ServerConfigDefaults(TypedDict):
     middleware: list[Any]
     pending_event_ttl: float
     read_timeout: float | None
+    rpc_concurrency_limit: int
     session_cleanup_interval: float
     stream_buffer_size: int
     stream_cleanup_interval: float
@@ -415,6 +419,7 @@ _DEFAULT_CLIENT_CONFIG: ClientConfigDefaults = {
     "read_timeout": DEFAULT_READ_TIMEOUT,
     "retry_backoff": DEFAULT_RETRY_BACKOFF,
     "retry_delay": DEFAULT_RETRY_DELAY,
+    "rpc_concurrency_limit": DEFAULT_RPC_CONCURRENCY_LIMIT,
     "stream_buffer_size": DEFAULT_BUFFER_SIZE,
     "stream_cleanup_interval": DEFAULT_STREAM_CLEANUP_INTERVAL,
     "stream_creation_timeout": DEFAULT_STREAM_CREATION_TIMEOUT,
@@ -457,6 +462,7 @@ _DEFAULT_SERVER_CONFIG: ServerConfigDefaults = {
     "middleware": [],
     "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
     "read_timeout": DEFAULT_READ_TIMEOUT,
+    "rpc_concurrency_limit": DEFAULT_RPC_CONCURRENCY_LIMIT,
     "session_cleanup_interval": DEFAULT_SESSION_CLEANUP_INTERVAL,
     "stream_buffer_size": DEFAULT_BUFFER_SIZE,
     "stream_cleanup_interval": DEFAULT_STREAM_CLEANUP_INTERVAL,

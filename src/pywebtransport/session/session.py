@@ -202,7 +202,7 @@ class WebTransportSession(EventEmitter):
         if not hasattr(self, "_rpc_manager"):
             from pywebtransport.rpc.manager import RpcManager
 
-            self._rpc_manager = RpcManager(session=self)
+            self._rpc_manager = RpcManager(session=self, concurrency_limit=self._config.rpc_concurrency_limit)
         return self._rpc_manager
 
     async def __aenter__(self) -> Self:
@@ -257,10 +257,7 @@ class WebTransportSession(EventEmitter):
             except* Exception as eg:
                 first_exception = eg
                 logger.error(
-                    "Errors during parallel resource cleanup for %s: %s",
-                    self.session_id,
-                    eg.exceptions,
-                    exc_info=eg,
+                    "Errors during parallel resource cleanup for %s: %s", self.session_id, eg.exceptions, exc_info=eg
                 )
 
             if self._incoming_streams:
@@ -276,10 +273,7 @@ class WebTransportSession(EventEmitter):
                             if first_exception is None:
                                 first_exception = e
                             logger.error(
-                                "Error closing parent connection for %s: %s",
-                                self.session_id,
-                                e,
-                                exc_info=True,
+                                "Error closing parent connection for %s: %s", self.session_id, e, exc_info=True
                             )
         finally:
             self._teardown_event_handlers()
@@ -701,10 +695,7 @@ class WebTransportSession(EventEmitter):
         stream_id = event.data.get("stream_id")
         direction = event.data.get("direction")
         if stream_id is None or direction is None:
-            logger.error(
-                "STREAM_OPENED event is missing required data for session %s.",
-                self.session_id,
-            )
+            logger.error("STREAM_OPENED event is missing required data for session %s.", self.session_id)
             return
 
         try:
@@ -724,12 +715,7 @@ class WebTransportSession(EventEmitter):
             await self.stream_manager.add_stream(stream=stream)
             await self._incoming_streams.put(stream)
 
-            logger.debug(
-                "Accepted incoming %s stream %d for session %s",
-                direction,
-                stream_id,
-                self.session_id,
-            )
+            logger.debug("Accepted incoming %s stream %d for session %s", direction, stream_id, self.session_id)
         except Exception as e:
             self._stats.stream_errors += 1
             logger.error("Error handling newly opened stream %d: %s", stream_id, e, exc_info=True)
@@ -786,10 +772,7 @@ class WebTransportSession(EventEmitter):
 
         if session_info := self._protocol_handler.get_session_info(session_id=self._session_id):
             if session_info.state == SessionState.CONNECTED:
-                logger.info(
-                    "Syncing ready state for session %s (protocol already connected)",
-                    self._session_id,
-                )
+                logger.info("Syncing ready state for session %s (protocol already connected)", self._session_id)
                 self._state = SessionState.CONNECTED
                 self._ready_at = session_info.ready_at or get_timestamp()
                 self._path = session_info.path

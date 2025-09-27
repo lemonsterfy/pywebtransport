@@ -48,10 +48,7 @@ class ClientMonitor:
                 self._monitor_task = asyncio.create_task(self._monitor_loop())
                 logger.info("Client monitoring started.")
             except RuntimeError:
-                logger.error(
-                    "Failed to start client monitor: No running event loop.",
-                    exc_info=True,
-                )
+                logger.error("Failed to start client monitor: No running event loop.", exc_info=True)
         return self
 
     async def __aexit__(

@@ -94,6 +94,7 @@ This module provides module-level constants, error codes, and default configurat
 - `DEFAULT_READ_TIMEOUT` (`float`): Default timeout for stream read operations. `Default: 60.0`.
 - `DEFAULT_RETRY_BACKOFF` (`float`): Default backoff factor for connection retries. `Default: 2.0`.
 - `DEFAULT_RETRY_DELAY` (`float`): Default initial delay for connection retries. `Default: 1.0`.
+- `DEFAULT_RPC_CONCURRENCY_LIMIT` (`int`): Default concurrency limit for the RPC manager. `Default: 100`.
 - `DEFAULT_SECURE_PORT` (`int`): Default port for secure connections. `Default: 443`.
 - `DEFAULT_SERVER_MAX_CONNECTIONS` (`int`): Default maximum concurrent connections for a server. `Default: 3000`.
 - `DEFAULT_SERVER_VERIFY_MODE` (`ssl.VerifyMode`): Default SSL verification mode for the server. `Default: ssl.CERT_NONE`.
@@ -205,6 +206,7 @@ A `TypedDict` that defines the structure of a client configuration dictionary.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
 - `retry_backoff` (`float`): The backoff factor for connection retries.
 - `retry_delay` (`float`): Initial delay in seconds between connection retries.
+- `rpc_concurrency_limit` (`int`): The maximum number of concurrent RPC calls.
 - `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
 - `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.
 - `stream_creation_timeout` (`float`): Timeout in seconds for creating a new stream.
@@ -251,6 +253,7 @@ A `TypedDict` that defines the structure of a server configuration dictionary.
 - `middleware` (`list[Any]`): A list of middleware to apply to incoming sessions.
 - `pending_event_ttl` (`float`): TTL for buffered events in seconds.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
+- `rpc_concurrency_limit` (`int`): The maximum number of concurrent RPC calls per session.
 - `session_cleanup_interval` (`float`): Interval in seconds for cleaning up closed sessions.
 - `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
 - `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.

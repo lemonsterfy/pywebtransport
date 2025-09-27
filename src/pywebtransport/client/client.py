@@ -197,11 +197,7 @@ class WebTransportClient(EventEmitter):
                 self._stats.min_connect_time = min(self._stats.min_connect_time, connect_time)
                 self._stats.max_connect_time = max(self._stats.max_connect_time, connect_time)
 
-                logger.info(
-                    "Session established to %s in %s",
-                    url,
-                    format_duration(seconds=connect_time),
-                )
+                logger.info("Session established to %s in %s", url, format_duration(seconds=connect_time))
                 return session
         except Exception as e:
             self._stats.connections_failed += 1

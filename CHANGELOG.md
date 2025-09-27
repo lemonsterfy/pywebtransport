@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.7.1] - 2025-09-27
+
+This is a hardening release focused on improving the stability and robustness of the RPC framework. It introduces a critical concurrency limiting feature and fixes a major bug in the request handling loop to enhance observability and prevent server overload.
+
+### Added
+
+- **Added a configurable concurrency limit to the RPC framework.** The new `rpc_concurrency_limit` option in `ClientConfig` and `ServerConfig` allows applications to control the maximum number of simultaneous incoming RPC requests, enhancing server stability and providing essential back-pressure against high request loads.
+
+### Fixed
+
+- **Fixed a critical bug in the RPC ingress loop** where all exceptions were silently swallowed. This ensures that unexpected errors are now correctly propagated and logged, significantly improving the framework's observability and robustness.
+
 ## [0.7.0] - 2025-09-26
 
 This is a major feature release that introduces a high-level application protocol layer with built-in RPC and Publish/Subscribe frameworks. It also unifies the client-side proxy configuration to create a more consistent and powerful API. This version includes significant, repository-wide improvements to code style, type hint consistency, and test suite reliability.
@@ -101,7 +113,7 @@ This is a major feature release that significantly enhances the library's usabil
   - `StructuredStream` and `StructuredDatagramStream` wrappers that add object-level `send()` and `receive()` capabilities.
   - New `WebTransportSession.create_structured_stream()` and `create_structured_datagram_stream()` factory methods for easy access.
 - **Implemented a configurable client-side auto-reconnect strategy.** The client can now automatically recover from transient network failures using an exponential backoff policy, controlled via new `ClientConfig` parameters.
-- **Implemented congestion control algorithm selection.** Users can now choose the desired algorithm (e.g., 'cubic', 'reno') in `ClientConfig` and `ServerConfig` for performance tuning.
+- **Implemented a congestion control algorithm selection.** Users can now choose the desired algorithm (e.g., 'cubic', 'reno') in `ClientConfig` and `ServerConfig` for performance tuning.
 
 ### Changed
 
@@ -332,7 +344,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.5.1...v0.6.0
