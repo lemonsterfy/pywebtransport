@@ -213,11 +213,7 @@ class DatagramReliabilityLayer:
         except (IndexError, UnicodeDecodeError):
             pass
         except Exception as e:
-            logger.error(
-                "Error processing received datagram for reliability: %s",
-                e,
-                exc_info=e,
-            )
+            logger.error("Error processing received datagram for reliability: %s", e, exc_info=e)
 
     async def _retry_loop(self) -> None:
         """Periodically check for and retry unacknowledged datagrams."""
@@ -260,11 +256,7 @@ class DatagramReliabilityLayer:
                                 datagram.retry_count += 1
                                 datagram.timestamp = get_timestamp()
                             tg.create_task(transport._send_framed_data(message_type="DATA", payload=datagram.data))
-                            logger.debug(
-                                "Retrying sequence %s, attempt %d",
-                                datagram.sequence,
-                                datagram.retry_count,
-                            )
+                            logger.debug("Retrying sequence %s, attempt %d", datagram.sequence, datagram.retry_count)
                 except* Exception as eg:
                     logger.warning(
                         "Errors occurred during datagram retry: %s",

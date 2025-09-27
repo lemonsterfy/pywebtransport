@@ -101,11 +101,7 @@ class ConnectionLoadBalancer:
                 for connection in connections_to_close:
                     tg.create_task(connection.close())
         except* Exception as eg:
-            logger.error(
-                "Errors occurred while closing connections: %s",
-                eg.exceptions,
-                exc_info=eg,
-            )
+            logger.error("Errors occurred while closing connections: %s", eg.exceptions, exc_info=eg)
         logger.info("All connections closed")
 
     async def get_connection(
@@ -159,12 +155,7 @@ class ConnectionLoadBalancer:
                     self._failed_targets.discard(target_key)
                     self._connections[target_key] = connection
 
-                logger.info(
-                    "Connected to %s:%s (latency: %.1fms)",
-                    host,
-                    port,
-                    latency * 1000,
-                )
+                logger.info("Connected to %s:%s (latency: %.1fms)", host, port, latency * 1000)
                 return connection
             except Exception as e:
                 async with self._lock:

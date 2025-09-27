@@ -95,11 +95,7 @@ class StreamPool:
                     for s in streams_to_close:
                         tg.create_task(s.close())
             except* Exception as eg:
-                logger.error(
-                    "Errors occurred while closing pooled streams: %s",
-                    eg.exceptions,
-                    exc_info=eg,
-                )
+                logger.error("Errors occurred while closing pooled streams: %s", eg.exceptions, exc_info=eg)
             logger.info("Closed %d idle streams from the pool.", len(streams_to_close))
 
     async def get_stream(self, *, timeout: float | None = None) -> WebTransportStream:
@@ -191,12 +187,7 @@ class StreamPool:
                 tasks = [tg.create_task(self._session.create_bidirectional_stream()) for _ in range(needed)]
             created_streams = [task.result() for task in tasks if task.done() and not task.exception()]
         except* Exception as eg:
-            logger.error(
-                "Failed to create %d streams for the pool: %s",
-                needed,
-                eg.exceptions,
-                exc_info=eg,
-            )
+            logger.error("Failed to create %d streams for the pool: %s", needed, eg.exceptions, exc_info=eg)
             async with self._condition:
                 self._total_managed_streams -= needed
                 self._condition.notify_all()
@@ -224,10 +215,7 @@ class StreamPool:
             try:
                 await self._fill_pool()
                 self._start_maintenance_task()
-                logger.info(
-                    "Stream pool initialized with %d streams.",
-                    self._total_managed_streams,
-                )
+                logger.info("Stream pool initialized with %d streams.", self._total_managed_streams)
             except Exception as e:
                 logger.error("Error initializing stream pool: %s", e, exc_info=True)
                 await self.close_all()

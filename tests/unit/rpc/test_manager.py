@@ -46,6 +46,29 @@ class TestRpcManagerLifecycle:
         assert rpc_manager._session is mock_session
         assert not rpc_manager._handlers
         assert not rpc_manager._pending_calls
+        assert rpc_manager._concurrency_limit_value is None
+        assert rpc_manager._concurrency_limiter is None
+
+    async def test_init_with_concurrency_limit(self, mock_session: MagicMock) -> None:
+        manager = RpcManager(session=mock_session, concurrency_limit=10)
+        assert manager._concurrency_limit_value == 10
+        assert manager._concurrency_limiter is None
+
+    async def test_aenter_initializes_semaphore(self, mock_session: MagicMock, mock_stream: MagicMock) -> None:
+        mock_session.create_bidirectional_stream.return_value = mock_stream
+        manager = RpcManager(session=mock_session, concurrency_limit=5)
+        async with manager:
+            assert isinstance(manager._concurrency_limiter, asyncio.Semaphore)
+            assert manager._concurrency_limiter._value == 5
+
+    @pytest.mark.parametrize("limit", [None, 0, -1])
+    async def test_aenter_no_semaphore_without_limit(
+        self, mock_session: MagicMock, mock_stream: MagicMock, limit: int | None
+    ) -> None:
+        mock_session.create_bidirectional_stream.return_value = mock_stream
+        manager = RpcManager(session=mock_session, concurrency_limit=limit)
+        async with manager:
+            assert manager._concurrency_limiter is None
 
     async def test_context_manager_flow(
         self,
@@ -246,19 +269,19 @@ class TestRpcManagerHandling:
         assert exc_info.value.error_code == 1
 
     @pytest.mark.asyncio
-    async def test_handle_request_success(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
+    async def test_process_request_success(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
         mock_send = mocker.patch.object(rpc_manager, "_send_message", new_callable=AsyncMock)
         handler = mocker.MagicMock(return_value="pong")
         rpc_manager.register(func=handler, name="ping")
         request_message = {"id": "req-1", "method": "ping", "params": [1]}
 
-        await rpc_manager._handle_request(message=request_message)
+        await rpc_manager._process_request(message=request_message)
 
         handler.assert_called_once_with(1)
         mock_send.assert_awaited_once_with(message={"id": "req-1", "result": "pong"})
 
     @pytest.mark.asyncio
-    async def test_handle_request_with_async_handler(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
+    async def test_process_request_with_async_handler(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
         mock_send = mocker.patch.object(rpc_manager, "_send_message", new_callable=AsyncMock)
 
         async def async_handler(arg: int) -> str:
@@ -268,45 +291,45 @@ class TestRpcManagerHandling:
         rpc_manager.register(func=async_handler, name="async_ping")
         request_message = {"id": "req-2", "method": "async_ping", "params": [42]}
 
-        await rpc_manager._handle_request(message=request_message)
+        await rpc_manager._process_request(message=request_message)
 
         mock_send.assert_awaited_once_with(message={"id": "req-2", "result": "async pong 42"})
 
     @pytest.mark.asyncio
-    async def test_handle_request_method_not_found(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
+    async def test_process_request_method_not_found(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
         mock_send = mocker.patch.object(rpc_manager, "_send_message", new_callable=AsyncMock)
         request_message = {"id": "req-1", "method": "non_existent", "params": []}
 
-        await rpc_manager._handle_request(message=request_message)
+        await rpc_manager._process_request(message=request_message)
 
         assert mock_send.call_args[1]["message"]["error"]["code"] == -32601
 
     @pytest.mark.asyncio
-    async def test_handle_request_as_notification(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
+    async def test_process_request_as_notification(self, rpc_manager: RpcManager, mocker: MockerFixture) -> None:
         mock_send = mocker.patch.object(rpc_manager, "_send_message", new_callable=AsyncMock)
         handler = mocker.MagicMock()
         rpc_manager.register(func=handler, name="notify")
         request_message = {"method": "notify", "params": []}
 
-        await rpc_manager._handle_request(message=request_message)
+        await rpc_manager._process_request(message=request_message)
 
         handler.assert_called_once_with()
         mock_send.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_handle_request_with_invalid_params_type(
+    async def test_process_request_with_invalid_params_type(
         self, rpc_manager: RpcManager, mocker: MockerFixture
     ) -> None:
         mock_send = mocker.patch.object(rpc_manager, "_send_message", new_callable=AsyncMock)
         rpc_manager.register(func=lambda: None, name="any")
         request_message = {"id": "req-1", "method": "any", "params": "not-a-list"}
 
-        await rpc_manager._handle_request(message=request_message)
+        await rpc_manager._process_request(message=request_message)
 
         assert mock_send.call_args[1]["message"]["error"]["code"] == -32602
 
     @pytest.mark.asyncio
-    async def test_handle_request_handler_raises_exception(
+    async def test_process_request_handler_raises_exception(
         self, rpc_manager: RpcManager, mocker: MockerFixture
     ) -> None:
         mock_send = mocker.patch.object(rpc_manager, "_send_message", new_callable=AsyncMock)
@@ -314,7 +337,7 @@ class TestRpcManagerHandling:
         rpc_manager.register(func=handler, name="failing")
         request_message = {"id": "req-1", "method": "failing", "params": []}
 
-        await rpc_manager._handle_request(message=request_message)
+        await rpc_manager._process_request(message=request_message)
 
         assert mock_send.call_args[1]["message"]["error"]["code"] == -32603
 
@@ -343,14 +366,14 @@ class TestRpcManagerHandling:
         mock_send.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("error_type, error_code", [(InvalidParamsError, -32602), (ValueError, -32603)])
+    @pytest.mark.parametrize("error_type", [InvalidParamsError, ValueError])
     async def test_handle_request_notification_with_error(
-        self, rpc_manager: RpcManager, mocker: MockerFixture, error_type: type[Exception], error_code: int
+        self, rpc_manager: RpcManager, mocker: MockerFixture, error_type: type[Exception]
     ) -> None:
         mock_send = mocker.patch.object(rpc_manager, "_send_message", new_callable=AsyncMock)
         handler = mocker.MagicMock(side_effect=error_type)
         rpc_manager.register(func=handler, name="failing_notification")
-        request_message: dict[str, Any] = {"id": None, "method": "failing_notification", "params": []}
+        request_message: dict[str, Any] = {"method": "failing_notification", "params": []}
 
         await rpc_manager._handle_request(message=request_message)
 
@@ -367,6 +390,61 @@ class TestRpcManagerHandling:
         await rpc_manager._handle_request(message=request_message)
 
         mock_send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+class TestRpcManagerConcurrency:
+    async def test_handle_request_respects_concurrency_limit(
+        self, mock_session: MagicMock, mock_stream: MagicMock, mocker: MockerFixture
+    ) -> None:
+        limit = 2
+        manager = RpcManager(session=mock_session, concurrency_limit=limit)
+        mock_session.create_bidirectional_stream.return_value = mock_stream
+
+        call_count = 0
+        max_concurrent_calls = 0
+        current_concurrent_calls = 0
+        lock = asyncio.Lock()
+        started_events = [asyncio.Event() for _ in range(limit + 1)]
+        finish_events = [asyncio.Event() for _ in range(limit)]
+
+        async def mock_process_request(*args: Any, **kwargs: Any) -> None:
+            nonlocal call_count, max_concurrent_calls, current_concurrent_calls
+            task_index = call_count
+            call_count += 1
+
+            async with lock:
+                current_concurrent_calls += 1
+                max_concurrent_calls = max(max_concurrent_calls, current_concurrent_calls)
+
+            started_events[task_index].set()
+            if task_index < limit:
+                await finish_events[task_index].wait()
+
+            async with lock:
+                current_concurrent_calls -= 1
+
+        mocker.patch.object(manager, "_process_request", side_effect=mock_process_request)
+
+        async with manager:
+            tasks = [asyncio.create_task(manager._handle_request(message={"method": "test"})) for _ in range(limit + 1)]
+
+            await asyncio.wait_for(asyncio.gather(*[e.wait() for e in started_events[:limit]]), timeout=1)
+
+            assert call_count == limit
+            assert max_concurrent_calls == limit
+            assert not started_events[limit].is_set()
+
+            finish_events[0].set()
+            await asyncio.wait_for(started_events[limit].wait(), timeout=1)
+
+            assert call_count == limit + 1
+            assert max_concurrent_calls == limit
+
+            for event in finish_events[1:]:
+                event.set()
+
+            await asyncio.gather(*tasks)
 
 
 @pytest.mark.asyncio
@@ -422,9 +500,14 @@ class TestRpcManagerIngressAndErrors:
         mock_stream.close.assert_awaited()
 
     @pytest.mark.parametrize(
-        "exc", [ConnectionError(message="Stream broke"), asyncio.IncompleteReadError(partial=b"", expected=1)]
+        "exc",
+        [
+            ConnectionError(message="Stream broke"),
+            asyncio.IncompleteReadError(partial=b"", expected=1),
+            ValueError("Generic Error"),
+        ],
     )
-    async def test_ingress_loop_breaks_on_io_error(
+    async def test_ingress_loop_breaks_on_io_and_generic_error(
         self, rpc_manager: RpcManager, mock_stream: MagicMock, mock_session: MagicMock, exc: Exception
     ) -> None:
         mock_stream.readexactly.side_effect = exc
@@ -435,7 +518,12 @@ class TestRpcManagerIngressAndErrors:
 
         assert rpc_manager._ingress_task is not None
         assert rpc_manager._ingress_task.done()
-        assert rpc_manager._ingress_task.exception() is None
+        task_exc = rpc_manager._ingress_task.exception()
+        if isinstance(exc, ValueError):
+            assert isinstance(task_exc, ExceptionGroup)
+            assert exc in task_exc.exceptions
+        else:
+            assert task_exc is None
         mock_stream.close.assert_awaited()
 
     @pytest.mark.parametrize(

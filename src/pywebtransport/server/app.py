@@ -166,11 +166,7 @@ class ServerApp:
             logger.warning("Connection %s is not in connected state", connection.connection_id)
             return
 
-        logger.info(
-            "Processing session request: session_id=%s, stream_id=%s",
-            session_id,
-            stream_id,
-        )
+        logger.info("Processing session request: session_id=%s, stream_id=%s", session_id, stream_id)
         try:
             session_info = connection.protocol_handler.get_session_info(session_id=session_id)
             if not session_info:
@@ -179,10 +175,7 @@ class ServerApp:
 
             config = connection.config
             if not isinstance(config, ServerConfig):
-                logger.error(
-                    "Connection %s has a non-server config, which is unexpected.",
-                    connection.connection_id,
-                )
+                logger.error("Connection %s has a non-server config, which is unexpected.", connection.connection_id)
                 connection.protocol_handler.close_webtransport_session(
                     session_id=session_id,
                     code=1,
@@ -224,11 +217,7 @@ class ServerApp:
                 )
                 return
 
-            logger.info(
-                "Routing session request for path '%s' to handler '%s'",
-                session.path,
-                handler.__name__,
-            )
+            logger.info("Routing session request for path '%s' to handler '%s'", session.path, handler.__name__)
             connection.protocol_handler.accept_webtransport_session(stream_id=stream_id, session_id=session_id)
             logger.info("Handler task created for session %s", session_id)
 
@@ -238,12 +227,7 @@ class ServerApp:
                     await h(s)
                     logger.debug("Handler completed for session %s", s.session_id)
                 except Exception as handler_error:
-                    logger.error(
-                        "Handler error for session %s: %s",
-                        s.session_id,
-                        handler_error,
-                        exc_info=True,
-                    )
+                    logger.error("Handler error for session %s: %s", s.session_id, handler_error, exc_info=True)
                 finally:
                     if not s.is_closed:
                         logger.debug("Closing session %s", s.session_id)
@@ -252,12 +236,7 @@ class ServerApp:
             asyncio.create_task(run_handler(h=handler, s=session))
 
         except Exception as e:
-            logger.error(
-                "Error handling session request for session %s: %s",
-                session_id,
-                e,
-                exc_info=True,
-            )
+            logger.error("Error handling session request for session %s: %s", session_id, e, exc_info=True)
             try:
                 if connection.protocol_handler:
                     connection.protocol_handler.close_webtransport_session(

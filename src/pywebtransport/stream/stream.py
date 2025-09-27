@@ -790,12 +790,7 @@ class WebTransportSendStream(_StreamBase, EventEmitter):
                     if future and not future.done():
                         future.set_exception(e)
                     self._stats.write_errors += 1
-                    logger.error(
-                        "Error sending stream data for %d: %s",
-                        self._stream_id,
-                        e,
-                        exc_info=True,
-                    )
+                    logger.error("Error sending stream data for %d: %s", self._stream_id, e, exc_info=True)
                     self._set_state(new_state=StreamState.RESET_SENT)
                     break
         except asyncio.CancelledError:

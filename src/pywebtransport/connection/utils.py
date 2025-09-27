@@ -80,11 +80,7 @@ async def create_multiple_connections(
             for host, port in targets:
                 tg.create_task(create_single_connection(host=host, port=port))
     except* Exception as eg:
-        logger.error(
-            "Errors occurred while creating multiple connections: %s",
-            eg.exceptions,
-            exc_info=eg,
-        )
+        logger.error("Errors occurred while creating multiple connections: %s", eg.exceptions, exc_info=eg)
 
     return connections
 

@@ -101,11 +101,7 @@ class PooledClient:
                     for session in sessions_to_close:
                         tg.create_task(session.close())
             except* Exception as eg:
-                logger.error(
-                    "Errors occurred while closing pooled sessions: %s",
-                    eg.exceptions,
-                    exc_info=eg,
-                )
+                logger.error("Errors occurred while closing pooled sessions: %s", eg.exceptions, exc_info=eg)
 
         await self._client.close()
         logger.info("PooledClient has been closed.")
@@ -139,10 +135,7 @@ class PooledClient:
                     self._total_sessions[pool_key] += 1
                     break
 
-                logger.debug(
-                    "Pool for %s is full. Waiting for a session to be returned.",
-                    pool_key,
-                )
+                logger.debug("Pool for %s is full. Waiting for a session to be returned.", pool_key)
                 await condition.wait()
 
         try:
@@ -224,11 +217,7 @@ class PooledClient:
 
                     if len(ready_sessions) < original_len:
                         pruned_count = original_len - len(ready_sessions)
-                        logger.info(
-                            "Pruned %d stale sessions from pool '%s'",
-                            pruned_count,
-                            pool_key,
-                        )
+                        logger.info("Pruned %d stale sessions from pool '%s'", pruned_count, pool_key)
                         self._pools[pool_key] = ready_sessions
                         self._total_sessions[pool_key] -= pruned_count
                         for _ in range(pruned_count):

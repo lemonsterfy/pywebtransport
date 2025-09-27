@@ -113,12 +113,7 @@ class WebTransportServerProtocol(QuicConnectionProtocol):
                     try:
                         await conn.protocol_handler.handle_quic_event(event=event)
                     except Exception as e:
-                        logger.error(
-                            "Error handling QUIC event for %s: %s",
-                            conn.connection_id,
-                            e,
-                            exc_info=True,
-                        )
+                        logger.error("Error handling QUIC event for %s: %s", conn.connection_id, e, exc_info=True)
                 else:
                     logger.warning(
                         "No handler available to process event for %s: %r",
@@ -212,11 +207,7 @@ class WebTransportServer(EventEmitter):
                 tg.create_task(self._connection_manager.shutdown())
                 tg.create_task(self._session_manager.shutdown())
         except* Exception as eg:
-            logger.error(
-                "Errors occurred during manager shutdown: %s",
-                eg.exceptions,
-                exc_info=eg,
-            )
+            logger.error("Errors occurred during manager shutdown: %s", eg.exceptions, exc_info=eg)
 
         if self._server:
             self._server.close()

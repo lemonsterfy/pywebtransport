@@ -57,9 +57,7 @@ class ClientPool:
                         cleanup_tg.create_task(client.close())
             except* Exception as cleanup_eg:
                 logger.error(
-                    "Errors during client pool startup cleanup: %s",
-                    cleanup_eg.exceptions,
-                    exc_info=cleanup_eg,
+                    "Errors during client pool startup cleanup: %s", cleanup_eg.exceptions, exc_info=cleanup_eg
                 )
             raise eg
 
@@ -93,11 +91,7 @@ class ClientPool:
                 for client in self._clients:
                     tg.create_task(client.close())
         except* Exception as eg:
-            logger.error(
-                "Errors occurred while closing client pool: %s",
-                eg.exceptions,
-                exc_info=eg,
-            )
+            logger.error("Errors occurred while closing client pool: %s", eg.exceptions, exc_info=eg)
 
         self._clients.clear()
         logger.info("Client pool closed.")

@@ -72,20 +72,13 @@ class ServerCluster:
             logger.error("Failed to start server cluster: %s", eg.exceptions, exc_info=True)
             successful_servers = [task.result() for task in tasks if task.done() and not task.exception()]
             if successful_servers:
-                logger.info(
-                    "Cleaning up %d successfully started servers...",
-                    len(successful_servers),
-                )
+                logger.info("Cleaning up %d successfully started servers...", len(successful_servers))
                 try:
                     async with asyncio.TaskGroup() as cleanup_tg:
                         for server in successful_servers:
                             cleanup_tg.create_task(server.close())
                 except* Exception as cleanup_eg:
-                    logger.error(
-                        "Errors during cluster startup cleanup: %s",
-                        cleanup_eg.exceptions,
-                        exc_info=True,
-                    )
+                    logger.error("Errors during cluster startup cleanup: %s", cleanup_eg.exceptions, exc_info=True)
             raise eg.exceptions[0]
 
         async with self._lock:
@@ -117,11 +110,7 @@ class ServerCluster:
                     for server in servers_to_stop:
                         tg.create_task(server.close())
             except* Exception as eg:
-                logger.error(
-                    "Errors occurred while stopping server cluster: %s",
-                    eg.exceptions,
-                    exc_info=True,
-                )
+                logger.error("Errors occurred while stopping server cluster: %s", eg.exceptions, exc_info=True)
                 raise eg
             logger.info("Stopped server cluster")
 
@@ -206,11 +195,7 @@ class ServerCluster:
                 for s in servers_snapshot:
                     tasks.append(tg.create_task(s.get_server_stats()))
         except* Exception as eg:
-            logger.error(
-                "Failed to fetch stats from some servers: %s",
-                eg.exceptions,
-                exc_info=True,
-            )
+            logger.error("Failed to fetch stats from some servers: %s", eg.exceptions, exc_info=True)
             raise eg
 
         stats_list = [task.result() for task in tasks if task.done() and not task.exception()]

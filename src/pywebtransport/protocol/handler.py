@@ -274,11 +274,7 @@ class WebTransportProtocolHandler(EventEmitter):
         )
         self._register_session(session_id=session_id, session_info=session_info)
         self._trigger_transmission()
-        logger.info(
-            "Initiated WebTransport session: %s on control stream %d",
-            session_id,
-            stream_id,
-        )
+        logger.info("Initiated WebTransport session: %s on control stream %d", session_id, stream_id)
         return session_id, stream_id
 
     def create_webtransport_stream(self, *, session_id: SessionId, is_unidirectional: bool = False) -> StreamId:
@@ -328,11 +324,7 @@ class WebTransportProtocolHandler(EventEmitter):
                 timeout=timeout,
                 condition=session_ready_condition,
             )
-            logger.info(
-                "WebTransport session established in %.2fs: %s",
-                timer.elapsed,
-                session_id,
-            )
+            logger.info("WebTransport session established in %.2fs: %s", timer.elapsed, session_id)
             return session_id, stream_id
 
     async def handle_quic_event(self, *, event: QuicEvent) -> None:
@@ -458,10 +450,7 @@ class WebTransportProtocolHandler(EventEmitter):
                     path=session_info.path, headers=session_info.headers
                 )
                 logger.info(
-                    "Recovered session %s as new session %s (attempt %d)",
-                    session_id,
-                    new_session_id,
-                    attempt + 1,
+                    "Recovered session %s as new session %s (attempt %d)", session_id, new_session_id, attempt + 1
                 )
                 return True
             except Exception as e:
@@ -632,11 +621,7 @@ class WebTransportProtocolHandler(EventEmitter):
                 event_data = session_info.to_dict()
                 if connection := self.connection:
                     event_data["connection"] = connection
-                logger.info(
-                    "Received WebTransport session request: %s for path '%s'",
-                    session_id,
-                    session_info.path,
-                )
+                logger.info("Received WebTransport session request: %s for path '%s'", session_id, session_info.path)
                 await self.emit(event_type=EventType.SESSION_REQUEST, data=event_data)
             case (False, method, _):
                 logger.warning(
@@ -660,11 +645,7 @@ class WebTransportProtocolHandler(EventEmitter):
     async def _handle_stream_reset(self, *, event: StreamReset) -> None:
         """Handle a reset stream event."""
         if session_id := self._session_control_streams.get(event.stream_id):
-            logger.info(
-                "Session %s closed due to control stream %d reset.",
-                session_id,
-                event.stream_id,
-            )
+            logger.info("Session %s closed due to control stream %d reset.", session_id, event.stream_id)
             await self.emit(
                 event_type=EventType.SESSION_CLOSED,
                 data={
@@ -713,9 +694,7 @@ class WebTransportProtocolHandler(EventEmitter):
                 QuicConnectionState.DRAINING,
             ):
                 logger.error(
-                    "No session mapping found for session_stream_id %d on new stream %d.",
-                    session_stream_id,
-                    stream_id,
+                    "No session mapping found for session_stream_id %d on new stream %d.", session_stream_id, stream_id
                 )
             return
 
@@ -803,11 +782,7 @@ class WebTransportProtocolHandler(EventEmitter):
                             session_id,
                         )
                         reason = reason_bytes.decode("utf-8", errors="replace")
-                    logger.info(
-                        "Received CLOSE_SESSION capsule: code=%d reason=%s",
-                        app_code,
-                        reason,
-                    )
+                    logger.info("Received CLOSE_SESSION capsule: code=%d reason=%s", app_code, reason)
                     await self.emit(
                         event_type=EventType.SESSION_CLOSED,
                         data={

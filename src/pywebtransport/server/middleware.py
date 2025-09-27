@@ -104,10 +104,7 @@ class RateLimiter:
                 for ip in stale_ips:
                     del self._requests[ip]
                 if stale_ips:
-                    logger.debug(
-                        "Cleaned up %d stale IP entries from rate limiter.",
-                        len(stale_ips),
-                    )
+                    logger.debug("Cleaned up %d stale IP entries from rate limiter.", len(stale_ips))
 
     def _start_cleanup_task(self) -> None:
         """Create and start the periodic cleanup task if not already running."""

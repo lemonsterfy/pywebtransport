@@ -61,6 +61,7 @@ The constructor accepts the following keyword-only arguments:
 - `read_timeout` (`float | None`): Timeout for read operations. `Default: 60.0`.
 - `retry_backoff` (`float`): Multiplier for increasing retry delay. `Default: 2.0`.
 - `retry_delay` (`float`): Initial delay between retries in seconds. `Default: 1.0`.
+- `rpc_concurrency_limit` (`int`): Maximum number of concurrent RPC calls. `Default: 100`.
 - `stream_buffer_size` (`int`): Default buffer size for streams in bytes. `Default: 65536`.
 - `stream_cleanup_interval` (`float`): Interval for cleaning up closed streams. `Default: 15.0`.
 - `stream_creation_timeout` (`float`): Timeout for creating a new stream. `Default: 10.0`.
@@ -126,6 +127,7 @@ The constructor accepts the following keyword-only arguments:
 - `middleware` (`list[MiddlewareProtocol]`): A list of middleware to apply to sessions. `Default: []`.
 - `pending_event_ttl` (`float`): Time-to-live in seconds for a buffered event. `Default: 5.0`.
 - `read_timeout` (`float | None`): Timeout for read operations. `Default: 60.0`.
+- `rpc_concurrency_limit` (`int`): Maximum number of concurrent RPC calls per session. `Default: 100`.
 - `session_cleanup_interval` (`float`): Interval for cleaning up closed sessions. `Default: 60.0`.
 - `stream_buffer_size` (`int`): Default buffer size for streams in bytes. `Default: 65536`.
 - `stream_cleanup_interval` (`float`): Interval for cleaning up closed streams. `Default: 15.0`.
