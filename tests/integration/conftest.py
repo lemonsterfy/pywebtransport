@@ -29,6 +29,18 @@ def certificates_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="module")
+def client_config(certificates_dir: Path) -> ClientConfig:
+    """Provide a ClientConfig that trusts the self-signed server certificate."""
+    return ClientConfig(
+        ca_certs=str(certificates_dir / "localhost.crt"),
+        connect_timeout=5.0,
+        initial_max_data=1024 * 1024,
+        initial_max_streams_bidi=100,
+        initial_max_streams_uni=100,
+    )
+
+
+@pytest.fixture(scope="module")
 def server_config(certificates_dir: Path) -> ServerConfig:
     """Provide a base ServerConfig configured with the test certificates."""
     return ServerConfig(
@@ -42,27 +54,11 @@ def server_config(certificates_dir: Path) -> ServerConfig:
     )
 
 
-@pytest.fixture(scope="module")
-def client_config(certificates_dir: Path) -> ClientConfig:
-    """Provide a ClientConfig that trusts the self-signed server certificate."""
-    return ClientConfig(
-        ca_certs=str(certificates_dir / "localhost.crt"),
-        connect_timeout=5.0,
-        initial_max_data=1024 * 1024,
-        initial_max_streams_bidi=100,
-        initial_max_streams_uni=100,
-    )
-
-
-@pytest.fixture
-def server_app(request: pytest.FixtureRequest, server_config: ServerConfig) -> ServerApp:
-    """Provide a ServerApp instance, supporting indirect parametrization for config overrides."""
-    config_overrides = getattr(request, "param", {})
-    if config_overrides and isinstance(config_overrides, dict):
-        custom_config = server_config.update(**config_overrides)
-        return ServerApp(config=custom_config)
-
-    return ServerApp(config=server_config)
+@asyncio_fixture
+async def client(client_config: ClientConfig) -> AsyncGenerator[WebTransportClient, None]:
+    """Provide a WebTransportClient instance for the duration of a test."""
+    async with WebTransportClient(config=client_config) as wt_client:
+        yield wt_client
 
 
 @asyncio_fixture
@@ -87,8 +83,12 @@ async def server(
                 pass
 
 
-@asyncio_fixture
-async def client(client_config: ClientConfig) -> AsyncGenerator[WebTransportClient, None]:
-    """Provide a WebTransportClient instance for the duration of a test."""
-    async with WebTransportClient(config=client_config) as wt_client:
-        yield wt_client
+@pytest.fixture
+def server_app(request: pytest.FixtureRequest, server_config: ServerConfig) -> ServerApp:
+    """Provide a ServerApp instance, supporting indirect parametrization for config overrides."""
+    config_overrides = getattr(request, "param", {})
+    if config_overrides and isinstance(config_overrides, dict):
+        custom_config = server_config.update(**config_overrides)
+        return ServerApp(config=custom_config)
+
+    return ServerApp(config=server_config)

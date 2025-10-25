@@ -28,7 +28,7 @@ async def test_stream_creation() -> bool:
     logger.info("Test 02A: Stream Creation")
     logger.info("-" * 30)
 
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -69,7 +69,7 @@ async def test_simple_echo() -> bool:
     logger.info("Test 02B: Simple Echo")
     logger.info("-" * 30)
 
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         read_timeout=5.0,
@@ -114,7 +114,7 @@ async def test_multiple_messages() -> bool:
     logger.info("Test 02C: Multiple Messages")
     logger.info("-" * 30)
 
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         read_timeout=5.0,

@@ -1,20 +1,16 @@
-"""Core data structures for the WebTransport RPC protocol."""
+"""Data structures for the RPC protocol."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = [
-    "RpcErrorResponse",
-    "RpcRequest",
-    "RpcSuccessResponse",
-]
+__all__: list[str] = ["RpcErrorResponse", "RpcRequest", "RpcSuccessResponse"]
 
 
 @dataclass(kw_only=True)
 class RpcErrorResponse:
-    """Represents a failed RPC response."""
+    """A failed RPC response."""
 
     id: str | int | None
     error: dict[str, Any]
@@ -22,7 +18,7 @@ class RpcErrorResponse:
 
 @dataclass(kw_only=True)
 class RpcRequest:
-    """Represents an RPC request."""
+    """An RPC request."""
 
     id: str | int
     method: str
@@ -31,7 +27,7 @@ class RpcRequest:
 
 @dataclass(kw_only=True)
 class RpcSuccessResponse:
-    """Represents a successful RPC response."""
+    """A successful RPC response."""
 
     id: str | int
     result: Any

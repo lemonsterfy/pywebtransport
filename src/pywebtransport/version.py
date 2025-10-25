@@ -1,7 +1,7 @@
-"""PyWebTransport Version Information."""
+"""Defines the semantic version number for the library."""
 
 from __future__ import annotations
 
-__all__ = ["__version__"]
+__all__: list[str] = ["__version__"]
 
-__version__ = "0.7.1"
+__version__ = "0.8.0"

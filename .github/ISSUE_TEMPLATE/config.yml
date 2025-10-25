@@ -2,6 +2,6 @@
 
 blank_issues_enabled: false
 contact_links:
-  - name: ❓ Question or Support Request
+  - name: Question or Support Request
     url: https://github.com/lemonsterfy/pywebtransport/discussions
     about: Please ask and answer questions here. The issue tracker is reserved for bugs and feature requests.

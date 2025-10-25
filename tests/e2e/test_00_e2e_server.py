@@ -7,16 +7,17 @@ import struct
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Final
+from typing import Any, Final
 
 from pywebtransport import (
     ConnectionError,
-    EventType,
     ServerApp,
     ServerConfig,
     StreamError,
+    StructuredDatagramTransport,
     StructuredStream,
     WebTransportReceiveStream,
     WebTransportSession,
@@ -24,6 +25,7 @@ from pywebtransport import (
 )
 from pywebtransport.rpc import InvalidParamsError, MethodNotFoundError, RpcError
 from pywebtransport.serializer import JSONSerializer, MsgPackSerializer
+from pywebtransport.types import EventType
 from pywebtransport.utils import generate_self_signed_cert
 
 CERT_PATH: Final[Path] = Path("localhost.crt")
@@ -245,7 +247,7 @@ async def handle_datagrams(*, session: WebTransportSession) -> None:
     logger.debug("Starting datagram handler for session %s", session_id)
 
     try:
-        datagram_transport = await session.datagrams
+        datagram_transport = await session.create_datagram_transport()
         while not session.is_closed:
             try:
                 data = await asyncio.wait_for(datagram_transport.receive(), timeout=1.0)
@@ -311,14 +313,15 @@ async def handle_structured_datagram(*, session: WebTransportSession, serializer
     logger.debug("Starting structured datagram handler for session %s", session_id)
 
     try:
-        structured_transport = await session.create_structured_datagram_transport(
-            serializer=serializer, registry=MESSAGE_REGISTRY
+        raw_datagram_transport = await session.create_datagram_transport()
+        structured_datagram_transport = StructuredDatagramTransport(
+            datagram_transport=raw_datagram_transport, serializer=serializer, registry=MESSAGE_REGISTRY
         )
         while not session.is_closed:
             try:
-                obj = await asyncio.wait_for(structured_transport.receive_obj(), timeout=1.0)
+                obj = await asyncio.wait_for(structured_datagram_transport.receive_obj(), timeout=1.0)
                 server_stats.record_datagram()
-                await structured_transport.send_obj(obj=obj)
+                await structured_datagram_transport.send_obj(obj=obj)
             except asyncio.TimeoutError:
                 continue
     except (asyncio.CancelledError, ConnectionError):
@@ -329,21 +332,22 @@ async def handle_structured_datagram(*, session: WebTransportSession, serializer
 
 async def handle_structured_stream(*, stream: WebTransportStream, serializer: Any) -> None:
     """Handle echoing structured objects on a single, existing bidirectional stream."""
-    stream_id = stream.stream_id
+    raw_stream = stream
+    stream_id = raw_stream.stream_id
     logger.debug("Handling structured stream %s", stream_id)
 
     try:
-        s_stream = StructuredStream(stream=stream, serializer=serializer, registry=MESSAGE_REGISTRY)
-        async for obj in s_stream:
+        structured_stream = StructuredStream(stream=raw_stream, serializer=serializer, registry=MESSAGE_REGISTRY)
+        async for obj in structured_stream:
             logger.debug("Echoing object on stream %s: %s", stream_id, obj)
-            await s_stream.send_obj(obj=obj)
+            await structured_stream.send_obj(obj=obj)
     except (asyncio.CancelledError, ConnectionError):
         pass
     except Exception as e:
         logger.error("Structured stream %s error: %s", stream_id, e, exc_info=True)
     finally:
-        if not stream.is_closed:
-            await stream.close()
+        if not raw_stream.is_closed:
+            await raw_stream.close()
         server_stats.record_stream_end(stream_id=stream_id)
 
 
@@ -358,7 +362,7 @@ async def health_handler(session: WebTransportSession) -> None:
             "active_sessions": len(server_stats.active_sessions),
             "active_streams": len(server_stats.active_streams),
         }
-        datagram_transport = await session.datagrams
+        datagram_transport = await session.create_datagram_transport()
         await datagram_transport.send_json(data=health_data)
         logger.info("Sent health status: %s", health_data["status"])
     except Exception as e:
@@ -555,7 +559,7 @@ async def main() -> None:
         logger.info("Generating self-signed certificate for %s...", CERT_PATH.stem)
         generate_self_signed_cert(hostname=CERT_PATH.stem, output_dir=".")
 
-    config = ServerConfig.create(
+    config = ServerConfig(
         bind_host=SERVER_HOST,
         bind_port=SERVER_PORT,
         certfile=str(CERT_PATH),

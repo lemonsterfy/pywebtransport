@@ -1,12 +1,13 @@
-"""High-level Pub/Sub manager for WebTransport sessions."""
+"""Publish-Subscribe messaging pattern manager."""
 
 from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import TYPE_CHECKING, AsyncIterator, Self
+from typing import Self
 
 from pywebtransport.constants import DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
 from pywebtransport.exceptions import ConnectionError, StreamError
@@ -15,13 +16,9 @@ from pywebtransport.stream import WebTransportStream
 from pywebtransport.types import Data
 from pywebtransport.utils import ensure_bytes, get_logger, get_timestamp
 
-if TYPE_CHECKING:
-    from pywebtransport.session import WebTransportSession
+__all__: list[str] = ["PubSubManager", "PubSubStats", "Subscription"]
 
-
-__all__ = ["PubSubManager", "PubSubStats", "Subscription"]
-
-logger = get_logger(name="pubsub.manager")
+logger = get_logger(name=__name__)
 
 
 @dataclass(kw_only=True)
@@ -97,10 +94,9 @@ class Subscription:
 class PubSubManager:
     """Manages the Pub/Sub lifecycle over a single WebTransport session."""
 
-    def __init__(self, *, session: WebTransportSession) -> None:
+    def __init__(self, *, stream: WebTransportStream) -> None:
         """Initialize the PubSubManager."""
-        self._session = session
-        self._stream: WebTransportStream | None = None
+        self._stream: WebTransportStream = stream
         self._ingress_task: asyncio.Task[None] | None = None
         self._lock: asyncio.Lock | None = None
         self._subscriptions: dict[str, set[Subscription]] = defaultdict(set)
@@ -117,8 +113,9 @@ class PubSubManager:
         """Enter the async context, ensuring the manager is initialized."""
         if self._lock is None:
             self._lock = asyncio.Lock()
-
-        await self._ensure_initialized()
+        if self._ingress_task is None:
+            self._ingress_task = asyncio.create_task(self._ingress_loop())
+            self._ingress_task.add_done_callback(self._on_ingress_done)
         return self
 
     async def __aexit__(
@@ -164,9 +161,7 @@ class PubSubManager:
             )
 
         async with self._lock:
-            await self._ensure_initialized()
-
-            if self._stream is None or self._stream.is_closed:
+            if self._stream.is_closed:
                 raise PubSubError(message="Pub/Sub stream is not available.")
 
             data_bytes = ensure_bytes(data=data)
@@ -190,7 +185,6 @@ class PubSubManager:
             raise ValueError("max_queue_size must be positive.")
 
         async with self._lock:
-            await self._ensure_initialized()
             if topic in self._pending_subscriptions:
                 raise PubSubError(message=f"Subscription to topic '{topic}' is already pending.")
 
@@ -198,7 +192,7 @@ class PubSubManager:
             subscription = Subscription(topic=topic, manager=self, max_queue_size=max_queue_size)
             self._pending_subscriptions[topic] = (future, subscription)
 
-        if self._stream is None or self._stream.is_closed:
+        if self._stream.is_closed:
             raise PubSubError(message="Pub/Sub stream is not available.")
         await self._stream.write(data=b"SUB %b\n" % topic.encode())
 
@@ -230,7 +224,7 @@ class PubSubManager:
             if not self._subscriptions.get(topic):
                 return
 
-            if self._stream is None or self._stream.is_closed:
+            if self._stream.is_closed:
                 raise NotSubscribedError(message="Pub/Sub stream is not available to unsubscribe.")
 
             await self._stream.write(data=b"UNSUB %b\n" % topic.encode())
@@ -242,18 +236,8 @@ class PubSubManager:
             self._subscriptions.pop(topic, None)
             self._stats.topics_subscribed = len(self._subscriptions)
 
-    async def _ensure_initialized(self) -> None:
-        """Lazily create the Pub/Sub stream and start the reader task."""
-        if self._stream is None:
-            self._stream = await self._session.create_bidirectional_stream()
-            self._ingress_task = asyncio.create_task(self._ingress_loop())
-            self._ingress_task.add_done_callback(self._on_ingress_done)
-
     async def _ingress_loop(self) -> None:
         """Read and dispatch incoming messages and signals."""
-        if self._stream is None:
-            return
-
         try:
             while not self._stream.is_closed:
                 line = await self._stream.readline()
@@ -291,7 +275,6 @@ class PubSubManager:
                             future.set_exception(SubscriptionFailedError(reason))
         except (ConnectionError, StreamError, asyncio.IncompleteReadError) as e:
             logger.info("Pub/Sub stream closed: %s", e)
-            raise
         except Exception as e:
             logger.error("Error in Pub/Sub ingress loop: %s", e, exc_info=True)
             raise
@@ -305,4 +288,5 @@ class PubSubManager:
             if exc := task.exception():
                 logger.error("Pub/Sub ingress task finished unexpectedly with an exception: %s.", exc, exc_info=exc)
 
-        asyncio.create_task(self.close())
+        if not self._is_closing:
+            asyncio.create_task(self.close())

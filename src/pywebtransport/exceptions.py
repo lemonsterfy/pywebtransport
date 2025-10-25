@@ -1,4 +1,4 @@
-"""WebTransport Exceptions."""
+"""Custom exception hierarchy for the library."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 from pywebtransport.constants import ErrorCodes
 from pywebtransport.types import SessionState, StreamState
 
-__all__ = [
+__all__: list[str] = [
     "AuthenticationError",
     "CertificateError",
     "ClientError",
@@ -24,13 +24,11 @@ __all__ = [
     "TimeoutError",
     "WebTransportError",
     "certificate_not_found",
-    "connection_timeout",
     "datagram_too_large",
     "get_error_category",
     "invalid_config",
     "is_fatal_error",
     "is_retriable_error",
-    "protocol_violation",
     "session_not_ready",
     "stream_closed",
 ]
@@ -61,13 +59,13 @@ class WebTransportError(Exception):
             "details": self.details,
         }
 
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return f"{self.__class__.__name__}(message='{self.message}', error_code={hex(self.error_code)})"
+
     def __str__(self) -> str:
         """Return a simple string representation of the error."""
         return f"[{hex(self.error_code)}] {self.message}"
-
-    def __repr__(self) -> str:
-        """Return a detailed string representation of the error."""
-        return f"{self.__class__.__name__}(message='{self.message}', error_code={self.error_code})"
 
 
 class AuthenticationError(WebTransportError):
@@ -92,8 +90,16 @@ class AuthenticationError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["auth_method"] = self.auth_method
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, auth_method={self.auth_method!r})"
+        )
 
 
 class CertificateError(WebTransportError):
@@ -120,9 +126,18 @@ class CertificateError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["certificate_path"] = self.certificate_path
         data["certificate_error"] = self.certificate_error
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, certificate_path={self.certificate_path!r}, "
+            f"certificate_error={self.certificate_error!r})"
+        )
 
 
 class ClientError(WebTransportError):
@@ -147,8 +162,16 @@ class ClientError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["target_url"] = self.target_url
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, target_url={self.target_url!r})"
+        )
 
 
 class ConfigurationError(WebTransportError):
@@ -175,9 +198,18 @@ class ConfigurationError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["config_key"] = self.config_key
         data["config_value"] = self.config_value
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, config_key={self.config_key!r}, "
+            f"config_value={self.config_value!r})"
+        )
 
 
 class ConnectionError(WebTransportError):
@@ -202,8 +234,16 @@ class ConnectionError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["remote_address"] = self.remote_address
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, remote_address={self.remote_address!r})"
+        )
 
 
 class DatagramError(WebTransportError):
@@ -230,9 +270,18 @@ class DatagramError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["datagram_size"] = self.datagram_size
         data["max_size"] = self.max_size
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, datagram_size={self.datagram_size!r}, "
+            f"max_size={self.max_size!r})"
+        )
 
 
 class FlowControlError(WebTransportError):
@@ -261,10 +310,19 @@ class FlowControlError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["stream_id"] = self.stream_id
         data["limit_exceeded"] = self.limit_exceeded
         data["current_value"] = self.current_value
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, stream_id={self.stream_id!r}, "
+            f"limit_exceeded={self.limit_exceeded!r}, current_value={self.current_value!r})"
+        )
 
 
 class HandshakeError(WebTransportError):
@@ -289,8 +347,16 @@ class HandshakeError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["handshake_stage"] = self.handshake_stage
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, handshake_stage={self.handshake_stage!r})"
+        )
 
 
 class ProtocolError(WebTransportError):
@@ -315,8 +381,50 @@ class ProtocolError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["frame_type"] = self.frame_type
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, frame_type={self.frame_type!r})"
+        )
+
+
+class SerializationError(WebTransportError):
+    """An exception for serialization or deserialization errors."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: int | None = None,
+        details: dict[str, Any] | None = None,
+        original_exception: Exception | None = None,
+    ) -> None:
+        """Initialize the serialization error."""
+        super().__init__(
+            message=message,
+            error_code=error_code or ErrorCodes.INTERNAL_ERROR,
+            details=details,
+        )
+        self.original_exception = original_exception
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the exception to a dictionary."""
+        data = super().to_dict()
+
+        data["original_exception"] = str(self.original_exception)
+        return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, original_exception={self.original_exception!r})"
+        )
 
 
 class ServerError(WebTransportError):
@@ -341,8 +449,16 @@ class ServerError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["bind_address"] = self.bind_address
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, bind_address={self.bind_address!r})"
+        )
 
 
 class SessionError(WebTransportError):
@@ -369,9 +485,18 @@ class SessionError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["session_id"] = self.session_id
         data["session_state"] = self.session_state
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, session_id={self.session_id!r}, "
+            f"session_state={self.session_state!r})"
+        )
 
 
 class StreamError(WebTransportError):
@@ -398,9 +523,18 @@ class StreamError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["stream_id"] = self.stream_id
         data["stream_state"] = self.stream_state
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, stream_id={self.stream_id!r}, "
+            f"stream_state={self.stream_state!r})"
+        )
 
     def __str__(self) -> str:
         """Return a simple string representation of the error."""
@@ -408,32 +542,6 @@ class StreamError(WebTransportError):
         if self.stream_id is not None:
             return f"{base_msg} (stream_id={self.stream_id})"
         return base_msg
-
-
-class SerializationError(WebTransportError):
-    """An exception for serialization or deserialization errors."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        error_code: int | None = None,
-        details: dict[str, Any] | None = None,
-        original_exception: Exception | None = None,
-    ) -> None:
-        """Initialize the serialization error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.INTERNAL_ERROR,
-            details=details,
-        )
-        self.original_exception = original_exception
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the exception to a dictionary."""
-        data = super().to_dict()
-        data["original_exception"] = str(self.original_exception)
-        return data
 
 
 class TimeoutError(WebTransportError):
@@ -460,9 +568,18 @@ class TimeoutError(WebTransportError):
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary."""
         data = super().to_dict()
+
         data["timeout_duration"] = self.timeout_duration
         data["operation"] = self.operation
         return data
+
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the error."""
+        return (
+            f"{self.__class__.__name__}(message='{self.message}', "
+            f"error_code={hex(self.error_code)}, timeout_duration={self.timeout_duration!r}, "
+            f"operation={self.operation!r})"
+        )
 
 
 _ERROR_CATEGORY_MAP: dict[type[Exception], str] = {
@@ -489,15 +606,6 @@ def certificate_not_found(*, path: str) -> CertificateError:
         message=f"Certificate file not found: {path}",
         certificate_path=path,
         certificate_error="file_not_found",
-    )
-
-
-def connection_timeout(*, timeout_duration: float, operation: str = "connect") -> TimeoutError:
-    """Create a connection timeout error."""
-    return TimeoutError(
-        message=f"Connection timeout after {timeout_duration}s during {operation}",
-        timeout_duration=timeout_duration,
-        operation=operation,
     )
 
 
@@ -538,6 +646,7 @@ def is_fatal_error(*, exception: Exception) -> bool:
                 ErrorCodes.APP_AUTHENTICATION_FAILED,
                 ErrorCodes.APP_PERMISSION_DENIED,
             }
+
             return code in fatal_codes
         case _:
             return True
@@ -552,18 +661,10 @@ def is_retriable_error(*, exception: Exception) -> bool:
                 ErrorCodes.APP_SERVICE_UNAVAILABLE,
                 ErrorCodes.FLOW_CONTROL_ERROR,
             }
+
             return code in retriable_codes
         case _:
             return False
-
-
-def protocol_violation(*, message: str, frame_type: int | None = None) -> ProtocolError:
-    """Create a protocol violation error."""
-    return ProtocolError(
-        message=message,
-        frame_type=frame_type,
-        error_code=ErrorCodes.PROTOCOL_VIOLATION,
-    )
 
 
 def session_not_ready(*, session_id: str, current_state: SessionState) -> SessionError:

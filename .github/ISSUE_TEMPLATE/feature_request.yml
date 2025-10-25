@@ -1,6 +1,6 @@
 # PyWebTransport Feature Request GitHub Issue Form
 
-name: "🚀 Feature Request"
+name: "Feature Request"
 description: "Suggest a new feature or enhancement for the library."
 title: "[Feature]: A brief description of the feature"
 labels: ["enhancement", "needs-discussion"]

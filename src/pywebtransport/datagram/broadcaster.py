@@ -1,4 +1,4 @@
-"""WebTransport Datagram Broadcaster."""
+"""Utility for broadcasting datagrams to multiple transports."""
 
 from __future__ import annotations
 
@@ -14,23 +14,18 @@ if TYPE_CHECKING:
     from pywebtransport.datagram.transport import WebTransportDatagramTransport
 
 
-__all__ = ["DatagramBroadcaster"]
+__all__: list[str] = ["DatagramBroadcaster"]
 
-logger = get_logger(name="datagram.broadcaster")
+logger = get_logger(name=__name__)
 
 
 class DatagramBroadcaster:
-    """A broadcaster to send datagrams to multiple transports concurrently."""
+    """Broadcast datagrams to multiple transports concurrently."""
 
     def __init__(self) -> None:
         """Initialize the datagram broadcaster."""
         self._transports: list[WebTransportDatagramTransport] = []
         self._lock: asyncio.Lock | None = None
-
-    @classmethod
-    def create(cls) -> Self:
-        """Factory method to create a new datagram broadcaster instance."""
-        return cls()
 
     async def __aenter__(self) -> Self:
         """Enter async context, initializing asyncio resources."""
@@ -48,18 +43,13 @@ class DatagramBroadcaster:
             async with self._lock:
                 self._transports.clear()
 
-    async def add_transport(self, *, transport: WebTransportDatagramTransport) -> None:
-        """Add a transport to the broadcast list."""
-        if self._lock is None:
-            raise DatagramError(
-                message=(
-                    "DatagramBroadcaster has not been activated. It must be used as an "
-                    "asynchronous context manager (`async with ...`)."
-                )
-            )
-        async with self._lock:
-            if transport not in self._transports:
-                self._transports.append(transport)
+    async def shutdown(self) -> None:
+        """Shut down the load balancer and clear transports."""
+        logger.info("Shutting down broadcaster")
+        if self._lock:
+            async with self._lock:
+                self._transports.clear()
+        logger.info("Broadcaster shutdown complete")
 
     async def broadcast(self, *, data: Data, priority: int = 0, ttl: float | None = None) -> int:
         """Broadcast a datagram to all registered transports concurrently."""
@@ -108,8 +98,8 @@ class DatagramBroadcaster:
 
         return sent_count
 
-    async def remove_transport(self, *, transport: WebTransportDatagramTransport) -> None:
-        """Remove a transport from the broadcast list."""
+    async def add_transport(self, *, transport: WebTransportDatagramTransport) -> None:
+        """Add a transport to the broadcast list."""
         if self._lock is None:
             raise DatagramError(
                 message=(
@@ -117,11 +107,10 @@ class DatagramBroadcaster:
                     "asynchronous context manager (`async with ...`)."
                 )
             )
+
         async with self._lock:
-            try:
-                self._transports.remove(transport)
-            except ValueError:
-                pass
+            if transport not in self._transports:
+                self._transports.append(transport)
 
     async def get_transport_count(self) -> int:
         """Get the current number of active transports safely."""
@@ -132,5 +121,22 @@ class DatagramBroadcaster:
                     "asynchronous context manager (`async with ...`)."
                 )
             )
+
         async with self._lock:
             return len(self._transports)
+
+    async def remove_transport(self, *, transport: WebTransportDatagramTransport) -> None:
+        """Remove a transport from the broadcast list."""
+        if self._lock is None:
+            raise DatagramError(
+                message=(
+                    "DatagramBroadcaster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
+            )
+
+        async with self._lock:
+            try:
+                self._transports.remove(transport)
+            except ValueError:
+                pass

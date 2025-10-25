@@ -4,41 +4,15 @@ import asyncio
 
 import pytest
 
-from pywebtransport import ClientError, ServerApp, SessionState, WebTransportClient, WebTransportSession
+from pywebtransport import ClientError, ServerApp, WebTransportClient, WebTransportSession
+from pywebtransport.types import SessionState
 
 pytestmark = pytest.mark.asyncio
-
-
-async def test_successful_connection_and_session(
-    server_app: ServerApp, server: tuple[str, int], client: WebTransportClient
-) -> None:
-    """Verify a client can connect, establish a session, and then close it."""
-    host, port = server
-    url = f"https://{host}:{port}/"
-    handler_called = asyncio.Event()
-
-    @server_app.route(path="/")
-    async def basic_handler(session: WebTransportSession) -> None:
-        handler_called.set()
-        try:
-            await session.wait_closed()
-        except asyncio.CancelledError:
-            pass
-
-    session = None
-    try:
-        session = await client.connect(url=url)
-        assert session.is_ready
-        await asyncio.wait_for(handler_called.wait(), timeout=1.0)
-    finally:
-        if session and not session.is_closed:
-            await session.close()
 
 
 async def test_client_initiated_close(
     server_app: ServerApp, server: tuple[str, int], client: WebTransportClient
 ) -> None:
-    """Verify that when a client closes a session, its local state becomes closed."""
     host, port = server
     url = f"https://{host}:{port}/"
     server_entered = asyncio.Event()
@@ -61,15 +35,28 @@ async def test_client_initiated_close(
     assert session.is_closed is True
 
 
+async def test_connection_to_non_existent_route_fails(
+    server: tuple[str, int], client: WebTransportClient, server_app: ServerApp
+) -> None:
+    host, port = server
+    url = f"https://{host}:{port}/nonexistent"
+
+    with pytest.raises(ClientError) as exc_info:
+        await client.connect(url=url)
+
+    error_message = str(exc_info.value).lower()
+    assert "404" in error_message or "route not found" in error_message or "timeout" in error_message
+
+
 async def test_server_initiated_close(
     server_app: ServerApp, server: tuple[str, int], client: WebTransportClient
 ) -> None:
-    """Verify a client correctly handles a server-initiated close."""
     host, port = server
     url = f"https://{host}:{port}/close-me"
 
     @server_app.route(path="/close-me")
     async def immediate_close_handler(session: WebTransportSession) -> None:
+        await asyncio.sleep(0.1)
         await session.close(reason="Server closed immediately.")
 
     session = await client.connect(url=url)
@@ -84,15 +71,26 @@ async def test_server_initiated_close(
     assert session.state == SessionState.CLOSED
 
 
-async def test_connection_to_non_existent_route_fails(
-    server: tuple[str, int], client: WebTransportClient, server_app: ServerApp
+async def test_successful_connection_and_session(
+    server_app: ServerApp, server: tuple[str, int], client: WebTransportClient
 ) -> None:
-    """Verify that connecting to a non-existent route fails with a ClientError."""
     host, port = server
-    url = f"https://{host}:{port}/nonexistent"
+    url = f"https://{host}:{port}/"
+    handler_called = asyncio.Event()
 
-    with pytest.raises(ClientError) as exc_info:
-        await client.connect(url=url)
+    @server_app.route(path="/")
+    async def basic_handler(session: WebTransportSession) -> None:
+        handler_called.set()
+        try:
+            await session.wait_closed()
+        except asyncio.CancelledError:
+            pass
 
-    error_message = str(exc_info.value).lower()
-    assert "404" in error_message or "route not found" in error_message or "timeout" in error_message
+    session = None
+    try:
+        session = await client.connect(url=url)
+        assert session.is_ready
+        await asyncio.wait_for(handler_called.wait(), timeout=1.0)
+    finally:
+        if session and not session.is_closed:
+            await session.close()

@@ -1,8 +1,8 @@
-"""Unit tests for the pywebtransport.events module."""
+"""Unit tests for the pywebtransport.protocol.events module."""
 
 import pytest
 
-from pywebtransport.types import Headers, StreamId
+from pywebtransport import Headers
 from pywebtransport.protocol.events import (
     CapsuleReceived,
     DatagramReceived,
@@ -10,12 +10,7 @@ from pywebtransport.protocol.events import (
     HeadersReceived,
     WebTransportStreamDataReceived,
 )
-
-
-def test_h3event_creation() -> None:
-    event = H3Event()
-
-    assert isinstance(event, H3Event)
+from pywebtransport.types import StreamId
 
 
 @pytest.mark.parametrize(
@@ -51,6 +46,12 @@ def test_datagram_received_event(data: bytes, stream_id: StreamId) -> None:
     assert event.stream_id == stream_id
 
 
+def test_h3event_creation() -> None:
+    event = H3Event()
+
+    assert isinstance(event, H3Event)
+
+
 @pytest.mark.parametrize(
     "headers, stream_id, stream_ended",
     [
@@ -69,26 +70,26 @@ def test_headers_received_event(headers: Headers, stream_id: StreamId, stream_en
 
 
 @pytest.mark.parametrize(
-    "data, session_id, stream_id, stream_ended",
+    "data, control_stream_id, stream_id, stream_ended",
     [
-        (b"stream data", 12345, 2, True),
-        (b"more stream data", 54321, 6, False),
-        (b"", 0, 10, True),
-        (b"\x00", 999, 14, False),
+        (b"stream data", 0, 2, True),
+        (b"more stream data", 0, 6, False),
+        (b"", 4, 10, True),
+        (b"\x00", 4, 14, False),
     ],
 )
 def test_webtransport_stream_data_received_event(
-    data: bytes, session_id: int, stream_id: StreamId, stream_ended: bool
+    data: bytes, control_stream_id: StreamId, stream_id: StreamId, stream_ended: bool
 ) -> None:
     event = WebTransportStreamDataReceived(
         data=data,
-        session_id=session_id,
+        control_stream_id=control_stream_id,
         stream_id=stream_id,
         stream_ended=stream_ended,
     )
 
     assert isinstance(event, H3Event)
     assert event.data == data
-    assert event.session_id == session_id
+    assert event.control_stream_id == control_stream_id
     assert event.stream_id == stream_id
     assert event.stream_ended is stream_ended

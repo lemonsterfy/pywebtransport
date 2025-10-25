@@ -39,7 +39,7 @@ from pywebtransport.utils import generate_self_signed_cert
 generate_self_signed_cert(hostname="localhost")
 
 app = ServerApp(
-    config=ServerConfig.create(
+    config=ServerConfig(
         certfile="localhost.crt",
         keyfile="localhost.key",
         initial_max_data=1024 * 1024,
@@ -51,7 +51,7 @@ app = ServerApp(
 async def handle_datagrams(session: WebTransportSession) -> None:
     """A background task to handle incoming datagrams."""
     try:
-        datagram_transport = await session.datagrams
+        datagram_transport = await session.create_datagram_transport()
         while True:
             data = await datagram_transport.receive()
             await datagram_transport.send(data=b"ECHO: " + data)
@@ -90,7 +90,6 @@ async def echo_handler(session: WebTransportSession) -> None:
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=4433)
-
 ```
 
 ## 3. Create the Client
@@ -110,7 +109,7 @@ from pywebtransport import ClientConfig, WebTransportClient
 async def main() -> None:
     # We disable SSL certificate verification because we are using a self-signed cert.
     # For production, you should use a proper certificate and validation.
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         initial_max_data=1024 * 1024,
         initial_max_streams_bidi=10,
@@ -120,7 +119,7 @@ async def main() -> None:
         session = await client.connect(url="https://127.0.0.1:4433/")
 
         print("Connection established. Testing datagrams...")
-        datagram_transport = await session.datagrams
+        datagram_transport = await session.create_datagram_transport()
         await datagram_transport.send(data=b"Hello, Datagram!")
         response = await datagram_transport.receive()
         print(f"Datagram echo: {response!r}\n")
@@ -139,7 +138,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-
 ```
 
 ## 4. Run the Example
@@ -168,7 +166,7 @@ A `WebTransportSession` is created by a `WebTransportClient` and represents a si
 
 ```python
 # Create a client and connect to get a session
-config = ClientConfig.create(verify_mode=ssl.CERT_NONE)
+config = ClientConfig(verify_mode=ssl.CERT_NONE)
 
 async with WebTransportClient(config=config) as client:
     session = await client.connect(url=url)
@@ -183,7 +181,7 @@ Send and receive unreliable, out-of-order messages.
 
 ```python
 # Get the datagrams interface (must be awaited on first access)
-datagrams = await session.datagrams
+datagrams = await session.create_datagram_transport()
 
 # Send a datagram
 await datagrams.send(data=b"unreliable message")
@@ -211,7 +209,7 @@ response = await stream.read_all()
 
 Now that you have a basic connection working, explore more advanced topics:
 
-- **[Installation Guide](installation.md)** - In-depth setup and installation guide.
-- **[Client API](api-reference/client.md)** - Detailed client API reference and usage patterns.
-- **[Server API](api-reference/server.md)** - Detailed server API reference and usage patterns.
-- **[API Reference](api-reference/index.md)** - Complete API documentation
+- **[Installation Guide](installation.md)**: Learn how to install the library.
+- **[Server API](api-reference/server.md)**: Build and manage WebTransport servers.
+- **[Client API](api-reference/client.md)**: Learn how to create and manage client connections.
+- **[API Reference](api-reference/index.md)**: Explore the complete API documentation.

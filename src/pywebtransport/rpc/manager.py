@@ -1,4 +1,4 @@
-"""Core RPC manager for WebTransport sessions."""
+"""Manager for the Remote Procedure Call (RPC) pattern."""
 
 from __future__ import annotations
 
@@ -8,32 +8,30 @@ import struct
 import uuid
 from collections.abc import Callable
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import Any, Self, cast
 
 from pywebtransport.exceptions import ConnectionError
 from pywebtransport.rpc.exceptions import InvalidParamsError, MethodNotFoundError, RpcError, RpcTimeoutError
 from pywebtransport.stream import WebTransportStream
+from pywebtransport.types import SessionId
 from pywebtransport.utils import get_logger
 
-if TYPE_CHECKING:
-    from pywebtransport.session import WebTransportSession
+__all__: list[str] = ["RpcManager"]
 
-
-__all__ = ["RpcManager"]
-
-logger = get_logger(name="rpc.manager")
+logger = get_logger(name=__name__)
 
 
 class RpcManager:
     """Manages the RPC lifecycle over a single WebTransport session."""
 
-    def __init__(self, *, session: WebTransportSession, concurrency_limit: int | None = None) -> None:
+    def __init__(
+        self, *, stream: WebTransportStream, session_id: SessionId, concurrency_limit: int | None = None
+    ) -> None:
         """Initialize the RpcManager."""
-        self._session = session
-        self._session_id = session.session_id
+        self._stream = stream
+        self._session_id = session_id
         self._handlers: dict[str, Callable[..., Any]] = {}
         self._pending_calls: dict[str, asyncio.Future[Any]] = {}
-        self._stream: WebTransportStream | None = None
         self._ingress_task: asyncio.Task[None] | None = None
         self._lock: asyncio.Lock | None = None
         self._is_closing = False
@@ -46,8 +44,9 @@ class RpcManager:
             self._lock = asyncio.Lock()
         if self._concurrency_limiter is None and self._concurrency_limit_value and self._concurrency_limit_value > 0:
             self._concurrency_limiter = asyncio.Semaphore(self._concurrency_limit_value)
-
-        await self._ensure_initialized()
+        if self._ingress_task is None:
+            self._ingress_task = asyncio.create_task(self._ingress_loop())
+            self._ingress_task.add_done_callback(self._on_ingress_done)
 
         return self
 
@@ -88,8 +87,7 @@ class RpcManager:
         request_data = {"id": call_id, "method": method, "params": list(params)}
 
         async with self._lock:
-            await self._ensure_initialized()
-            if self._stream is None or self._stream.is_closed:
+            if self._stream.is_closed:
                 raise RpcError(message="RPC stream is not available or closed.", session_id=self._session_id)
 
             self._pending_calls[call_id] = future
@@ -117,19 +115,57 @@ class RpcManager:
         self._handlers[handler_name] = func
         logger.debug("RPC method '%s' registered for session %s.", handler_name, self._session_id)
 
-    async def _ensure_initialized(self) -> None:
-        """Ensure the RPC stream and ingress loop are running."""
-        if self._stream is None:
-            logger.debug("Initializing RPC stream for session %s.", self._session_id)
-            self._stream = await self._session.create_bidirectional_stream()
-            self._ingress_task = asyncio.create_task(self._ingress_loop())
-            self._ingress_task.add_done_callback(self._on_ingress_done)
+    async def _cleanup(self) -> None:
+        """Clean up all resources associated with the RPC manager."""
+        if self._ingress_task and not self._ingress_task.done():
+            self._ingress_task.cancel()
+            try:
+                await self._ingress_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._stream and not self._stream.is_closed:
+            await self._stream.close()
+
+        for future in self._pending_calls.values():
+            if not future.done():
+                future.set_exception(RpcError(message="RPC manager shutting down.", session_id=self._session_id))
+        self._pending_calls.clear()
+
+        logger.debug("RPC manager cleaned up for session %s.", self._session_id)
+
+    async def _handle_request(self, *, message: dict[str, Any]) -> None:
+        """Handle an incoming RPC request message."""
+        if self._concurrency_limiter:
+            async with self._concurrency_limiter:
+                await self._process_request(message=message)
+        else:
+            await self._process_request(message=message)
+
+    def _handle_response(self, *, message: dict[str, Any]) -> None:
+        """Handle an incoming RPC response message."""
+        response_id = cast(str, message.get("id"))
+        future = self._pending_calls.get(response_id)
+
+        if not future or future.done():
+            logger.warning(
+                "Received RPC response for unknown/completed call ID %s on session %s.", response_id, self._session_id
+            )
+            return
+
+        if "error" in message:
+            error_details = message["error"]
+            error = RpcError(
+                message=error_details.get("message", "Unknown RPC error"),
+                error_code=error_details.get("code"),
+                session_id=self._session_id,
+            )
+            future.set_exception(error)
+        elif "result" in message:
+            future.set_result(message["result"])
 
     async def _ingress_loop(self) -> None:
         """Continuously read and process incoming messages from the stream."""
-        if not self._stream:
-            return
-
         try:
             async with asyncio.TaskGroup() as tg:
                 while not self._stream.is_closed:
@@ -162,36 +198,6 @@ class RpcManager:
             if exc := task.exception():
                 logger.error("RPC ingress task finished unexpectedly with an exception: %s.", exc, exc_info=exc)
         asyncio.create_task(self.close())
-
-    def _handle_response(self, *, message: dict[str, Any]) -> None:
-        """Handle an incoming RPC response message."""
-        response_id = cast(str, message.get("id"))
-        future = self._pending_calls.get(response_id)
-
-        if not future or future.done():
-            logger.warning(
-                "Received RPC response for unknown/completed call ID %s on session %s.", response_id, self._session_id
-            )
-            return
-
-        if "error" in message:
-            error_details = message["error"]
-            error = RpcError(
-                message=error_details.get("message", "Unknown RPC error"),
-                error_code=error_details.get("code"),
-                session_id=self._session_id,
-            )
-            future.set_exception(error)
-        elif "result" in message:
-            future.set_result(message["result"])
-
-    async def _handle_request(self, *, message: dict[str, Any]) -> None:
-        """Handle an incoming RPC request message."""
-        if self._concurrency_limiter:
-            async with self._concurrency_limiter:
-                await self._process_request(message=message)
-        else:
-            await self._process_request(message=message)
 
     async def _process_request(self, *, message: dict[str, Any]) -> None:
         """Process a single RPC request after acquiring the concurrency limit."""
@@ -231,7 +237,7 @@ class RpcManager:
 
     async def _send_message(self, *, message: dict[str, Any]) -> None:
         """Send a JSON-RPC message over the stream."""
-        if not self._stream or self._stream.is_closed:
+        if self._stream.is_closed:
             return
 
         try:
@@ -241,22 +247,3 @@ class RpcManager:
         except Exception as e:
             logger.error("Failed to send RPC message for session %s: %s.", self._session_id, e, exc_info=True)
             await self._cleanup()
-
-    async def _cleanup(self) -> None:
-        """Clean up all resources associated with the RPC manager."""
-        if self._ingress_task and not self._ingress_task.done():
-            self._ingress_task.cancel()
-            try:
-                await self._ingress_task
-            except asyncio.CancelledError:
-                pass
-
-        if self._stream and not self._stream.is_closed:
-            await self._stream.close()
-
-        for future in self._pending_calls.values():
-            if not future.done():
-                future.set_exception(RpcError(message="RPC manager shutting down.", session_id=self._session_id))
-        self._pending_calls.clear()
-
-        logger.debug("RPC manager cleaned up for session %s.", self._session_id)

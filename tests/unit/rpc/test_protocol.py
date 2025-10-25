@@ -4,7 +4,24 @@ from typing import Any
 
 import pytest
 
-from pywebtransport.rpc.protocol import RpcErrorResponse, RpcRequest, RpcSuccessResponse
+from pywebtransport.rpc import RpcErrorResponse, RpcRequest, RpcSuccessResponse
+
+
+class TestRpcErrorResponse:
+    @pytest.mark.parametrize("resp_id", ["error-uuid", 500, None])
+    def test_instantiation(self, resp_id: str | int | None) -> None:
+        error_payload = {"code": -32601, "message": "Method not found"}
+
+        response = RpcErrorResponse(id=resp_id, error=error_payload)
+
+        assert response.id == resp_id
+        assert response.error == error_payload
+
+    def test_kw_only_enforced(self) -> None:
+        error_payload = {"code": -32603, "message": "Internal error"}
+
+        with pytest.raises(TypeError):
+            RpcErrorResponse(1, error_payload)  # type: ignore[misc]
 
 
 class TestRpcRequest:
@@ -15,7 +32,7 @@ class TestRpcRequest:
             (12345, {"kwarg1": "value1", "kwarg2": 100}),
         ],
     )
-    def test_instantiation(self, req_id: str | int, params: list | dict) -> None:
+    def test_instantiation(self, req_id: str | int, params: list[Any] | dict[str, Any]) -> None:
         method_name = "test.method"
 
         request = RpcRequest(id=req_id, method=method_name, params=params)
@@ -44,20 +61,3 @@ class TestRpcSuccessResponse:
     def test_kw_only_enforced(self) -> None:
         with pytest.raises(TypeError):
             RpcSuccessResponse(1, "some result")  # type: ignore[misc]
-
-
-class TestRpcErrorResponse:
-    @pytest.mark.parametrize("resp_id", ["error-uuid", 500, None])
-    def test_instantiation(self, resp_id: str | int | None) -> None:
-        error_payload = {"code": -32601, "message": "Method not found"}
-
-        response = RpcErrorResponse(id=resp_id, error=error_payload)
-
-        assert response.id == resp_id
-        assert response.error == error_payload
-
-    def test_kw_only_enforced(self) -> None:
-        error_payload = {"code": -32603, "message": "Internal error"}
-
-        with pytest.raises(TypeError):
-            RpcErrorResponse(1, error_payload)  # type: ignore[misc]

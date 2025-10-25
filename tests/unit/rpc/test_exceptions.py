@@ -2,40 +2,11 @@
 
 import pytest
 
-from pywebtransport import SessionId
 from pywebtransport.rpc import InvalidParamsError, MethodNotFoundError, RpcError, RpcErrorCode, RpcTimeoutError
-
-
-class TestRpcErrorCode:
-    def test_enum_values(self) -> None:
-        assert RpcErrorCode.PARSE_ERROR.value == -32700
-        assert RpcErrorCode.INVALID_REQUEST.value == -32600
-        assert RpcErrorCode.METHOD_NOT_FOUND.value == -32601
-        assert RpcErrorCode.INVALID_PARAMS.value == -32602
-        assert RpcErrorCode.INTERNAL_ERROR.value == -32603
+from pywebtransport.types import SessionId
 
 
 class TestRpcError:
-    def test_init_without_session_id(self) -> None:
-        message = "An internal error occurred."
-
-        error = RpcError(message=message)
-
-        assert error.message == message
-        assert error.error_code == RpcErrorCode.INTERNAL_ERROR
-        assert error.session_id is None
-        assert error.details == {}
-
-    def test_init_with_session_id(self) -> None:
-        message = "Something went wrong."
-        session_id: SessionId = "session-abc-123"
-
-        error = RpcError(message=message, session_id=session_id)
-
-        expected_message = f"[Session:{session_id}] {message}"
-        assert error.message == expected_message
-        assert error.session_id == session_id
-
     def test_init_with_custom_code_and_details(self) -> None:
         message = "Invalid request format."
         details = {"field": "missing_id"}
@@ -50,6 +21,26 @@ class TestRpcError:
         assert error.error_code == RpcErrorCode.INVALID_REQUEST
         assert error.details == details
 
+    def test_init_with_session_id(self) -> None:
+        message = "Something went wrong."
+        session_id: SessionId = "session-abc-123"
+
+        error = RpcError(message=message, session_id=session_id)
+
+        expected_message = f"[Session:{session_id}] {message}"
+        assert error.message == expected_message
+        assert error.session_id == session_id
+
+    def test_init_without_session_id(self) -> None:
+        message = "An internal error occurred."
+
+        error = RpcError(message=message)
+
+        assert error.message == message
+        assert error.error_code == RpcErrorCode.INTERNAL_ERROR
+        assert error.session_id is None
+        assert error.details == {}
+
     def test_to_dict_conversion(self) -> None:
         message = "A test error."
         session_id: SessionId = "session-xyz-789"
@@ -61,6 +52,15 @@ class TestRpcError:
         expected_message = f"[Session:{session_id}] {message}"
         expected_dict = {"code": error_code, "message": expected_message}
         assert error_dict == expected_dict
+
+
+class TestRpcErrorCode:
+    def test_enum_values(self) -> None:
+        assert RpcErrorCode.PARSE_ERROR.value == -32700
+        assert RpcErrorCode.INVALID_REQUEST.value == -32600
+        assert RpcErrorCode.METHOD_NOT_FOUND.value == -32601
+        assert RpcErrorCode.INVALID_PARAMS.value == -32602
+        assert RpcErrorCode.INTERNAL_ERROR.value == -32603
 
 
 @pytest.mark.parametrize(

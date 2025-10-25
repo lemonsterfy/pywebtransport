@@ -1,4 +1,4 @@
-"""WebTransport Datagram Reliability Layer."""
+"""Optional reliability layer for datagram transport."""
 
 from __future__ import annotations
 
@@ -10,28 +10,21 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Self
 
 from pywebtransport.datagram.transport import DatagramMessage, WebTransportDatagramTransport
-from pywebtransport.events import EventType
 from pywebtransport.exceptions import DatagramError, TimeoutError
-from pywebtransport.types import Data
+from pywebtransport.types import Data, EventType
 from pywebtransport.utils import ensure_bytes, get_logger, get_timestamp
 
 if TYPE_CHECKING:
     from pywebtransport.events import Event
 
 
-__all__ = ["DatagramReliabilityLayer"]
+__all__: list[str] = ["DatagramReliabilityLayer"]
 
-logger = get_logger(name="datagram.reliability")
-
-
-class _ReliableDatagram(DatagramMessage):
-    """An internal datagram message with added reliability metadata."""
-
-    retry_count: int = 0
+logger = get_logger(name=__name__)
 
 
 class DatagramReliabilityLayer:
-    """Adds a TCP-like reliability layer over an unreliable datagram transport."""
+    """Add a TCP-like reliability layer over an unreliable datagram transport."""
 
     def __init__(
         self,
@@ -52,21 +45,6 @@ class DatagramReliabilityLayer:
         self._incoming_queue: asyncio.Queue[bytes] | None = None
         self._lock: asyncio.Lock | None = None
         self._retry_task: asyncio.Task[None] | None = None
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        datagram_transport: WebTransportDatagramTransport,
-        ack_timeout: float = 1.0,
-        max_retries: int = 3,
-    ) -> Self:
-        """Factory method to create a new datagram reliability layer for a transport."""
-        return cls(
-            datagram_transport=datagram_transport,
-            ack_timeout=ack_timeout,
-            max_retries=max_retries,
-        )
 
     async def __aenter__(self) -> Self:
         """Enter the async context and start background tasks."""
@@ -90,6 +68,7 @@ class DatagramReliabilityLayer:
         """Gracefully close the reliability layer and clean up resources."""
         if self._closed:
             return
+
         self._closed = True
 
         if transport := self._transport():
@@ -137,10 +116,11 @@ class DatagramReliabilityLayer:
             seq = self._send_sequence
             self._send_sequence += 1
             data_payload = struct.pack("!I", seq) + data_bytes
-            datagram = _ReliableDatagram(data=data_payload, sequence=seq)
+            frame = self._pack_frame(message_type="DATA", payload=data_payload)
+            datagram = _ReliableDatagram(data=frame, sequence=seq)
             self._pending_acks[seq] = datagram
 
-        await transport._send_framed_data(message_type="DATA", payload=data_payload)
+        await transport.send(data=frame)
         logger.debug("Sent reliable datagram with sequence %d", seq)
 
     def _get_transport(self) -> WebTransportDatagramTransport:
@@ -175,7 +155,9 @@ class DatagramReliabilityLayer:
 
         try:
             transport = self._get_transport()
-            await transport._send_framed_data(message_type="ACK", payload=str(seq).encode("utf-8"))
+            ack_payload = str(seq).encode("utf-8")
+            frame = self._pack_frame(message_type="ACK", payload=ack_payload)
+            await transport.send(data=frame, priority=2)
         except DatagramError as e:
             logger.warning("Failed to send ACK for sequence %d: %s", seq, e, exc_info=True)
             return
@@ -198,22 +180,27 @@ class DatagramReliabilityLayer:
         if not isinstance(raw_data, bytes):
             return
 
-        try:
-            type_len = raw_data[0]
-            if len(raw_data) < 1 + type_len:
-                return
-            message_type = raw_data[1 : 1 + type_len].decode("utf-8")
-            payload = raw_data[1 + type_len :]
+        unpacked = self._unpack_frame(raw_data=raw_data)
+        if not unpacked:
+            return
 
+        message_type, payload = unpacked
+        try:
             match message_type:
                 case "ACK":
                     await self._handle_ack_message(payload=payload)
                 case "DATA":
                     await self._handle_data_message(payload=payload)
-        except (IndexError, UnicodeDecodeError):
-            pass
         except Exception as e:
             logger.error("Error processing received datagram for reliability: %s", e, exc_info=e)
+
+    def _pack_frame(self, *, message_type: str, payload: bytes) -> bytes:
+        """Pack a message type and payload into a single bytes frame."""
+        type_bytes = message_type.encode("utf-8")
+        if len(type_bytes) > 255:
+            raise DatagramError(message="Message type too long (max 255 bytes)")
+
+        return struct.pack("!B", len(type_bytes)) + type_bytes + payload
 
     async def _retry_loop(self) -> None:
         """Periodically check for and retry unacknowledged datagrams."""
@@ -255,7 +242,7 @@ class DatagramReliabilityLayer:
                             async with self._lock:
                                 datagram.retry_count += 1
                                 datagram.timestamp = get_timestamp()
-                            tg.create_task(transport._send_framed_data(message_type="DATA", payload=datagram.data))
+                            tg.create_task(transport.send(data=datagram.data))
                             logger.debug("Retrying sequence %s, attempt %d", datagram.sequence, datagram.retry_count)
                 except* Exception as eg:
                     logger.warning(
@@ -276,3 +263,21 @@ class DatagramReliabilityLayer:
                 self._retry_task = asyncio.create_task(self._retry_loop())
             except RuntimeError:
                 logger.warning("Could not start reliability layer tasks: No running event loop.")
+
+    def _unpack_frame(self, *, raw_data: bytes) -> tuple[str, bytes] | None:
+        """Unpack a raw datagram into a message type and payload."""
+        try:
+            type_len = raw_data[0]
+            if len(raw_data) < 1 + type_len:
+                return None
+            message_type = raw_data[1 : 1 + type_len].decode("utf-8")
+            payload = raw_data[1 + type_len :]
+            return message_type, payload
+        except (IndexError, UnicodeDecodeError):
+            return None
+
+
+class _ReliableDatagram(DatagramMessage):
+    """An internal datagram message with added reliability metadata."""
+
+    retry_count: int = 0

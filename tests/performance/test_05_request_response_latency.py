@@ -28,7 +28,7 @@ class DataFactoryProtocol(Protocol):
 @pytest.fixture(scope="module")
 def client_config() -> ClientConfig:
     """Provide a client configuration suitable for latency tests."""
-    return ClientConfig.create(
+    return ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=15.0,
         read_timeout=10.0,

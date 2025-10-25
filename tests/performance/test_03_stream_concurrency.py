@@ -22,7 +22,7 @@ logger = logging.getLogger("test_03_stream_concurrency")
 @pytest.fixture(scope="module")
 def client_config() -> ClientConfig:
     """Provide a client configuration with generous timeouts for high concurrency."""
-    return ClientConfig.create(
+    return ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=30.0,
         read_timeout=90.0,

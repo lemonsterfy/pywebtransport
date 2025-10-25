@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Final
 
 from pywebtransport import ClientConfig, ConnectionError, TimeoutError, WebTransportClient
-from pywebtransport.pubsub import Subscription
+from pywebtransport.pubsub import PubSubManager, Subscription
 
 SERVER_HOST: Final[str] = "127.0.0.1"
 SERVER_PORT: Final[int] = 4433
@@ -35,7 +35,7 @@ async def _receive_message(subscription: Subscription) -> bytes | None:
 async def test_pubsub_basic_echo() -> bool:
     """Test subscribing, publishing, and receiving a message on a single topic."""
     logger.info("--- Test 10A: Basic Subscribe and Publish ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -49,7 +49,8 @@ async def test_pubsub_basic_echo() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.pubsub as pubsub:
+                pubsub_stream = await session.create_bidirectional_stream()
+                async with PubSubManager(stream=pubsub_stream) as pubsub:
                     subscription = await pubsub.subscribe(topic=topic)
                     async with subscription:
                         logger.info("Subscribed to topic '%s'.", topic)
@@ -76,7 +77,7 @@ async def test_pubsub_basic_echo() -> bool:
 async def test_pubsub_multiple_subscribers() -> bool:
     """Test that a message is broadcast to multiple subscribers."""
     logger.info("--- Test 10B: Multiple Subscribers Broadcast ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -93,7 +94,9 @@ async def test_pubsub_multiple_subscribers() -> bool:
             logger.info("Established two sessions: %s and %s", session1.session_id, session2.session_id)
 
             async with session1, session2:
-                async with session1.pubsub as pubsub1, session2.pubsub as pubsub2:
+                stream1 = await session1.create_bidirectional_stream()
+                stream2 = await session2.create_bidirectional_stream()
+                async with PubSubManager(stream=stream1) as pubsub1, PubSubManager(stream=stream2) as pubsub2:
                     sub1 = await pubsub1.subscribe(topic=topic)
                     sub2 = await pubsub2.subscribe(topic=topic)
 
@@ -124,7 +127,7 @@ async def test_pubsub_multiple_subscribers() -> bool:
 async def test_pubsub_unsubscribe() -> bool:
     """Test that a client stops receiving messages after unsubscribing."""
     logger.info("--- Test 10C: Unsubscribe Logic ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -140,7 +143,9 @@ async def test_pubsub_unsubscribe() -> bool:
             session2 = await client.connect(url=SERVER_URL)
 
             async with session1, session2:
-                async with session1.pubsub as pubsub1, session2.pubsub as pubsub2:
+                stream1 = await session1.create_bidirectional_stream()
+                stream2 = await session2.create_bidirectional_stream()
+                async with PubSubManager(stream=stream1) as pubsub1, PubSubManager(stream=stream2) as pubsub2:
                     sub1 = await pubsub1.subscribe(topic=topic)
                     sub2 = await pubsub2.subscribe(topic=topic)
 
@@ -177,7 +182,7 @@ async def test_pubsub_unsubscribe() -> bool:
 async def test_pubsub_multiple_topics() -> bool:
     """Test that topic subscriptions are correctly isolated."""
     logger.info("--- Test 10D: Multiple Topic Isolation ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -188,7 +193,8 @@ async def test_pubsub_multiple_topics() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.pubsub as pubsub:
+                pubsub_stream = await session.create_bidirectional_stream()
+                async with PubSubManager(stream=pubsub_stream) as pubsub:
                     sub_a = await pubsub.subscribe(topic="topic-a")
                     sub_b = await pubsub.subscribe(topic="topic-b")
 

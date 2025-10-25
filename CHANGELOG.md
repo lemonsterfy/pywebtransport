@@ -11,6 +11,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.8.0] - 2025-10-25
+
+This is a major internal refactoring release focused entirely on improving **code health**, **maintainability**, and **testability** across the entire library in preparation for future API stabilization. It addresses significant architectural issues identified in a comprehensive code audit, primarily focusing on eliminating widespread code duplication and resolving complex dependency issues through systematic refactoring and the application of Dependency Injection (DI). While introducing numerous internal improvements and robustness fixes, this release also streamlines the public API surface by removing redundant or unsafe interfaces.
+
+### BREAKING CHANGE
+
+- **API Surface Reduction & Relocation**: Several previously exported components and utility functions have been removed from subpackage `__init__.py` files or the top-level `pywebtransport` namespace as part of the internal refactoring and API cleanup. Key changes include:
+  - **Managers (`ConnectionManager`, `SessionManager`, `StreamManager`)** are now exclusively available via `from pywebtransport.manager import ...`.
+  - **Pools (`ConnectionPool`, `SessionPool`, `StreamPool`)** are now exclusively available via `from pywebtransport.pool import ...`.
+  - **Monitors (`ClientMonitor`, `ServerMonitor`, `DatagramMonitor`)** are now exclusively available via `from pywebtransport.monitor import ...`.
+  - The `client` subpackage's `ClientPool` has been **renamed** to `ClientFleet`.
+  - The buggy `client.PooledClient` has been **removed** and replaced by the robust `pool.SessionPool`.
+  - Internal helper classes (like `StreamBuffer`) and application-level utilities (like `server.utils.create_development_server`, `stream.utils.echo_stream`) are no longer exposed.
+  - Low-level types (like `EventType`, `ConnectionState`, etc.) and specific exceptions are no longer exported from the top-level `pywebtransport` namespace and must be imported from their respective modules (e.g., `pywebtransport.types`, `pywebtransport.exceptions`).
+- **Configuration API Simplification**: The redundant `ConfigBuilder` class and `merge()` methods on `ClientConfig` and `ServerConfig` have been removed. Use standard `dataclass` initialization, `from_dict()`, or `update()` instead. The generic `.create()` factory methods on config classes have also been removed; use direct initialization or specific `create_for_*()` methods.
+- **Diagnostic API Unification**: Multiple disparate methods for fetching statistics and debugging state (e.g., `get_summary()`, `debug_state()`, `diagnose_issues()`, `get_server_stats()`, `monitor_health()`) across core components (`WebTransportConnection`, `WebTransportSession`, `WebTransportStream`, `WebTransportDatagramTransport`, `WebTransportClient`, `WebTransportServer`) have been removed. Use the new unified `.diagnostics` property or `diagnostics()` async method, which return structured `dataclass` objects (`ConnectionDiagnostics`, `SessionDiagnostics`, etc.).
+- **Factory Method Removal**: Redundant `.create()` class factory methods have been removed from many utility and higher-level components (`DatagramBroadcaster`, `ServerCluster`, `ConnectionLoadBalancer`, `ReconnectingClient`, `WebTransportBrowser`, etc.). Use direct class instantiation instead.
+- **Heartbeat API Change**: `WebTransportDatagramTransport.start_heartbeat()` has been replaced by `enable_heartbeat()` and `disable_heartbeat()` for better lifecycle management.
+
+### Added
+
+- **New Base Classes for Code Reuse**: Introduced internal base classes (`_BaseResourceManager`, `_AsyncObjectPool`, `_BaseMonitor`, `_BaseDataclassSerializer`) to encapsulate common logic for managers, pools, monitors, and serializers respectively, significantly reducing code duplication.
+- **New Internal Modules**: Added several new internal modules resulting from architectural refactoring (e.g., `client._proxy`, `protocol._pending_event_manager`, `protocol._session_tracker`, `protocol._stream_tracker`).
+- **Unified Diagnostic Data Classes**: Introduced new `dataclasses` (e.g., `ConnectionDiagnostics`, `SessionDiagnostics`, `DatagramTransportDiagnostics`, `ServerDiagnostics`, `ClientDiagnostics`) returned by the unified `.diagnostics` APIs.
+- **Robustness Features**:
+  - Added mandatory message size limits (`max_message_size`) to `StructuredStream` to prevent DoS attacks.
+  - Added validation for unique types in the `registry` for `StructuredStream` and `StructuredDatagramTransport` to prevent configuration errors.
+
+### Changed
+
+- **Major Architectural Refactoring (DRY & DI)**:
+  - **Managers**: Refactored `ConnectionManager`, `SessionManager`, `StreamManager` to inherit from `_BaseResourceManager`, eliminating redundant code. Applied Dependency Injection (DI) to `StreamManager` (using a `stream_factory` callback) to break its circular dependency on `WebTransportSession` and improve testability.
+  - **Pools**: Refactored `ConnectionPool` and `StreamPool` to inherit from the new, robust `_AsyncObjectPool` base class, fixing critical concurrency bugs and performance issues. Replaced `client.PooledClient` with a new `pool.SessionPool` based on `_AsyncObjectPool`. Applied DI to `StreamPool` (using `stream_manager`).
+  - **Monitors**: Refactored `ClientMonitor`, `ServerMonitor`, `DatagramMonitor` to inherit from `_BaseMonitor`, eliminating redundant code.
+  - **Protocol Handler**: Split the monolithic `WebTransportProtocolHandler` ("God Class") into a lean orchestrator and three specialized helper classes (`_ProtocolSessionTracker`, `_ProtocolStreamTracker`, `_PendingEventManager`), dramatically improving modularity, testability, and maintainability.
+  - **Serializers**: Refactored `JSONSerializer` and `MsgPackSerializer` to inherit from `_BaseDatagramSerializer`, eliminating redundant dataclass conversion logic.
+  - **Utilities**: Restructured utility functions, moving domain-specific helpers into their respective subpackages (e.g., URL parsing to `client.utils`) and removing application-level helpers from core library code (`server.utils`, `stream.utils`, `connection.utils`). The main `utils.py` was significantly streamlined.
+  - **Core Components (DI & Testability)**: Applied Dependency Injection extensively to improve testability and reduce coupling in `WebTransportClient` (via `connection/session_factory`), `ReconnectingClient` (inject `WebTransportClient`), `WebTransportBrowser` (inject `WebTransportClient`), `ConnectionLoadBalancer` (via `connection_factory`/`health_checker`), `WebTransportSession` (removing service locator role), `RpcManager` (inject `WebTransportStream`), `PubSubManager` (inject `WebTransportStream`), and `WebTransportDatagramTransport` (via `datagram_sender` callback).
+  - **Client Proxy Logic**: Extracted proxy handshake logic from `WebTransportConnection` into a dedicated internal module `client._proxy`.
+- **API Unification & Cleanup**:
+  - Standardized diagnostic reporting across core components using a unified `.diagnostics` API returning structured data classes.
+  - Removed numerous redundant `.create()` class factory methods across the library.
+  - Removed redundant or overlapping APIs like `ConfigBuilder`, `merge()`, unsafe `get_*_count()` methods, and unused components like `EventBus`.
+  - Streamlined `__init__.py` files for the main package and subpackages to expose a cleaner, more focused public API.
+- **Performance Improvements**:
+  - Optimized stream data handling in `WebTransportH3Engine` using `collections.deque`.
+  - Optimized `WebTransportReceiveStream.readuntil/readline` by avoiding byte-by-byte reading.
+- **Robustness Enhancements**:
+  - Improved the shutdown logic in `WebTransportSession` and `WebTransportServer` using `TaskGroup` and refined error handling.
+  - Made `WebTransportSendStream._teardown` correctly `await` the cancelled writer task.
+  - Made the `CONNECTION_LOST` event handling in `WebTransportConnection` more robust and decoupled (delegating close decision to listeners).
+  - Improved readability, encapsulation, and resource handling within `ServerApp._handle_session_request`.
+  - Improved `ServerApp` session rejection logic to correctly signal HTTP status codes (403/404) via the protocol handler.
+  - Enhanced type safety in `ProtobufSerializer` checks and `server.router` path parameter handling.
+- **Security Improvement**: Changed the default `ServerConfig.verify_mode` from `ssl.CERT_NONE` to the safer `ssl.CERT_OPTIONAL`.
+
+### Fixed
+
+- **Fixed Critical Concurrency Bugs**: Eliminated race conditions in all pooling mechanisms (`ConnectionPool`, `StreamPool`, replaced `PooledClient` with `SessionPool`) by migrating to the robust `_AsyncObjectPool` base class.
+- **Fixed Critical Architectural Flaw**: Corrected `DatagramReliabilityLayer`'s violation of encapsulation by removing its dependency on private methods of `WebTransportDatagramTransport` and internalizing the framing logic.
+- **Fixed Debuggability Issue**: Implemented correct `__repr__` methods for all custom exception classes.
+- **Fixed Type Annotations**: Corrected inaccurate type hints (e.g., `EventHandler`).
+- **Fixed Silent Failures**: Added validation to prevent silent failures in structured messaging registry configuration and unknown event type strings.
+- **Fixed potential task leaks in `ServerApp`**: Ensured session handler tasks are explicitly tracked and cancelled during application shutdown.
+- **Fixed potential `AssertionError` during connection closure**: Updated the required `aioquic` dependency to >= 1.3.0, incorporating an upstream fix for a race condition (`aioquic` issue #597) that could cause noisy errors (`cannot call reset() more than once`) in server logs.
+
+### Removed
+
+- **Removed Redundant Components**: Deleted `client/pooled.py` (replaced by `pool/SessionPool`), `server/utils.py`, `stream/utils.py`, `connection/utils.py`. Moved logic from `connection/manager.py`, `session/manager.py`, `stream/manager.py` to the new `manager/` package. Moved logic from `connection/pool.py`, `stream/pool.py` to the new `pool/` package. Moved logic from `client/monitor.py`, `server/monitor.py`, `datagram/monitor.py` to the new `monitor/` package.
+- **Removed Redundant APIs**: Deleted `ConfigBuilder`, `merge()`, generic `.create()` factories, multiple old diagnostic methods, unsafe `get_*_count()` methods, `EventBus`, `event_handler`, `create_event_emitter`, `connection._transmit`, `datagram._receive/send_framed_data`, and various other internal or unused functions/methods identified during the audit.
+- **Removed Dead Code**: Deleted numerous unused constants from `constants.py`.
+
 ## [0.7.1] - 2025-09-27
 
 This is a hardening release focused on improving the stability and robustness of the RPC framework. It introduces a critical concurrency limiting feature and fixes a major bug in the request handling loop to enhance observability and prevent server overload.
@@ -37,7 +109,7 @@ This is a major feature release that introduces a high-level application protoco
 ### Changed
 
 - **Unified the Client-Side Proxy Configuration**. The proxy settings are now integrated directly into `ClientConfig`, providing a single, consistent API. The old, separate `WebTransportProxy` component has been removed.
-- **Enhanced Reliability of All Core Managers**. Refactored `ConnectionManager`, `SessionManager`, and `StreamManager` with a "supervisor" pattern to ensure they shut down safely if a background task fails unexpectedly, preventing resource leaks and improving the stability of long-running applications.
+- **Enhanced Reliability of All Core Managers**. Refactored `ConnectionManager`, `SessionManager`, `StreamManager` with a "supervisor" pattern to ensure they shut down safely if a background task fails unexpectedly, preventing resource leaks and improving the stability of long-running applications.
 - **Modernized Codebase with Python Best Practices**:
   - Standardized all module docstrings to the single-line format (PEP 257).
   - Enforced `-> None` return type annotation on all `__init__` methods (PEP 484).
@@ -344,7 +416,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.0...v0.6.1

@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from typing import Final
 
 from pywebtransport import ClientConfig, ConnectionError, TimeoutError, WebTransportClient
-from pywebtransport.rpc import RpcError, RpcTimeoutError
+from pywebtransport.rpc import RpcError, RpcManager, RpcTimeoutError
 
 SERVER_HOST: Final[str] = "127.0.0.1"
 SERVER_PORT: Final[int] = 4433
@@ -36,7 +36,7 @@ class UserData:
 async def test_rpc_basic_add() -> bool:
     """Test a basic RPC call with arguments and a return value."""
     logger.info("--- Test 09A: Basic RPC Call (add) ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -47,7 +47,8 @@ async def test_rpc_basic_add() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.rpc as rpc:
+                rpc_stream = await session.create_bidirectional_stream()
+                async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     logger.info("Calling remote procedure: add(a=2, b=3)")
                     result = await rpc.call("add", 2, 3)
                     logger.info("Received result: %s", result)
@@ -66,7 +67,7 @@ async def test_rpc_basic_add() -> bool:
 async def test_rpc_complex_types() -> bool:
     """Test RPC with dictionary representations of custom objects."""
     logger.info("--- Test 09B: Complex Data Types (UserData) ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -77,7 +78,8 @@ async def test_rpc_complex_types() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.rpc as rpc:
+                rpc_stream = await session.create_bidirectional_stream()
+                async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     user_id = 123
                     logger.info("Calling remote procedure: get_user(user_id=%d)", user_id)
                     result_dict = await rpc.call("get_user", user_id)
@@ -98,7 +100,7 @@ async def test_rpc_complex_types() -> bool:
 async def test_rpc_notification() -> bool:
     """Test an RPC call with no return value (a notification)."""
     logger.info("--- Test 09C: Notification (No Return Value) ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -109,7 +111,8 @@ async def test_rpc_notification() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.rpc as rpc:
+                rpc_stream = await session.create_bidirectional_stream()
+                async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     message = "This is a test notification."
                     logger.info("Calling remote procedure: log_message('%s')", message)
                     result = await rpc.call("log_message", message)
@@ -129,7 +132,7 @@ async def test_rpc_notification() -> bool:
 async def test_rpc_error_handling() -> bool:
     """Test that a remote exception is correctly propagated to the client."""
     logger.info("--- Test 09D: Remote Error Handling ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -140,7 +143,8 @@ async def test_rpc_error_handling() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.rpc as rpc:
+                rpc_stream = await session.create_bidirectional_stream()
+                async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     logger.info("Calling remote procedure that will raise an error: divide(10, 0)")
                     try:
                         await rpc.call("divide", 10, 0)
@@ -162,7 +166,7 @@ async def test_rpc_error_handling() -> bool:
 async def test_rpc_concurrency() -> bool:
     """Test making multiple RPC calls concurrently."""
     logger.info("--- Test 09E: Concurrent RPC Calls ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -173,7 +177,8 @@ async def test_rpc_concurrency() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.rpc as rpc:
+                rpc_stream = await session.create_bidirectional_stream()
+                async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     calls = [rpc.call("add", i, i) for i in range(5)]
                     logger.info("Dispatching 5 concurrent 'add' calls...")
                     results = await asyncio.gather(*calls)
@@ -194,7 +199,7 @@ async def test_rpc_concurrency() -> bool:
 async def test_rpc_timeout() -> bool:
     """Test that an RPC call correctly times out if the server is too slow."""
     logger.info("--- Test 09F: RPC Timeout ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -205,7 +210,8 @@ async def test_rpc_timeout() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             async with session:
-                async with session.rpc as rpc:
+                rpc_stream = await session.create_bidirectional_stream()
+                async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     logger.info("Calling slow remote procedure with a 1s timeout...")
                     try:
                         await rpc.call("slow_operation", 2, timeout=1.0)

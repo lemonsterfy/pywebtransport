@@ -20,7 +20,7 @@ logger = logging.getLogger("test_01_connection")
 @pytest.fixture(scope="module")
 def default_client_config() -> ClientConfig:
     """Provide a default client configuration for latency tests."""
-    return ClientConfig.create(
+    return ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=15.0,
         initial_max_data=1024 * 1024,
@@ -32,7 +32,7 @@ def default_client_config() -> ClientConfig:
 @pytest.fixture(scope="module")
 def concurrency_client_config() -> ClientConfig:
     """Provide a client configuration suitable for high-concurrency tests."""
-    return ClientConfig.create(
+    return ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=30.0,
         initial_max_data=1024 * 1024,

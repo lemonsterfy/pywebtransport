@@ -277,6 +277,6 @@ rmdir /s .venv  # Windows
 ## See Also
 
 - **[Home](index.md)**: Project homepage and overview
-- **[Quick Start](quickstart.md)**: A 5-minute tutorial
-- **[API Reference](api-reference/index.md)**: Complete API documentation
-- **[Contributing Guide](../CONTRIBUTING.md)**: Learn how to contribute
+- **[Quick Start](quickstart.md)**: Learn how to install the library.
+- **[API Reference](api-reference/index.md)**: Explore the complete API documentation.
+- **[Contributing Guide](../CONTRIBUTING.md)**: See how to contribute

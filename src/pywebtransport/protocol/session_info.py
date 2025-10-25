@@ -1,4 +1,4 @@
-"""WebTransport Session and Stream Information Data Classes."""
+"""Data structures for tracking session and stream state."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ from typing import Any
 from pywebtransport.types import Headers, SessionId, SessionState, StreamDirection, StreamId, StreamState
 from pywebtransport.utils import get_timestamp
 
-__all__ = ["StreamInfo", "WebTransportSessionInfo"]
+__all__: list[str] = ["StreamInfo", "WebTransportSessionInfo"]
 
 
 @dataclass(kw_only=True)
 class StreamInfo:
-    """Represents stateful information about a single WebTransport stream."""
+    """Represent stateful information about a single WebTransport stream."""
 
     stream_id: StreamId
     session_id: SessionId
@@ -47,10 +47,10 @@ class StreamInfo:
 
 @dataclass(kw_only=True)
 class WebTransportSessionInfo:
-    """Represents stateful information about a WebTransport session."""
+    """Represent stateful information about a WebTransport session."""
 
     session_id: SessionId
-    stream_id: StreamId
+    control_stream_id: StreamId
     state: SessionState
     path: str
     created_at: float
@@ -84,4 +84,7 @@ class WebTransportSessionInfo:
         elif self.ready_at:
             duration = f" (active: {get_timestamp() - self.ready_at:.2f}s)"
 
-        return f"Session {self.session_id} [{self.state}] " f"path={self.path} stream={self.stream_id}{duration}"
+        return (
+            f"Session {self.session_id} [{self.state}] "
+            f"path={self.path} control_stream={self.control_stream_id}{duration}"
+        )

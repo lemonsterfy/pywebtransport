@@ -63,7 +63,7 @@ class TestResourceUsage:
     @pytest.fixture(scope="class")
     def client_config(self) -> ClientConfig:
         """Provide a client configuration for resource tests."""
-        return ClientConfig.create(
+        return ClientConfig(
             verify_mode=ssl.CERT_NONE,
             connect_timeout=15.0,
             read_timeout=15.0,
@@ -127,7 +127,7 @@ class TestResourceUsage:
         perf_logger.info("Baseline: %.2f%% CPU", baseline_resources["cpu_percent"])
 
         load_sessions: list[WebTransportSession] = []
-        load_tasks: list[asyncio.Task] = []
+        load_tasks: list[asyncio.Task[None]] = []
         try:
             async with WebTransportClient(config=client_config) as client:
                 connect_tasks = [

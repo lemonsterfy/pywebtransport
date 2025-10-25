@@ -8,19 +8,19 @@ This document provides a reference for the `pywebtransport.stream` subpackage, w
 
 Represents a bidirectional WebTransport stream that can be both read from and written to. It inherits all methods and properties from `WebTransportReceiveStream` and `WebTransportSendStream`.
 
-**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` or `StreamManager` (e.g., via `session.create_bidirectional_stream()` or `session.incoming_streams()`).
+**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` (e.g., via `session.create_bidirectional_stream()`).
 
 ### Instance Methods
 
 - **`async def close(self) -> None`**: Gracefully closes the stream's write side by sending a `FIN` bit.
-- **`async def diagnose_issues(self, *, error_rate_threshold: float = 0.1, latency_threshold: float = 1.0, stale_threshold: float = 3600.0) -> list[str]`**: Runs checks and returns a list of strings describing potential issues.
+- **`def diagnose_issues(self, *, error_rate_threshold: float = 0.1, latency_threshold: float = 1.0, stale_threshold: float = 3600.0) -> list[str]`**: Runs checks and returns a list of strings describing potential issues.
 - **`async def monitor_health(self, *, check_interval: float = 30.0, error_rate_threshold: float = 0.1) -> None`**: A long-running task that continuously monitors stream health.
 
 ## WebTransportSendStream Class
 
 Represents a unidirectional (send-only) WebTransport stream.
 
-**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` or `StreamManager`.
+**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession`.
 
 ### Properties
 
@@ -39,7 +39,7 @@ Represents a unidirectional (send-only) WebTransport stream.
 
 Represents a unidirectional (receive-only) WebTransport stream.
 
-**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` or `StreamManager`.
+**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession`.
 
 ### Properties
 
@@ -52,8 +52,8 @@ Represents a unidirectional (receive-only) WebTransport stream.
 - **`async def read_all(self, *, max_size: int | None = None) -> bytes`**: Reads the entire stream content into a single bytes object.
 - **`async def read_iter(self, *, chunk_size: int = 8192) -> AsyncIterator[bytes]`**: Returns an async iterator to read the stream in chunks.
 - **`async def readexactly(self, *, n: int) -> bytes`**: Reads exactly `n` bytes.
-- **`async def readline(self) -> bytes`**: Reads one line from the stream.
-- **`async def readuntil(self, *, separator: bytes = b"\n") -> bytes`**: Reads data until a separator is found.
+- **`async def readline(self, *, limit: int = 65536) -> bytes`**: Reads one line from the stream.
+- **`async def readuntil(self, *, separator: bytes = b"\n", limit: int | None = None) -> bytes`**: Reads data until a separator is found.
 - **`async def wait_closed(self) -> None`**: Waits until the stream is fully closed.
 
 ## StructuredStream Class
@@ -73,43 +73,17 @@ A high-level wrapper for sending and receiving structured Python objects over a 
 - **`async def receive_obj(self) -> Any`**: Receives, deserializes, and returns a Python object from the stream.
 - **`async def send_obj(self, *, obj: Any) -> None`**: Serializes and sends a Python object over the stream.
 
-## Management Classes
-
-### StreamManager Class
-
-Manages the lifecycle of all streams within a `WebTransportSession`, enforcing concurrency limits.
-
-**Note on Usage**: `StreamManager` must be used as an asynchronous context manager (`async with ...`).
-
-### Constructor
-
-- **`def __init__(self, session: WebTransportSession, *, max_streams: int = 100, stream_cleanup_interval: float = 15.0) -> None`**: Initializes the stream manager.
-
-### Instance Methods
-
-- **`async def create_bidirectional_stream(self) -> WebTransportStream`**: Creates a new bidirectional stream.
-- **`async def create_unidirectional_stream(self) -> WebTransportSendStream`**: Creates a new unidirectional stream.
-- **`async def get_stream(self, *, stream_id: StreamId) -> StreamType | None`**: Retrieves a managed stream by its ID.
-- **`async def get_stats(self) -> dict[str, Any]`**: Returns detailed statistics about the managed streams.
-- **`async def shutdown(self) -> None`**: Closes all managed streams and stops background tasks.
-
-### StreamPool Class
-
-Manages a pool of reusable `WebTransportStream` objects to reduce the latency of creating new streams.
-
-**Note on Usage**: `StreamPool` must be used as an asynchronous context manager (`async with ...`).
-
-### Constructor
-
-- **`def __init__(self, session: WebTransportSession, *, pool_size: int = 10, maintenance_interval: float = 60.0) -> None`**: Initializes the stream pool.
-
-### Instance Methods
-
-- **`async def close_all(self) -> None`**: Closes all idle streams in the pool and shuts down the pool.
-- **`async def get_stream(self, *, timeout: float | None = None) -> WebTransportStream`**: Gets a stream from the pool or creates a new one.
-- **`async def return_stream(self, *, stream: WebTransportStream) -> None`**: Returns a healthy stream to the pool for reuse.
-
 ## Supporting Data Classes
+
+### StreamDiagnostics Class
+
+A structured, immutable snapshot of a stream's health.
+
+### Attributes
+
+- `stats` (`StreamStats`): The full statistics object for the stream.
+- `read_buffer_size` (`int`): The current size of the read buffer in bytes.
+- `write_buffer_size` (`int`): The current size of the write buffer in bytes.
 
 ### StreamStats Class
 
@@ -137,19 +111,6 @@ A dataclass holding statistics for a single stream.
 - `avg_read_time` (`float`): The average time for a read operation in seconds.
 - `avg_write_time` (`float`): The average time for a write operation in seconds.
 - `uptime` (`float`): The total uptime of the stream in seconds.
-
-### StreamBuffer Class
-
-An internal, deque-based buffer for asynchronous read operations.
-
-**Note on Usage**: This is an internal class and not intended for direct use.
-
-## Utility Functions
-
-These helper functions are available in the `pywebtransport.stream.utils` module.
-
-- **`async def copy_stream_data(*, source: WebTransportReceiveStream, destination: WebTransportSendStream, chunk_size: int = 8192) -> int`**: Copies all data from a source stream to a destination stream.
-- **`async def echo_stream(*, stream: WebTransportStream) -> None`**: Reads all data from a bidirectional stream and writes it back to the same stream.
 
 ## See Also
 

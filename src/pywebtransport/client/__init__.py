@@ -1,21 +1,15 @@
-"""WebTransport Client Subpackage."""
+"""Client-side interface for the WebTransport protocol."""
 
 from .browser import WebTransportBrowser
-from .client import ClientStats, WebTransportClient
-from .monitor import ClientMonitor
-from .pool import ClientPool
-from .pooled import PooledClient
+from .client import ClientDiagnostics, ClientStats, WebTransportClient
+from .fleet import ClientFleet
 from .reconnecting import ReconnectingClient
-from .utils import benchmark_client_performance, test_client_connectivity
 
-__all__ = [
-    "ClientMonitor",
-    "ClientPool",
+__all__: list[str] = [
+    "ClientDiagnostics",
+    "ClientFleet",
     "ClientStats",
-    "PooledClient",
     "ReconnectingClient",
     "WebTransportBrowser",
     "WebTransportClient",
-    "benchmark_client_performance",
-    "test_client_connectivity",
 ]

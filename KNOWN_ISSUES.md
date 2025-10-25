@@ -2,15 +2,16 @@
 
 - **ID**: KI-001
 - **Subject**: Race Condition in aioquic Core on Connection Shutdown
-- **Status**: Confirmed
-- **Dependency**: aioquic (all known versions)
+- **Status**: Resolved
+- **Dependency**: aioquic (< 1.3.0)
 - **Date Discovered**: 2025-09-17
+- **Date Resolved**: 2025-10-23
 
 ### Summary
 
-On the `pywebtransport` server, a benign `AssertionError` may be triggered in the underlying `aioquic` dependency when a client connection is closed cleanly and rapidly. The issue stems from a non-idempotent event handler within `aioquic` that creates a race condition when processing concurrent shutdown signals. This defect does not affect the library's core functionality or data transfer stability but produces `ERROR`-level stack traces in the server logs, which can interfere with operational monitoring.
+On the `pywebtransport` server, a benign `AssertionError` may be triggered in the underlying `aioquic` dependency when a client connection is closed cleanly and rapidly. The issue stems from a non-idempotent event handler within `aioquic` (< 1.3.0) that creates a race condition when processing concurrent shutdown signals. This defect does not affect the library's core functionality or data transfer stability but produces `ERROR`-level stack traces in the server logs, which can interfere with operational monitoring.
 
-We have hardened our own codebase where possible and have identified this as a low-level issue to be fixed in the upstream `aioquic` library.
+We have hardened our own codebase where possible and have identified this as a low-level issue fixed in the upstream `aioquic` library.
 
 ### Symptoms
 
@@ -24,26 +25,25 @@ AssertionError: cannot call reset() more than once
 
 ### Root Cause Analysis
 
-The root cause of this issue is that `aioquic`'s `_handle_stop_sending_frame` method is not idempotent. During a rapid client-side connection closure, at least three events can race to reset the same stream:
+The root cause of this issue is that `aioquic`'s `_handle_stop_sending_frame` method (< 1.3.0) calls a non-idempotent internal stream reset function. During a rapid client-side connection closure, at least three events can race to reset the same stream:
 
 1.  **Application Layer Cleanup**: `pywebtransport` receives a `CLOSE_SESSION` capsule and, per the protocol specification, calls `reset_stream`.
 2.  **Peer Stream Closure**: The client sends a `STOP_SENDING` frame.
 3.  **Peer Connection Closure**: The client sends a `CONNECTION_CLOSE` frame, which also triggers `aioquic` to clean up all associated streams.
 
-Because `aioquic`'s `datagram_received` method executes synchronously, if any of the above events cause a stream to be reset, a subsequent `STOP_SENDING` frame will still trigger the `_handle_stop_sending_frame` method, causing its internal assertion to fail.
+Because `aioquic`'s `datagram_received` method executes synchronously, if any of the above events cause a stream to be reset, a subsequent `STOP_SENDING` frame handled by `_handle_stop_sending_frame` would trigger the internal assertion failure in versions prior to 1.3.0.
 
 ### Impact Assessment
 
 - **On Library Functionality**: **None**. Data transfer, session, and stream lifecycle management remain correct, and connections are ultimately closed successfully.
 - **On Operations & Monitoring**: **Significant**. The `ERROR`-level logs are misleading, may trigger false positives in monitoring systems, increase unnecessary investigation costs, and cast doubt on the service's stability.
 
-### Current Status & Action Plan
+### Resolution
 
-1.  **Internal Hardening**: We have updated the `pywebtransport` `protocol.handler.abort_stream` method to ensure our own code is idempotent.
-2.  **Documentation**: This issue is formally documented in this `KNOWN_ISSUES.md` file to guide development and operational monitoring.
-3.  **Upstream Tracking**: This issue has been confirmed as a low-level defect in `aioquic`, and an issue has been submitted to the upstream community for tracking.
-    - **Upstream Issue Link**: [aioquic/aioquic#597](https://github.com/aiortc/aioquic/issues/597)
-4.  **Short-Term Strategy**: Until a new version of `aioquic` with this fix is released, this `AssertionError` should be treated by our team as known, benign log noise that occurs during shutdown.
+- **Status**: This issue has been **fixed** in the upstream `aioquic` library, starting from version **1.3.0**, by making the internal stream reset operation idempotent.
+- **Action**: Resolved by updating the required `aioquic` dependency to version 1.3.0 or later within `pywebtransport`.
+- **Upstream Fix Link**: [aiortc/aioquic#597](https://github.com/aiortc/aioquic/issues/597) (Original issue tracking)
+- **Note**: This `AssertionError` should no longer occur when using a version of `pywebtransport` that depends on `aioquic` 1.3.0 or later. If observed, it might indicate a different issue.
 
 ---
 
@@ -73,6 +73,6 @@ The WebTransport specification mandates support for `RESET_STREAM_AT` to ensure 
 ### Current Status & Action Plan
 
 1.  **Upstream Tracking**: We have submitted a formal feature request to the `aioquic` community to add support for this QUIC extension.
-    - **Upstream Issue Link**: [aioquic/aioquic#596](https://github.com/aiortc/aioquic/issues/596)
+    - **Upstream Issue Link**: [aiortc/aioquic#596](https://github.com/aiortc/aioquic/issues/596)
 2.  **Documentation**: This compliance limitation is formally documented in this `KNOWN_ISSUES.md` file.
 3.  **Short-Term Strategy**: `pywebtransport` cannot provide this functionality until it is supported by `aioquic`. We will continue to monitor upstream progress.

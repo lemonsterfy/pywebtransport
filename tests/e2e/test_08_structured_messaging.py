@@ -9,7 +9,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Final
 
-from pywebtransport import ClientConfig, ConnectionError, Serializer, TimeoutError, WebTransportClient
+from pywebtransport import (
+    ClientConfig,
+    ConnectionError,
+    Serializer,
+    StructuredDatagramTransport,
+    StructuredStream,
+    TimeoutError,
+    WebTransportClient,
+)
 from pywebtransport.serializer import JSONSerializer, MsgPackSerializer
 
 SERVER_HOST: Final[str] = "127.0.0.1"
@@ -48,7 +56,7 @@ MESSAGE_REGISTRY: dict[int, type[Any]] = {1: UserData, 2: StatusUpdate}
 
 async def run_structured_test(*, serializer: Serializer, path: str, serializer_name: str) -> bool:
     """Run the core logic for testing a specific serializer end-to-end."""
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -62,12 +70,13 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
             logger.info("Connected for %s test, session: %s", serializer_name.upper(), session.session_id)
 
             logger.info("[%s] Testing StructuredStream...", serializer_name.upper())
-            s_stream = await session.create_structured_stream(serializer=serializer, registry=MESSAGE_REGISTRY)
+            raw_stream = await session.create_bidirectional_stream()
+            structured_stream = StructuredStream(stream=raw_stream, serializer=serializer, registry=MESSAGE_REGISTRY)
 
             user_obj = UserData(id=1, name="test", email="test@example.com")
             logger.info("   - Sending stream object: %s", user_obj)
-            await s_stream.send_obj(obj=user_obj)
-            received_user_obj = await s_stream.receive_obj()
+            await structured_stream.send_obj(obj=user_obj)
+            received_user_obj = await structured_stream.receive_obj()
             logger.info("   - Received stream object: %s", received_user_obj)
             if user_obj != received_user_obj:
                 logger.error("FAILURE: Stream object mismatch for UserData.")
@@ -75,24 +84,25 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
 
             status_obj = StatusUpdate(status="active", timestamp=time.time())
             logger.info("   - Sending stream object: %s", status_obj)
-            await s_stream.send_obj(obj=status_obj)
-            received_status_obj = await s_stream.receive_obj()
+            await structured_stream.send_obj(obj=status_obj)
+            received_status_obj = await structured_stream.receive_obj()
             logger.info("   - Received stream object: %s", received_status_obj)
             if status_obj.status != received_status_obj.status:
                 logger.error("FAILURE: Stream object mismatch for StatusUpdate.")
                 return False
             logger.info("   - SUCCESS: StructuredStream echo correct.")
-            await s_stream.close()
+            await structured_stream.close()
 
             logger.info("[%s] Testing StructuredDatagramTransport...", serializer_name.upper())
-            s_datagram_transport = await session.create_structured_datagram_transport(
-                serializer=serializer, registry=MESSAGE_REGISTRY
+            raw_datagram_transport = await session.create_datagram_transport()
+            structured_datagram_transport = StructuredDatagramTransport(
+                datagram_transport=raw_datagram_transport, serializer=serializer, registry=MESSAGE_REGISTRY
             )
 
             datagram_obj = UserData(id=99, name="datagram_user", email="dg@example.com")
             logger.info("   - Sending datagram object: %s", datagram_obj)
-            await s_datagram_transport.send_obj(obj=datagram_obj)
-            received_datagram_obj = await s_datagram_transport.receive_obj(timeout=5.0)
+            await structured_datagram_transport.send_obj(obj=datagram_obj)
+            received_datagram_obj = await structured_datagram_transport.receive_obj(timeout=5.0)
             logger.info("   - Received datagram object: %s", received_datagram_obj)
             if datagram_obj != received_datagram_obj:
                 logger.error("FAILURE: Datagram object mismatch.")
