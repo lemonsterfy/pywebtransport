@@ -1,14 +1,16 @@
-"""WebTransport Stream Subpackage."""
+"""Abstractions for the WebTransport reliable stream transport."""
 
-from .manager import StreamManager
-from .pool import StreamPool
-from .stream import StreamBuffer, StreamStats, WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from .stream import (
+    StreamDiagnostics,
+    StreamStats,
+    WebTransportReceiveStream,
+    WebTransportSendStream,
+    WebTransportStream,
+)
 from .structured import StructuredStream
 
-__all__ = [
-    "StreamBuffer",
-    "StreamManager",
-    "StreamPool",
+__all__: list[str] = [
+    "StreamDiagnostics",
     "StreamStats",
     "StructuredStream",
     "WebTransportReceiveStream",

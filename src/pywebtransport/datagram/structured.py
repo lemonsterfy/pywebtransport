@@ -1,22 +1,22 @@
-"""High-level structured data datagrams for WebTransport."""
+"""High-level wrapper for structured data over datagrams."""
 
 from __future__ import annotations
 
 import struct
 from typing import TYPE_CHECKING, Any
 
-from pywebtransport.exceptions import SerializationError
+from pywebtransport.exceptions import ConfigurationError, SerializationError
 from pywebtransport.types import Serializer
 
 if TYPE_CHECKING:
     from pywebtransport.datagram.transport import WebTransportDatagramTransport
 
 
-__all__ = ["StructuredDatagramTransport"]
+__all__: list[str] = ["StructuredDatagramTransport"]
 
 
 class StructuredDatagramTransport:
-    """A high-level wrapper for sending and receiving structured objects."""
+    """Send and receive structured objects over datagrams."""
 
     _HEADER_FORMAT = "!H"
     _HEADER_SIZE = struct.calcsize(_HEADER_FORMAT)
@@ -29,6 +29,9 @@ class StructuredDatagramTransport:
         registry: dict[int, type[Any]],
     ) -> None:
         """Initialize the structured datagram transport."""
+        if len(set(registry.values())) != len(registry):
+            raise ConfigurationError(message="Types in the structured datagram registry must be unique.")
+
         self._datagram_transport = datagram_transport
         self._serializer = serializer
         self._registry = registry

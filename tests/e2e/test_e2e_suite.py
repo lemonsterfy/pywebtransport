@@ -62,15 +62,15 @@ from .test_10_pubsub import test_pubsub_unsubscribe as run_10_unsubscribe
 
 
 async def _is_server_ready() -> bool:
-    config = ClientConfig.create(verify_mode=ssl.CERT_NONE, connect_timeout=1.0)
-    for _ in range(20):
+    config = ClientConfig(verify_mode=ssl.CERT_NONE, connect_timeout=10.0)
+    for _ in range(60):
         try:
             async with WebTransportClient(config=config) as client:
                 session = await client.connect(url="https://127.0.0.1:4433/health")
                 await session.close()
                 return True
         except (ClientError, asyncio.TimeoutError):
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     return False
 
 
@@ -109,7 +109,7 @@ async def e2e_server() -> AsyncGenerator[None, None]:
 
     server_proc.terminate()
     try:
-        server_proc.communicate(timeout=5)
+        server_proc.communicate(timeout=5.0)
     except subprocess.TimeoutExpired:
         server_proc.kill()
         server_proc.communicate()

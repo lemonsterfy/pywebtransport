@@ -1,6 +1,6 @@
 # API Reference: config
 
-This document contains the configuration classes for the client and server.
+This module provides the configuration classes for the client and server.
 
 ---
 
@@ -26,7 +26,7 @@ A dataclass that holds all configuration options for a WebTransport client.
 
 The constructor accepts the following keyword-only arguments:
 
-- `alpn_protocols` (`list[str]`): List of protocols for ALPN negotiation. `Default: ['h3', 'h3-29']`.
+- `alpn_protocols` (`list[str]`): List of protocols for ALPN negotiation. `Default: ['h3']`.
 - `auto_reconnect` (`bool`): Enable or disable automatic reconnection on unexpected disconnections. `Default: False`.
 - `ca_certs` (`str | None`): Path to a file of concatenated CA certificates. `Default: None`.
 - `certfile` (`str | None`): Path to the client's certificate file (for mTLS). `Default: None`.
@@ -73,7 +73,6 @@ The constructor accepts the following keyword-only arguments:
 
 ### Class Methods
 
-- **`def create(cls, **kwargs: Any) -> Self`**: Creates a `ClientConfig` instance, applying keyword arguments over the defaults.
 - **`def create_for_development(cls, *, verify_ssl: bool = False) -> Self`**: Creates a config optimized for development with relaxed security.
 - **`def create_for_production(cls, *, ca_certs: str | None = None, certfile: str | None = None, keyfile: str | None = None) -> Self`**: Creates a config optimized for production with stricter security.
 - **`def from_dict(cls, *, config_dict: dict[str, Any]) -> Self`**: Creates a `ClientConfig` instance from a dictionary.
@@ -81,7 +80,6 @@ The constructor accepts the following keyword-only arguments:
 ### Instance Methods
 
 - **`def copy(self) -> Self`**: Returns a deep copy of the configuration instance.
-- **`def merge(self, *, other: ClientConfig | dict[str, Any]) -> Self`**: Merges the current config with another, returning a new instance.
 - **`def to_dict(self) -> dict[str, Any]`**: Converts the configuration to a dictionary.
 - **`def update(self, **kwargs: Any) -> Self`**: Returns a new `ClientConfig` instance with updated values.
 - **`def validate(self) -> None`**: Validates configuration values, raising `ConfigurationError` on failure.
@@ -97,7 +95,7 @@ A dataclass that holds all configuration options for a WebTransport server.
 The constructor accepts the following keyword-only arguments:
 
 - `access_log` (`bool`): Enable or disable access logging. `Default: True`.
-- `alpn_protocols` (`list[str]`): List of protocols for ALPN negotiation. `Default: ['h3', 'h3-29']`.
+- `alpn_protocols` (`list[str]`): List of protocols for ALPN negotiation. `Default: ['h3']`.
 - `bind_host` (`str`): The host address to bind to. `Default: "localhost"`.
 - `bind_port` (`int`): The port to bind to. `Default: 4433`.
 - `ca_certs` (`str | None`): Path to CA certificates for client validation (mTLS). `Default: None`.
@@ -133,12 +131,11 @@ The constructor accepts the following keyword-only arguments:
 - `stream_cleanup_interval` (`float`): Interval for cleaning up closed streams. `Default: 15.0`.
 - `stream_flow_control_increment_bidi` (`int`): Number of bidirectional streams to grant when the limit is reached. `Default: 10`.
 - `stream_flow_control_increment_uni` (`int`): Number of unidirectional streams to grant when the limit is reached. `Default: 10`.
-- `verify_mode` (`ssl.VerifyMode`): SSL verification mode for client certificates. `Default: ssl.CERT_NONE`.
+- `verify_mode` (`ssl.VerifyMode`): SSL verification mode for client certificates. `Default: ssl.CERT_OPTIONAL`.
 - `write_timeout` (`float | None`): Timeout for write operations. `Default: 30.0`.
 
 ### Class Methods
 
-- **`def create(cls, **kwargs: Any) -> Self`**: Creates a `ServerConfig` instance, applying keyword arguments over the defaults.
 - **`def create_for_development(cls, *, host: str = "localhost", port: int = 4433, certfile: str | None = None, keyfile: str | None = None) -> Self`**: Creates a config for local development.
 - **`def create_for_production(cls, *, host: str, port: int, certfile: str, keyfile: str, ca_certs: str | None = None) -> Self`**: Creates a config for production use.
 - **`def from_dict(cls, *, config_dict: dict[str, Any]) -> Self`**: Creates a `ServerConfig` instance from a dictionary.
@@ -146,29 +143,9 @@ The constructor accepts the following keyword-only arguments:
 ### Instance Methods
 
 - **`def copy(self) -> Self`**: Returns a deep copy of the configuration instance.
-- **`def get_bind_address(self) -> Address`**: Returns the bind address as a `(host, port)` tuple.
-- **`def merge(self, *, other: ServerConfig | dict[str, Any]) -> Self`**: Merges the current config with another, returning a new instance.
 - **`def to_dict(self) -> dict[str, Any]`**: Converts the configuration to a dictionary.
 - **`def update(self, **kwargs: Any) -> Self`**: Returns a new `ServerConfig` instance with updated values.
 - **`def validate(self) -> None`**: Validates configuration values, raising `ConfigurationError` on failure.
-
-## ConfigBuilder Class
-
-A fluent builder for creating `ClientConfig` or `ServerConfig` instances.
-
-### Constructor
-
-- **`def __init__(self, *, config_type: str = "client") -> None`**: Initializes the builder for "client" or "server".
-
-### Instance Methods
-
-- **`def bind(self, *, host: str, port: int) -> Self`**: Sets bind address (server only).
-- **`def build(self) -> ClientConfig | ServerConfig`**: Constructs and returns the final configuration object.
-- **`def debug(self, *, enabled: bool = True, log_level: str = "DEBUG") -> Self`**: Sets debug settings.
-- **`def flow_control(self, *, window_size: int | None = None, window_auto_scale: bool | None = None, initial_max_data: int | None = None, initial_max_streams_bidi: int | None = None, initial_max_streams_uni: int | None = None, stream_increment_bidi: int | None = None, stream_increment_uni: int | None = None) -> Self`**: Sets session-level flow control settings.
-- **`def performance(self, *, max_streams: int | None = None, buffer_size: int | None = None, max_connections: int | None = None) -> Self`**: Sets performance settings.
-- **`def security(self, *, certfile: str | None = None, keyfile: str | None = None, ca_certs: str | None = None, verify_mode: ssl.VerifyMode | None = None) -> Self`**: Sets security settings.
-- **`def timeout(self, *, connect: float | None = None, read: float | None = None, write: float | None = None) -> Self`**: Sets timeout settings.
 
 ## See Also
 

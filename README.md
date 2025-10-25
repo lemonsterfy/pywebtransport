@@ -11,12 +11,12 @@ The canonical, async-native WebTransport stack for Python.
 
 ## Features
 
-- **Full Async Support**: Built from the ground up on asyncio for high-performance, non-blocking I/O.
-- **High-Level Frameworks**: Includes a ServerApp with routing and middleware, and a versatile WebTransportClient with helpers for pooling, auto-reconnection, and proxying.
+- **Full Async Support**: Built from the ground up on `asyncio` for high-performance, non-blocking I/O.
+- **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for fleet management, auto-reconnection, and browser-like navigation.
 - **Advanced Messaging**: Built-in managers for Pub/Sub and RPC (JSON-RPC 2.0 compliant), plus pluggable serializers (`JSON`, `MsgPack`, `Protobuf`) for structured data.
 - **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
-- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and monitoring.
-- **Event-Driven Architecture**: A powerful EventEmitter and EventBus system for decoupled, asynchronous communication between components.
+- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, monitoring, pooling, and resource management.
+- **Event-Driven Architecture**: A powerful `EventEmitter` system for decoupled, asynchronous communication between components.
 - **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
 
 ## Installation
@@ -48,7 +48,7 @@ from pywebtransport.utils import generate_self_signed_cert
 generate_self_signed_cert(hostname="localhost")
 
 app = ServerApp(
-    config=ServerConfig.create(
+    config=ServerConfig(
         certfile="localhost.crt",
         keyfile="localhost.key",
         initial_max_data=1024 * 1024,
@@ -59,7 +59,7 @@ app = ServerApp(
 
 async def handle_datagrams(session: WebTransportSession) -> None:
     try:
-        datagram_transport = await session.datagrams
+        datagram_transport = await session.create_datagram_transport()
         while True:
             data = await datagram_transport.receive()
             await datagram_transport.send(data=b"ECHO: " + data)
@@ -90,7 +90,6 @@ async def echo_handler(session: WebTransportSession) -> None:
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=4433)
-
 ```
 
 ### Client
@@ -104,7 +103,7 @@ from pywebtransport import ClientConfig, WebTransportClient
 
 
 async def main() -> None:
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         initial_max_data=1024 * 1024,
         initial_max_streams_bidi=10,
@@ -114,7 +113,7 @@ async def main() -> None:
         session = await client.connect(url="https://127.0.0.1:4433/")
 
         print("Connection established. Testing datagrams...")
-        datagram_transport = await session.datagrams
+        datagram_transport = await session.create_datagram_transport()
         await datagram_transport.send(data=b"Hello, Datagram!")
         response = await datagram_transport.receive()
         print(f"Datagram echo: {response!r}\n")
@@ -133,14 +132,13 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-
 ```
 
 ## Documentation
 
-- **[Installation Guide](docs/installation.md)** - In-depth setup and installation guide.
-- **[Quick Start](docs/quickstart.md)** - A 5-minute tutorial to get started.
-- **[API Reference](docs/api-reference/)** - Complete API documentation.
+- **[Installation Guide](docs/installation.md)** - Learn how to install the library.
+- **[Quick Start](docs/quickstart.md)** - Discover how to get started with basic client and server setup.
+- **[API Reference](docs/api-reference/)** - Explore the complete API documentation.
 
 ## Requirements
 
@@ -174,7 +172,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - [aioquic](https://github.com/aiortc/aioquic) for the underlying QUIC protocol implementation.
-- [WebTransport Working Group](https://datatracker.ietf.org/wg/webtrans/) for standardizing the protocol.
+- [WebTransport Working Group](https://datatracker.ietf.org/wg/webtrans/) for defining and standardizing the WebTransport protocol.
 
 ## Support
 

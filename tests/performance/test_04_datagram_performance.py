@@ -25,7 +25,7 @@ logger = logging.getLogger("test_04_datagram_performance")
 @pytest.fixture(scope="module")
 def client_config() -> ClientConfig:
     """Provide a client configuration suitable for datagram tests."""
-    return ClientConfig.create(
+    return ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=15.0,
         read_timeout=5.0,
@@ -44,7 +44,7 @@ class TestDatagramPerformance:
         async def run_rtt_cycle() -> None:
             async with WebTransportClient(config=client_config) as client:
                 session = await client.connect(url=f"{SERVER_URL}{ECHO_ENDPOINT}")
-                datagram_transport = await session.datagrams
+                datagram_transport = await session.create_datagram_transport()
                 payload = uuid.uuid4().bytes
 
                 async def send_and_wait_for_echo() -> None:
@@ -72,7 +72,7 @@ class TestDatagramPerformance:
         async def run_pps_cycle() -> None:
             async with WebTransportClient(config=client_config) as client:
                 session = await client.connect(url=f"{SERVER_URL}{DISCARD_ENDPOINT}")
-                datagram_transport = await session.datagrams
+                datagram_transport = await session.create_datagram_transport()
 
                 tasks = []
                 for _ in range(PPS_BURST_COUNT):

@@ -1,6 +1,6 @@
 # API Reference: serializer
 
-This document provides a reference for the `pywebtransport.serializer` subpackage, which offers a framework for serializing and deserializing structured data.
+This document provides a reference for the `pywebtransport.serializer` subpackage, which provides pluggable serializers for structured data transmission.
 
 ---
 

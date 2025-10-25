@@ -1,14 +1,10 @@
-"""WebTransport Pub/Sub-specific exceptions."""
+"""Custom exception hierarchy for the Pub/Sub system."""
 
 from __future__ import annotations
 
 from pywebtransport.exceptions import WebTransportError
 
-__all__ = [
-    "NotSubscribedError",
-    "PubSubError",
-    "SubscriptionFailedError",
-]
+__all__: list[str] = ["NotSubscribedError", "PubSubError", "SubscriptionFailedError"]
 
 
 class PubSubError(WebTransportError):

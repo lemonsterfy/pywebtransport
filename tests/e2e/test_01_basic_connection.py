@@ -50,7 +50,7 @@ async def test_basic_connection() -> bool:
     logger.info("Test 01: Basic WebTransport Connection")
     logger.info("=" * 50)
 
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=15.0,
         headers={"user-agent": "pywebtransport-e2e-test/1.0"},

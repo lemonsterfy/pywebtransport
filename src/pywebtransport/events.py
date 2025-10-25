@@ -1,28 +1,20 @@
-"""Asynchronous Event System."""
+"""Core components for the library's event-driven architecture."""
 
 from __future__ import annotations
 
 import asyncio
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Self, TypeVar
+from typing import Any, Self
 
-from pywebtransport.types import EventData, EventHandler, EventType, Timeout
+from pywebtransport.types import EventData, EventType, Timeout
 from pywebtransport.utils import get_logger, get_timestamp
 
-__all__ = [
-    "Event",
-    "EventBus",
-    "EventEmitter",
-    "create_event_bus",
-    "create_event_emitter",
-    "event_handler",
-]
+__all__: list[str] = ["Event", "EventEmitter", "EventHandler"]
 
-logger = get_logger(name="events")
-F = TypeVar("F", bound=Callable[..., Any])
+logger = get_logger(name=__name__)
 
 
 @dataclass(kw_only=True)
@@ -41,7 +33,7 @@ class Event:
             try:
                 self.type = EventType(self.type)
             except ValueError:
-                pass
+                logger.warning("Unknown event type string: '%s'", self.type)
 
     @classmethod
     def for_connection(cls, *, event_type: EventType, connection_info: dict[str, Any]) -> Self:
@@ -58,6 +50,7 @@ class Event:
         """Factory method to create a new error event from an exception."""
         to_dict_method: Callable[[], dict[str, Any]] = getattr(error, "to_dict", lambda: {})
         details = to_dict_method() if callable(to_dict_method) else {}
+
         return cls(
             type=EventType.PROTOCOL_ERROR,
             data={
@@ -113,13 +106,16 @@ class Event:
             "source": str(self.source) if self.source else None,
         }
 
+    def __repr__(self) -> str:
+        """Return a detailed string representation of the event."""
+        return f"Event(type={self.type}, id={self.event_id}, timestamp={self.timestamp})"
+
     def __str__(self) -> str:
         """Return a simple string representation of the event."""
         return f"Event({self.type}, {self.event_id[:8]})"
 
-    def __repr__(self) -> str:
-        """Return a detailed string representation of the event."""
-        return f"Event(type={self.type}, id={self.event_id}, timestamp={self.timestamp})"
+
+EventHandler = Callable[[Event], Awaitable[None] | None]
 
 
 class EventEmitter:
@@ -129,15 +125,16 @@ class EventEmitter:
         """Initialize the event emitter."""
         if getattr(self, "_emitter_initialized", False):
             return
+
         self._handlers: dict[EventType | str, list[EventHandler]] = defaultdict(list)
         self._once_handlers: dict[EventType | str, list[EventHandler]] = defaultdict(list)
-        self._max_listeners = kwargs.get("max_listeners", 100)
-        self._event_history: list[Event] = []
-        self._max_history = 1000
         self._wildcard_handlers: list[EventHandler] = []
-        self._paused = False
         self._event_queue: deque[Event] = deque()
-        self._processing_task: asyncio.Task | None = None
+        self._event_history: list[Event] = []
+        self._processing_task: asyncio.Task[None] | None = None
+        self._paused = False
+        self._max_listeners = kwargs.get("max_listeners", 100)
+        self._max_history = 1000
         self._emitter_initialized = True
 
     async def close(self) -> None:
@@ -148,6 +145,7 @@ class EventEmitter:
                 await self._processing_task
             except asyncio.CancelledError:
                 pass
+
         self.remove_all_listeners()
         logger.debug("EventEmitter closed and listeners cleared.")
 
@@ -156,10 +154,11 @@ class EventEmitter:
         self._paused = True
         logger.debug("Event processing paused")
 
-    def resume(self) -> asyncio.Task | None:
+    def resume(self) -> asyncio.Task[None] | None:
         """Resume event processing and handle all queued events."""
         self._paused = False
         logger.debug("Event processing resumed")
+
         if self._event_queue and (self._processing_task is None or self._processing_task.done()):
             self._processing_task = asyncio.create_task(self._process_queued_events())
             return self._processing_task
@@ -214,6 +213,7 @@ class EventEmitter:
                 self._max_listeners,
                 event_type,
             )
+
         if handler not in handlers:
             handlers.append(handler)
             logger.debug("Registered handler for event %s", event_type)
@@ -229,6 +229,7 @@ class EventEmitter:
     def once(self, *, event_type: EventType | str, handler: EventHandler) -> None:
         """Register a one-time event handler."""
         once_handlers = self._once_handlers[event_type]
+
         if handler not in once_handlers:
             once_handlers.append(handler)
             logger.debug("Registered once handler for event %s", event_type)
@@ -319,11 +320,14 @@ class EventEmitter:
         """Process a single event by invoking all relevant handlers."""
         handlers_to_call: list[EventHandler] = self._handlers[event.type][:]
         once_handlers_to_call: list[EventHandler] = self._once_handlers[event.type][:]
+        all_handlers = handlers_to_call + once_handlers_to_call + self._wildcard_handlers
+
         if once_handlers_to_call:
             self._once_handlers[event.type].clear()
-        all_handlers = handlers_to_call + once_handlers_to_call + self._wildcard_handlers
+
         if not all_handlers:
             return
+
         logger.debug("Emitting event %s to %d handlers", event.type, len(all_handlers))
         for handler in all_handlers:
             try:
@@ -339,99 +343,3 @@ class EventEmitter:
         while self._event_queue and not self._paused:
             event = self._event_queue.popleft()
             await self._process_event(event=event)
-
-
-class EventBus:
-    """A global, singleton event bus for cross-component communication."""
-
-    _instance: EventBus | None = None
-    _lock: asyncio.Lock | None = None
-
-    def __init__(self) -> None:
-        """Initialize the event bus."""
-        self._emitter = EventEmitter(max_listeners=1000)
-        self._subscriptions: dict[str, tuple[EventType | str, EventHandler]] = {}
-        self._subscription_counter = 0
-
-    @classmethod
-    async def get_instance(cls) -> EventBus:
-        """Get the singleton instance of the EventBus."""
-        if cls._instance is None:
-            if cls._lock is None:
-                cls._lock = asyncio.Lock()
-            async with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
-
-    async def close(self) -> None:
-        """Close the event bus and its underlying emitter."""
-        await self._emitter.close()
-        self.clear_all_subscriptions()
-        logger.debug("Event bus closed.")
-
-    async def emit(
-        self,
-        *,
-        event_type: EventType | str,
-        data: EventData | None = None,
-        source: Any = None,
-    ) -> None:
-        """Create and emit an event on the bus."""
-        await self._emitter.emit(event_type=event_type, data=data, source=source)
-
-    async def publish(self, *, event: Event) -> None:
-        """Publish a pre-constructed event to all subscribers."""
-        await self._emitter.emit(event_type=event.type, data=event.data, source=event.source)
-
-    def subscribe(self, *, event_type: EventType | str, handler: EventHandler, once: bool = False) -> str:
-        """Subscribe to an event, returning a unique subscription ID."""
-        subscription_id = f"sub_{self._subscription_counter}"
-        self._subscription_counter += 1
-        self._subscriptions[subscription_id] = (event_type, handler)
-        if once:
-            self._emitter.once(event_type=event_type, handler=handler)
-        else:
-            self._emitter.on(event_type=event_type, handler=handler)
-        logger.debug("Created subscription %s for event %s", subscription_id, event_type)
-        return subscription_id
-
-    def unsubscribe(self, *, subscription_id: str) -> None:
-        """Unsubscribe from an event using its subscription ID."""
-        if subscription_id not in self._subscriptions:
-            logger.warning("Subscription %s not found", subscription_id)
-            return
-        event_type, handler = self._subscriptions.pop(subscription_id)
-        self._emitter.off(event_type=event_type, handler=handler)
-        logger.debug("Removed subscription %s for event %s", subscription_id, event_type)
-
-    def clear_all_subscriptions(self) -> None:
-        """Clear all subscriptions from the bus."""
-        self._subscriptions.clear()
-        self._emitter.remove_all_listeners()
-        logger.debug("Cleared all event bus subscriptions")
-
-    def get_subscription_count(self) -> int:
-        """Get the number of active subscriptions."""
-        return len(self._subscriptions)
-
-
-async def create_event_bus() -> EventBus:
-    """Create or get the global event bus instance."""
-    return await EventBus.get_instance()
-
-
-def create_event_emitter(*, max_listeners: int = 100) -> EventEmitter:
-    """Create a new, standalone event emitter."""
-    return EventEmitter(max_listeners=max_listeners)
-
-
-def event_handler(*, event_type: EventType | str) -> Callable[[F], F]:
-    """Decorate a function as a handler for a specific event type."""
-
-    def decorator(func: F) -> F:
-        setattr(func, "_event_type", event_type)
-        setattr(func, "_is_event_handler", True)
-        return func
-
-    return decorator

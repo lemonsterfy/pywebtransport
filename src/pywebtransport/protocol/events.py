@@ -1,4 +1,4 @@
-"""Internal event definitions for the WebTransport protocol layer."""
+"""Internal event types used within the protocol layer."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from pywebtransport.types import Headers, StreamId
 
-__all__ = [
+__all__: list[str] = [
     "CapsuleReceived",
     "DatagramReceived",
     "H3Event",
@@ -16,12 +16,12 @@ __all__ = [
 
 
 class H3Event:
-    """Base class for all H3 protocol engine events."""
+    """Represent the base class for all H3 protocol engine events."""
 
 
 @dataclass(kw_only=True)
 class CapsuleReceived(H3Event):
-    """Fired when an HTTP Capsule is received on a stream."""
+    """Represent an HTTP Capsule received on a stream."""
 
     capsule_data: bytes
     capsule_type: int
@@ -30,7 +30,7 @@ class CapsuleReceived(H3Event):
 
 @dataclass(kw_only=True)
 class DatagramReceived(H3Event):
-    """Fired when a WebTransport datagram is received."""
+    """Represent a WebTransport datagram received."""
 
     data: bytes
     stream_id: StreamId
@@ -38,7 +38,7 @@ class DatagramReceived(H3Event):
 
 @dataclass(kw_only=True)
 class HeadersReceived(H3Event):
-    """Fired when a HEADERS frame is received on a stream."""
+    """Represent a HEADERS frame received on a stream."""
 
     headers: Headers
     stream_id: StreamId
@@ -47,9 +47,9 @@ class HeadersReceived(H3Event):
 
 @dataclass(kw_only=True)
 class WebTransportStreamDataReceived(H3Event):
-    """Fired when raw data is received on an established WebTransport stream."""
+    """Represent raw data received on an established WebTransport stream."""
 
     data: bytes
-    session_id: int
+    control_stream_id: StreamId
     stream_id: StreamId
     stream_ended: bool

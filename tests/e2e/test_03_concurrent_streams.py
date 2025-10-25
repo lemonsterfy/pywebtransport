@@ -35,7 +35,7 @@ async def test_sequential_streams() -> bool:
     """Test creating and using multiple streams sequentially in one session."""
     logger.info("--- Test 03A: Sequential Multiple Streams ---")
     num_streams = 3
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         read_timeout=5.0,
@@ -77,7 +77,7 @@ async def test_concurrent_streams() -> bool:
     """Test handling multiple streams concurrently using asyncio tasks."""
     logger.info("--- Test 03B: Concurrent Streams ---")
     num_streams = 10
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         read_timeout=10.0,
@@ -135,7 +135,7 @@ async def test_concurrent_streams() -> bool:
 async def test_stream_lifecycle() -> bool:
     """Test the full lifecycle management of a single stream."""
     logger.info("--- Test 03C: Stream Lifecycle Management ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         read_timeout=5.0,
@@ -173,7 +173,7 @@ async def test_stream_stress() -> bool:
     """Perform a stress test by rapidly creating and using streams."""
     logger.info("--- Test 03D: Stream Stress Test ---")
     num_iterations = 20
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         read_timeout=5.0,

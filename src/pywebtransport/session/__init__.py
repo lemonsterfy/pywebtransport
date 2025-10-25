@@ -1,10 +1,5 @@
-"""WebTransport Session Subpackage."""
+"""Core abstraction for a logical WebTransport session."""
 
-from .manager import SessionManager
-from .session import SessionStats, WebTransportSession
+from .session import SessionDiagnostics, SessionStats, WebTransportSession
 
-__all__ = [
-    "SessionManager",
-    "SessionStats",
-    "WebTransportSession",
-]
+__all__: list[str] = ["SessionDiagnostics", "SessionStats", "WebTransportSession"]

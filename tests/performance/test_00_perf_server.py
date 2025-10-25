@@ -13,7 +13,6 @@ import psutil
 
 from pywebtransport import (
     ConnectionError,
-    EventType,
     ServerApp,
     ServerConfig,
     WebTransportReceiveStream,
@@ -21,7 +20,8 @@ from pywebtransport import (
     WebTransportSession,
     WebTransportStream,
 )
-from pywebtransport.types import SessionHandler
+from pywebtransport.server import SessionHandler
+from pywebtransport.types import ConnectionState, EventType
 from pywebtransport.utils import generate_self_signed_cert
 
 CERT_PATH: Final[Path] = Path("localhost.crt")
@@ -111,13 +111,13 @@ class PerformanceServerApp(ServerApp):
                     continue
 
                 await stream.read(size=1)
-                stats = await self.server.get_server_stats()
+                diagnostics = await self.server.diagnostics()
                 cpu_percent = SERVER_PROCESS.cpu_percent(interval=0.1)
                 memory_info = SERVER_PROCESS.memory_info()
                 usage_data = {
                     "cpu_percent": cpu_percent,
                     "memory_rss_bytes": memory_info.rss,
-                    "active_connections": stats.get("connections", {}).get("active", 0),
+                    "active_connections": diagnostics.connection_states.get(ConnectionState.CONNECTED, 0),
                 }
                 await stream.write_all(data=json.dumps(usage_data).encode())
                 await stream.read_all()
@@ -200,7 +200,7 @@ async def handle_stream_request_response(stream: WebTransportStream) -> None:
 async def datagram_echo_task(*, session: WebTransportSession) -> None:
     """Receive datagrams and echo them back in a loop."""
     try:
-        datagram_transport = await session.datagrams
+        datagram_transport = await session.create_datagram_transport()
         while True:
             data = await datagram_transport.receive()
             await datagram_transport.send(data=b"ECHO: " + data)
@@ -238,7 +238,7 @@ async def main() -> None:
         generate_self_signed_cert(hostname=CERT_PATH.stem, output_dir=".")
 
     logger.info("Starting PyWebTransport Performance Test Server...")
-    config = ServerConfig.create(
+    config = ServerConfig(
         bind_host=SERVER_HOST,
         bind_port=SERVER_PORT,
         certfile=str(CERT_PATH),

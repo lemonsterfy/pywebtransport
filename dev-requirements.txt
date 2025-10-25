@@ -6,34 +6,20 @@
 #
 --index-url https://pypi.org/simple
 
-aioquic==1.2.0 \
-    --hash=sha256:1de513772fd04ff38028fdf748a9e2dec33d7aa2fbf67fda3011d9a85b620c54 \
-    --hash=sha256:2466499759b31ea4f1d17f4aeb1f8d4297169e05e3c1216d618c9757f4dd740d \
-    --hash=sha256:358e2b9c1e0c24b9933094c3c2cf990faf44d03b64d6f8ff79b4b3f510c6c268 \
-    --hash=sha256:3976b75e82d83742c8b811e38d273eda2ca7f81394b6a85da33a02849c5f1d9d \
-    --hash=sha256:3e23964dfb04526ade6e66f5b7cd0c830421b8138303ab60ba6e204015e7cb0b \
-    --hash=sha256:43ae3b11d43400a620ca0b4b4885d12b76a599c2cbddba755f74bebfa65fe587 \
-    --hash=sha256:6371c3afa1036294e1505fdbda8c147bc41c5b6709a47459e8c1b4eec41a86ef \
-    --hash=sha256:6e418c92898a0af306e6f1b6a55a0d3d2597001c57a7b1ba36cf5b47bf41233b \
-    --hash=sha256:6fe683943ea3439dd0aca05ff80e85a552d4b39f9f34858c76ac54c205990e88 \
-    --hash=sha256:7dcc212bb529900757d8e99a76198b42c2a978ce735a1bfca394033c16cfc33c \
-    --hash=sha256:81650d59bef05c514af2cfdcb2946e9d13367b745e68b36881d43630ef563d38 \
-    --hash=sha256:84d733332927b76218a3b246216104116f766f5a9b2308ec306cd017b3049660 \
-    --hash=sha256:8e600da7aa7e4a7bc53ee8f45fd66808032127ae00938c119ac77d66633b8961 \
-    --hash=sha256:910d8c91da86bba003d491d15deaeac3087d1b9d690b9edc1375905d8867b742 \
-    --hash=sha256:bb917143e7a4de5beba1e695fa89f2b05ef080b450dea07338cc67a9c75e0a4d \
-    --hash=sha256:c22689c33fe4799624aed6faaba0af9e6ea7d31ac45047745828ee68d67fe1d9 \
-    --hash=sha256:c332cffa3c2124e5db82b2b9eb2662bd7c39ee2247606b74de689f6d3091b61a \
-    --hash=sha256:cbe7167b2faee887e115d83d25332c4b8fa4604d5175807d978cb4fe39b4e36e \
-    --hash=sha256:cd75015462ca5070a888110dc201f35a9f4c7459f9201b77adc3c06013611bb8 \
-    --hash=sha256:e2c3c127cc3d9eac7a6d05142036bf4b2c593d750a115a2fa42c1f86cbe8c0a0 \
-    --hash=sha256:e3dcfb941004333d477225a6689b55fc7f905af5ee6a556eb5083be0354e653a \
-    --hash=sha256:e7ce10198f8efa91986ad8ac83fa08e50972e0aacde45bdaf7b9365094e72c0c \
-    --hash=sha256:f209ad5edbff8239e994c189dc74428420957448a190f4343faee4caedef4eee \
-    --hash=sha256:f81e7946f09501a7c27e3f71b84a455e6bf92346fb5a28ef2d73c9d564463c63 \
-    --hash=sha256:f91263bb3f71948c5c8915b4d50ee370004f20a416f67fab3dcc90556c7e7199 \
-    --hash=sha256:fcc1eb083ed9f8d903482e375281c8c26a5ed2b6bee5ee2be3f13275d8fdb146
-    # via pywebtransport
+aioquic==1.3.0 \
+    --hash=sha256:019b16580d53541b5d77b4a44a61966921156554fad2536d74895713c800caa5 \
+    --hash=sha256:0538acdfbf839d87b175676664737c248cd51f1a2295c5fef8e131ddde478a86 \
+    --hash=sha256:28d070b2183e3e79afa9d4e7bd558960d0d53aeb98bc0cf0a358b279ba797c92 \
+    --hash=sha256:2d7957ba14a6c5efcc14fdc685ccda7ecf0ad048c410a2bdcad1b63bf9527e8e \
+    --hash=sha256:396e5f53f6ddb27713d9b5bb11d8f0f842e42857b7e671c5ae203bf618528550 \
+    --hash=sha256:4098afc6337adf19bdb54474f6c37983988e7bfa407892a277259c32eb664b00 \
+    --hash=sha256:48292279a248422b6289fffd82159eba8d8b35ff4b1f660b9f74ff85e10ca265 \
+    --hash=sha256:48590fa38ec13f01a3d4e44fb3cfd373661094c9c7248f3c54d2d9512b6c3469 \
+    --hash=sha256:59da070ff0f55a54f5623c9190dbc86638daa0bcf84bbdb11ebe507abc641435 \
+    --hash=sha256:9d15a89213d38cbc4679990fa5151af8ea02655a1d6ce5ec972b0a6af74d5f1c \
+    --hash=sha256:a8881239801279188e33ced6f9849cedf033325a48a6f44d7e55e583abc555a3 \
+    --hash=sha256:ba30016244e45d9222fdd1fbd4e8b0e5f6811e81a5d0643475ad7024a537274a
+    # via pywebtransport (pyproject.toml)
 attrs==25.3.0 \
     --hash=sha256:427318ce031701fea540783410126f03899a97ffc6f61596ad581ac2e40e3bc3 \
     --hash=sha256:75d7cefc7fb576747b2c81b4442d4d4a1ce0900973527c011d1030fd3bf4af1b
@@ -61,7 +47,7 @@ black==25.9.0 \
     --hash=sha256:e593466de7b998374ea2585a471ba90553283fb9beefcfa430d84a2651ed5933 \
     --hash=sha256:ef69351df3c84485a8beb6f7b8f9721e2009e20ef80a8d619e2d1788b7816d47 \
     --hash=sha256:f96b6726d690c96c60ba682955199f8c39abc1ae0c3a494a9c62c0184049a713
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 certifi==2025.8.3 \
     --hash=sha256:e564105f78ded564e3ae7c923924435e1daa7463faeab5bb932bc53ffae63407 \
     --hash=sha256:f6c12493cfb1b06ba2ff328595af9350c65d6644968e5d3a2ffd78699af217a5
@@ -303,12 +289,12 @@ cryptography==45.0.7 \
     # via
     #   aioquic
     #   pyopenssl
-    #   pywebtransport
+    #   pywebtransport (pyproject.toml)
     #   service-identity
 flake8==7.3.0 \
     --hash=sha256:b9696257b9ce8beb888cdbe31cf885c90d31928fe202be0889a7cdafad32f01e \
     --hash=sha256:fe044858146b9fc69b551a4b490d69cf960fcb78ad1edcb84e7fbb1b4a8e3872
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 iniconfig==2.1.0 \
     --hash=sha256:3abbd2e30b36733fee78f9c7f7308f2d0050e88f0087fd25c2645f63c773e1c7 \
     --hash=sha256:9deba5723312380e77435581c6bf4935c94cbfab9b1ed33ef8d238ea168eb760
@@ -316,7 +302,7 @@ iniconfig==2.1.0 \
 isort==6.0.1 \
     --hash=sha256:1cb5df28dfbc742e490c5e41bad6da41b805b0a8be7bc93cd0fb2a8a890ac450 \
     --hash=sha256:2dc5d7f65c9678d94c88dfc29161a320eec67328bc97aad576874cb4be1e9615
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 mccabe==0.7.0 \
     --hash=sha256:348e0240c33b60bbdf4e523192ef919f28cb2c3d7d5c7794f74009290f236325 \
     --hash=sha256:6c2d30ab6be0e4a46919781807b4f0d834ebdd6c6e3dca0bda5a15f863427b6e
@@ -381,7 +367,7 @@ msgpack==1.1.1 \
     --hash=sha256:e4141c5a32b5e37905b5940aacbc59739f036930367d7acce7a64e4dec1f5e0b \
     --hash=sha256:f5be6b6bc52fad84d010cb45433720327ce886009d862f46b26d4d154001994b \
     --hash=sha256:f6d58656842e1b2ddbe07f43f56b10a60f2ba5826164910968f5933e5178af75
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 mypy==1.18.2 \
     --hash=sha256:01199871b6110a2ce984bde85acd481232d17413868c9807e95c1b0739a58914 \
     --hash=sha256:030c52d0ea8144e721e49b1f68391e39553d7451f0c3f8a7565b59e19fcb608b \
@@ -421,7 +407,7 @@ mypy==1.18.2 \
     --hash=sha256:d924eef3795cc89fecf6bedc6ed32b33ac13e8321344f6ddbf8ee89f706c05cb \
     --hash=sha256:ed4482847168439651d3feee5833ccedbf6657e964572706a2adb1f7fa4dfe2e \
     --hash=sha256:f9e171c465ad3901dc652643ee4bffa8e9fef4d7d0eece23b428908c77a76a66
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 mypy-extensions==1.1.0 \
     --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505 \
     --hash=sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558
@@ -460,7 +446,7 @@ protobuf==6.32.1 \
     --hash=sha256:d0975d0b2f3e6957111aa3935d08a0eb7e006b1505d825f862a1fffc8348e122 \
     --hash=sha256:d8c7e6eb619ffdf105ee4ab76af5a68b60a9d0f66da3ea12d1640e6d8dab7281 \
     --hash=sha256:ee2469e4a021474ab9baafea6cd070e5bf27c7d29433504ddea1a4ee5850f68d
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 psutil==7.1.0 \
     --hash=sha256:09ad740870c8d219ed8daae0ad3b726d3bf9a028a198e7f3080f6a1888b99bca \
     --hash=sha256:22e4454970b32472ce7deaa45d045b34d3648ce478e26a04c7e858a0a6e75ff3 \
@@ -471,7 +457,7 @@ psutil==7.1.0 \
     --hash=sha256:76168cef4397494250e9f4e73eb3752b146de1dd950040b29186d0cce1d5ca13 \
     --hash=sha256:7d4a113425c037300de3ac8b331637293da9be9713855c4fc9d2d97436d7259d \
     --hash=sha256:8c70e113920d51e89f212dd7be06219a9b88014e63a4cec69b684c327bc474e3
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 py-cpuinfo==9.0.0 \
     --hash=sha256:3cdbbf3fac90dc6f118bfd64384f309edeadd902d7c8fb17f02ffa1fc3f49690 \
     --hash=sha256:859625bc251f64e21f077d099d4162689c762b5d6a4c3c97553d56241c9674d5
@@ -533,23 +519,23 @@ pytest==8.4.2 \
 pytest-asyncio==1.2.0 \
     --hash=sha256:8e17ae5e46d8e7efe51ab6494dd2010f4ca8dae51652aa3c8d55acf50bfb2e99 \
     --hash=sha256:c609a64a2a8768462d0c99811ddb8bd2583c33fd33cf7f21af1c142e824ffb57
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 pytest-benchmark==5.1.0 \
     --hash=sha256:922de2dfa3033c227c96da942d1878191afa135a29485fb942e85dff1c592c89 \
     --hash=sha256:9ea661cdc292e8231f7cd4c10b0319e56a2118e2c09d9f50e1b3d150d2aca105
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 pytest-cov==6.3.0 \
     --hash=sha256:35c580e7800f87ce892e687461166e1ac2bcb8fb9e13aea79032518d6e503ff2 \
     --hash=sha256:440db28156d2468cafc0415b4f8e50856a0d11faefa38f30906048fe490f1749
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 pytest-mock==3.15.1 \
     --hash=sha256:0a25e2eb88fe5168d535041d09a4529a188176ae608a6d249ee65abc0949630d \
     --hash=sha256:1849a238f6f396da19762269de72cb1814ab44416fa73a8686deac10b0d87a0f
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 pytest-repeat==0.9.4 \
     --hash=sha256:c1738b4e412a6f3b3b9e0b8b29fcd7a423e50f87381ad9307ef6f5a8601139f3 \
     --hash=sha256:d92ac14dfaa6ffcfe6917e5d16f0c9bc82380c135b03c2a5f412d2637f224485
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 pytokens==0.1.10 \
     --hash=sha256:c9a4bfa0be1d26aebce03e6884ba454e842f186a59ea43a6d3b25af58223c044 \
     --hash=sha256:db7b72284e480e69fb085d9f251f66b3d2df8b7166059261258ff35f50fb711b
@@ -561,7 +547,7 @@ service-identity==24.2.0 \
 types-psutil==7.0.0.20250801 \
     --hash=sha256:0230b56234252cc6f59c361dccbaaa08f3088ea3569367abe6900485d388c97d \
     --hash=sha256:751842baf9e0efa31b3a7722a38a3f9afeb5a7132b146a1960cd472db362faa0
-    # via pywebtransport
+    # via pywebtransport (pyproject.toml)
 typing-extensions==4.15.0 \
     --hash=sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466 \
     --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548

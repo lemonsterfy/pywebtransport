@@ -1,4 +1,4 @@
-"""WebTransport Middleware Framework."""
+"""Core framework and common implementations for server middleware."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pywebtransport.session import WebTransportSession
 from pywebtransport.types import AuthHandlerProtocol, MiddlewareProtocol
 from pywebtransport.utils import get_logger, get_timestamp
 
-__all__ = [
+__all__: list[str] = [
     "MiddlewareManager",
     "RateLimiter",
     "create_auth_middleware",
@@ -19,7 +19,7 @@ __all__ = [
     "create_rate_limit_middleware",
 ]
 
-logger = get_logger(name="server.middleware")
+logger = get_logger(name=__name__)
 
 
 class MiddlewareManager:
@@ -28,14 +28,6 @@ class MiddlewareManager:
     def __init__(self) -> None:
         """Initialize the middleware manager."""
         self._middleware: list[MiddlewareProtocol] = []
-
-    def add_middleware(self, *, middleware: MiddlewareProtocol) -> None:
-        """Add a middleware to the chain."""
-        self._middleware.append(middleware)
-
-    def get_middleware_count(self) -> int:
-        """Get the number of registered middleware."""
-        return len(self._middleware)
 
     async def process_request(self, *, session: WebTransportSession) -> bool:
         """Process a request through the middleware chain."""
@@ -47,6 +39,14 @@ class MiddlewareManager:
                 logger.error("Middleware error: %s", e, exc_info=True)
                 return False
         return True
+
+    def add_middleware(self, *, middleware: MiddlewareProtocol) -> None:
+        """Add a middleware to the chain."""
+        self._middleware.append(middleware)
+
+    def get_middleware_count(self) -> int:
+        """Get the number of registered middleware."""
+        return len(self._middleware)
 
     def remove_middleware(self, *, middleware: MiddlewareProtocol) -> None:
         """Remove a middleware from the chain."""
@@ -73,43 +73,19 @@ class RateLimiter:
         self._cleanup_task: asyncio.Task[None] | None = None
 
     async def __aenter__(self) -> Self:
-        """Enter async context, initializing resources and starting the background cleanup task."""
+        """Initialize resources and start the cleanup task."""
         self._lock = asyncio.Lock()
         self._start_cleanup_task()
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        """Stop the background cleanup task."""
+        """Stop the background cleanup task and release resources."""
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
-
-    async def _periodic_cleanup(self) -> None:
-        """Periodically remove stale IP entries from the tracker."""
-        if self._lock is None:
-            logger.error("RateLimiter cleanup task cannot run without a lock.")
-            return
-
-        while True:
-            await asyncio.sleep(self._cleanup_interval)
-            async with self._lock:
-                current_time = get_timestamp()
-                cutoff_time = current_time - self._window_seconds
-                stale_ips = [
-                    ip for ip, timestamps in self._requests.items() if not timestamps or timestamps[-1] < cutoff_time
-                ]
-                for ip in stale_ips:
-                    del self._requests[ip]
-                if stale_ips:
-                    logger.debug("Cleaned up %d stale IP entries from rate limiter.", len(stale_ips))
-
-    def _start_cleanup_task(self) -> None:
-        """Create and start the periodic cleanup task if not already running."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
     async def __call__(self, *, session: WebTransportSession) -> bool:
         """Apply rate limiting to an incoming session."""
@@ -120,6 +96,7 @@ class RateLimiter:
                     "asynchronous context manager (`async with ...`)."
                 )
             )
+
         if not session.connection or not session.connection.remote_address:
             return True
 
@@ -138,6 +115,32 @@ class RateLimiter:
             valid_requests.append(current_time)
             self._requests[client_ip] = valid_requests
         return True
+
+    async def _periodic_cleanup(self) -> None:
+        """Periodically remove stale IP entries from the tracker."""
+        if self._lock is None:
+            logger.error("RateLimiter cleanup task cannot run without a lock.")
+            return
+
+        while True:
+            await asyncio.sleep(self._cleanup_interval)
+
+            async with self._lock:
+                current_time = get_timestamp()
+                cutoff_time = current_time - self._window_seconds
+                stale_ips = [
+                    ip for ip, timestamps in self._requests.items() if not timestamps or timestamps[-1] < cutoff_time
+                ]
+                for ip in stale_ips:
+                    del self._requests[ip]
+
+                if stale_ips:
+                    logger.debug("Cleaned up %d stale IP entries from rate limiter.", len(stale_ips))
+
+    def _start_cleanup_task(self) -> None:
+        """Create and start the periodic cleanup task if not already running."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
 
 def create_auth_middleware(

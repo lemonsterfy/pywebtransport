@@ -1,4 +1,4 @@
-"""High-level structured data stream for WebTransport."""
+"""High-level wrapper for structured data over a reliable stream."""
 
 from __future__ import annotations
 
@@ -6,14 +6,15 @@ import asyncio
 import struct
 from typing import TYPE_CHECKING, Any
 
-from pywebtransport.exceptions import SerializationError, StreamError
+from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE
+from pywebtransport.exceptions import ConfigurationError, SerializationError, StreamError
 from pywebtransport.types import Serializer
 
 if TYPE_CHECKING:
     from pywebtransport.stream.stream import WebTransportStream
 
 
-__all__ = ["StructuredStream"]
+__all__: list[str] = ["StructuredStream"]
 
 
 class StructuredStream:
@@ -28,11 +29,16 @@ class StructuredStream:
         stream: WebTransportStream,
         serializer: Serializer,
         registry: dict[int, type[Any]],
+        max_message_size: int = DEFAULT_MAX_MESSAGE_SIZE,
     ) -> None:
         """Initialize the structured stream."""
+        if len(set(registry.values())) != len(registry):
+            raise ConfigurationError(message="Types in the structured stream registry must be unique.")
+
         self._stream = stream
         self._serializer = serializer
         self._registry = registry
+        self._max_message_size = max_message_size
         self._class_to_id = {v: k for k, v in registry.items()}
 
     @property
@@ -57,6 +63,13 @@ class StructuredStream:
             raise StreamError(message="Stream closed while waiting for message header.") from e
 
         type_id, payload_len = struct.unpack(self._HEADER_FORMAT, header_bytes)
+
+        if payload_len > self._max_message_size:
+            await self._stream.abort()
+            raise SerializationError(
+                message=f"Incoming message size {payload_len} exceeds the configured limit of {self._max_message_size}."
+            )
+
         message_class = self._registry.get(type_id)
         if message_class is None:
             raise SerializationError(message=f"Received unknown message type ID: {type_id}")

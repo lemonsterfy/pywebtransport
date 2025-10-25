@@ -127,7 +127,7 @@ class TestLongRunningStability:
     @pytest.fixture(scope="class")
     def client_config(self) -> ClientConfig:
         """Provide a client configuration for long-running stability tests."""
-        return ClientConfig.create(
+        return ClientConfig(
             verify_mode=ssl.CERT_NONE,
             connect_timeout=20.0,
             read_timeout=40.0,

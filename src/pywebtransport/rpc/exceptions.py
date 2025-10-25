@@ -1,4 +1,4 @@
-"""WebTransport RPC-specific exceptions."""
+"""Custom exception hierarchy for the RPC system."""
 
 from __future__ import annotations
 
@@ -8,13 +8,7 @@ from typing import Any
 from pywebtransport.exceptions import WebTransportError
 from pywebtransport.types import SessionId
 
-__all__ = [
-    "InvalidParamsError",
-    "MethodNotFoundError",
-    "RpcError",
-    "RpcErrorCode",
-    "RpcTimeoutError",
-]
+__all__: list[str] = ["InvalidParamsError", "MethodNotFoundError", "RpcError", "RpcErrorCode", "RpcTimeoutError"]
 
 
 class RpcErrorCode(IntEnum):

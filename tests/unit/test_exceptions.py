@@ -5,63 +5,37 @@ from typing import Any
 import pytest
 
 from pywebtransport import (
-    AuthenticationError,
-    CertificateError,
     ClientError,
     ConfigurationError,
     ConnectionError,
     DatagramError,
-    FlowControlError,
-    HandshakeError,
     ProtocolError,
-    SerializationError,
     ServerError,
     SessionError,
-    SessionState,
     StreamError,
-    StreamState,
     TimeoutError,
     WebTransportError,
 )
 from pywebtransport.constants import ErrorCodes
 from pywebtransport.exceptions import (
+    AuthenticationError,
+    CertificateError,
+    FlowControlError,
+    HandshakeError,
+    SerializationError,
     certificate_not_found,
-    connection_timeout,
     datagram_too_large,
     get_error_category,
     invalid_config,
     is_fatal_error,
     is_retriable_error,
-    protocol_violation,
     session_not_ready,
     stream_closed,
 )
+from pywebtransport.types import SessionState, StreamState
 
 
 class TestExceptionClasses:
-    def test_webtransport_error_base(self) -> None:
-        details = {"info": "abc"}
-
-        exc = WebTransportError(message="Base error", error_code=100, details=details)
-
-        assert exc.message == "Base error"
-        assert exc.error_code == 100
-        assert exc.details == {"info": "abc"}
-        assert str(exc) == "[0x64] Base error"
-        assert repr(exc) == "WebTransportError(message='Base error', error_code=100)"
-        assert exc.to_dict() == {
-            "type": "WebTransportError",
-            "message": "Base error",
-            "error_code": 100,
-            "details": {"info": "abc"},
-        }
-
-    def test_webtransport_error_defaults(self) -> None:
-        exc = WebTransportError(message="Default error")
-
-        assert exc.error_code == ErrorCodes.INTERNAL_ERROR
-        assert exc.details == {}
-
     def test_stream_error_custom_str(self) -> None:
         exc_no_id = StreamError(message="No ID")
         exc_with_id = StreamError(message="With ID", stream_id=5)
@@ -70,81 +44,117 @@ class TestExceptionClasses:
         assert str(exc_with_id) == f"[{hex(exc_with_id.error_code)}] With ID (stream_id=5)"
 
     @pytest.mark.parametrize(
-        "exc_class, args, expected_attrs, default_code",
+        "exc_class, args, expected_attrs, default_code, expected_repr",
         [
             (
                 AuthenticationError,
                 {"auth_method": "token"},
                 {"auth_method": "token"},
                 ErrorCodes.APP_AUTHENTICATION_FAILED,
+                "AuthenticationError(message='Test message', error_code=0x1001, auth_method='token')",
             ),
             (
                 CertificateError,
                 {"certificate_path": "/c.pem", "certificate_error": "expired"},
                 {"certificate_path": "/c.pem", "certificate_error": "expired"},
                 ErrorCodes.APP_AUTHENTICATION_FAILED,
+                (
+                    "CertificateError(message='Test message', error_code=0x1001, "
+                    "certificate_path='/c.pem', certificate_error='expired')"
+                ),
             ),
             (
                 ClientError,
                 {"target_url": "https://a.com"},
                 {"target_url": "https://a.com"},
                 ErrorCodes.APP_INVALID_REQUEST,
+                "ClientError(message='Test message', error_code=0x1004, target_url='https://a.com')",
             ),
             (
                 ConfigurationError,
                 {"config_key": "timeout", "config_value": -1},
                 {"config_key": "timeout", "config_value": -1},
                 ErrorCodes.APP_INVALID_REQUEST,
+                "ConfigurationError(message='Test message', error_code=0x1004, config_key='timeout', config_value=-1)",
             ),
             (
                 ConnectionError,
                 {"remote_address": ("1.1.1.1", 443)},
                 {"remote_address": ("1.1.1.1", 443)},
                 ErrorCodes.CONNECTION_REFUSED,
+                "ConnectionError(message='Test message', error_code=0x2, remote_address=('1.1.1.1', 443))",
             ),
             (
                 DatagramError,
                 {"datagram_size": 9000, "max_size": 1500},
                 {"datagram_size": 9000, "max_size": 1500},
                 ErrorCodes.INTERNAL_ERROR,
+                "DatagramError(message='Test message', error_code=0x1, datagram_size=9000, max_size=1500)",
             ),
             (
                 FlowControlError,
                 {"stream_id": 1, "limit_exceeded": 100},
                 {"stream_id": 1, "limit_exceeded": 100},
                 ErrorCodes.FLOW_CONTROL_ERROR,
+                (
+                    "FlowControlError(message='Test message', error_code=0x3, "
+                    "stream_id=1, limit_exceeded=100, current_value=None)"
+                ),
             ),
-            (HandshakeError, {"handshake_stage": "alpn"}, {"handshake_stage": "alpn"}, ErrorCodes.INTERNAL_ERROR),
-            (ProtocolError, {"frame_type": 0x41}, {"frame_type": 0x41}, ErrorCodes.PROTOCOL_VIOLATION),
+            (
+                HandshakeError,
+                {"handshake_stage": "alpn"},
+                {"handshake_stage": "alpn"},
+                ErrorCodes.INTERNAL_ERROR,
+                "HandshakeError(message='Test message', error_code=0x1, handshake_stage='alpn')",
+            ),
+            (
+                ProtocolError,
+                {"frame_type": 0x41},
+                {"frame_type": 0x41},
+                ErrorCodes.PROTOCOL_VIOLATION,
+                "ProtocolError(message='Test message', error_code=0xa, frame_type=65)",
+            ),
             (
                 SerializationError,
                 {"original_exception": ValueError("bad data")},
                 {"original_exception": ValueError("bad data")},
                 ErrorCodes.INTERNAL_ERROR,
+                "SerializationError(message='Test message', error_code=0x1, original_exception=ValueError('bad data'))",
             ),
             (
                 ServerError,
                 {"bind_address": ("0.0.0.0", 4433)},
                 {"bind_address": ("0.0.0.0", 4433)},
                 ErrorCodes.APP_SERVICE_UNAVAILABLE,
+                "ServerError(message='Test message', error_code=0x1005, bind_address=('0.0.0.0', 4433))",
             ),
             (
                 SessionError,
                 {"session_id": "abc", "session_state": SessionState.CONNECTED},
                 {"session_id": "abc", "session_state": SessionState.CONNECTED},
                 ErrorCodes.INTERNAL_ERROR,
+                (
+                    "SessionError(message='Test message', error_code=0x1, "
+                    "session_id='abc', session_state=<SessionState.CONNECTED: 'connected'>)"
+                ),
             ),
             (
                 StreamError,
                 {"stream_id": 5, "stream_state": StreamState.OPEN},
                 {"stream_id": 5, "stream_state": StreamState.OPEN},
                 ErrorCodes.STREAM_STATE_ERROR,
+                (
+                    "StreamError(message='Test message', error_code=0x5, "
+                    "stream_id=5, stream_state=<StreamState.OPEN: 'open'>)"
+                ),
             ),
             (
                 TimeoutError,
                 {"timeout_duration": 10.0, "operation": "read"},
                 {"timeout_duration": 10.0, "operation": "read"},
                 ErrorCodes.APP_CONNECTION_TIMEOUT,
+                "TimeoutError(message='Test message', error_code=0x1000, timeout_duration=10.0, operation='read')",
             ),
         ],
     )
@@ -154,11 +164,14 @@ class TestExceptionClasses:
         args: dict[str, Any],
         expected_attrs: dict[str, Any],
         default_code: ErrorCodes,
+        expected_repr: str,
     ) -> None:
         exc = exc_class(message="Test message", **args)
         exc_default = exc_class(message="Default code")
 
         assert isinstance(exc, WebTransportError)
+        assert repr(exc) == expected_repr
+
         for key, expected_value in expected_attrs.items():
             actual_value = getattr(exc, key)
             if isinstance(expected_value, Exception):
@@ -180,6 +193,29 @@ class TestExceptionClasses:
 
         assert exc_default.error_code == default_code
 
+    def test_webtransport_error_base(self) -> None:
+        details = {"info": "abc"}
+
+        exc = WebTransportError(message="Base error", error_code=100, details=details)
+
+        assert exc.message == "Base error"
+        assert exc.error_code == 100
+        assert exc.details == {"info": "abc"}
+        assert str(exc) == "[0x64] Base error"
+        assert repr(exc) == "WebTransportError(message='Base error', error_code=0x64)"
+        assert exc.to_dict() == {
+            "type": "WebTransportError",
+            "message": "Base error",
+            "error_code": 100,
+            "details": {"info": "abc"},
+        }
+
+    def test_webtransport_error_defaults(self) -> None:
+        exc = WebTransportError(message="Default error")
+
+        assert exc.error_code == ErrorCodes.INTERNAL_ERROR
+        assert exc.details == {}
+
 
 class TestExceptionFactories:
     def test_certificate_not_found(self) -> None:
@@ -189,14 +225,6 @@ class TestExceptionFactories:
         assert exc.certificate_path == "/path/to/cert.pem"
         assert exc.certificate_error == "file_not_found"
         assert "/path/to/cert.pem" in exc.message
-
-    def test_connection_timeout(self) -> None:
-        exc = connection_timeout(timeout_duration=15.5, operation="handshake")
-
-        assert isinstance(exc, TimeoutError)
-        assert exc.timeout_duration == 15.5
-        assert exc.operation == "handshake"
-        assert "15.5s" in exc.message
 
     def test_datagram_too_large(self) -> None:
         exc = datagram_too_large(size=9000, max_size=1500)
@@ -213,14 +241,6 @@ class TestExceptionFactories:
         assert exc.config_key == "retries"
         assert exc.config_value == -1
         assert "retries" in exc.message and "must be non-negative" in exc.message
-
-    def test_protocol_violation(self) -> None:
-        exc = protocol_violation(message="Invalid frame", frame_type=0xFF)
-
-        assert isinstance(exc, ProtocolError)
-        assert exc.frame_type == 0xFF
-        assert exc.error_code == ErrorCodes.PROTOCOL_VIOLATION
-        assert exc.message == "Invalid frame"
 
     def test_session_not_ready(self) -> None:
         exc = session_not_ready(session_id="sess_123", current_state=SessionState.CONNECTING)
@@ -240,16 +260,6 @@ class TestExceptionFactories:
 
 
 class TestHelperFunctions:
-    def test_is_fatal_error_with_standard_exception(self) -> None:
-        exc = ValueError("Standard error")
-
-        assert is_fatal_error(exception=exc) is True
-
-    def test_is_retriable_error_with_standard_exception(self) -> None:
-        exc = ValueError("Standard error")
-
-        assert is_retriable_error(exception=exc) is False
-
     @pytest.mark.parametrize(
         "exception_instance, expected_category",
         [
@@ -290,6 +300,11 @@ class TestHelperFunctions:
 
         assert is_fatal_error(exception=exc) is is_fatal
 
+    def test_is_fatal_error_with_standard_exception(self) -> None:
+        exc = ValueError("Standard error")
+
+        assert is_fatal_error(exception=exc) is True
+
     @pytest.mark.parametrize(
         "error_code, is_retriable",
         [
@@ -304,3 +319,8 @@ class TestHelperFunctions:
         exc = WebTransportError(message="Test", error_code=error_code)
 
         assert is_retriable_error(exception=exc) is is_retriable
+
+    def test_is_retriable_error_with_standard_exception(self) -> None:
+        exc = ValueError("Standard error")
+
+        assert is_retriable_error(exception=exc) is False

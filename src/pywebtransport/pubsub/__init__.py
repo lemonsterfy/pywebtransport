@@ -1,9 +1,9 @@
-"""Built-in Pub/Sub framework for WebTransport."""
+"""High-level Publish-Subscribe messaging pattern."""
 
 from .exceptions import NotSubscribedError, PubSubError, SubscriptionFailedError
 from .manager import PubSubManager, PubSubStats, Subscription
 
-__all__ = [
+__all__: list[str] = [
     "NotSubscribedError",
     "PubSubError",
     "PubSubManager",

@@ -1,8 +1,9 @@
 """Unit tests for the pywebtransport.connection.load_balancer module."""
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable, Coroutine
-from typing import Any
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import Any, cast
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from pytest_asyncio import fixture as asyncio_fixture
@@ -12,451 +13,453 @@ from pywebtransport import ClientConfig, ConnectionError
 from pywebtransport.connection import ConnectionLoadBalancer, WebTransportConnection
 
 
-@asyncio_fixture
-async def lb(targets: list[tuple[str, int]]) -> AsyncGenerator[ConnectionLoadBalancer, None]:
-    async with ConnectionLoadBalancer(targets=targets) as load_balancer:
-        yield load_balancer
-
-
-@pytest.fixture
-def mock_client_config(mocker: MockerFixture) -> Any:
-    return mocker.MagicMock(spec=ClientConfig)
-
-
-@pytest.fixture
-def mock_connection(mocker: MockerFixture) -> Any:
-    connection = mocker.create_autospec(WebTransportConnection, instance=True)
-    connection.is_connected = True
-    connection.remote_address = ("server1.com", 443)
-    connection.close = mocker.AsyncMock()
-    return connection
-
-
-@pytest.fixture
-def targets() -> list[tuple[str, int]]:
-    return [("server1.com", 443), ("server2.com", 4433), ("server3.com", 8443)]
-
-
 class TestConnectionLoadBalancer:
-    def test_initialization(self, targets: list[tuple[str, int]]) -> None:
-        lb = ConnectionLoadBalancer(targets=targets)
+    @asyncio_fixture
+    async def load_balancer(
+        self,
+        mock_connection_factory: Callable[..., Awaitable[WebTransportConnection]],
+        mock_health_checker: Callable[..., Awaitable[bool]],
+    ) -> AsyncGenerator[ConnectionLoadBalancer, None]:
+        lb = ConnectionLoadBalancer(
+            targets=[("host1", 443), ("host2", 443), ("host1", 443)],
+            connection_factory=mock_connection_factory,
+            health_checker=mock_health_checker,
+            health_check_interval=0.01,
+        )
+        async with lb as activated_lb:
+            yield activated_lb
 
-        assert len(lb) == len(targets)
-        assert lb._targets == targets
-        assert all(key in lb._target_weights for key in [f"{h}:{p}" for h, p in targets])
-        assert all(key in lb._target_latencies for key in [f"{h}:{p}" for h, p in targets])
+    @pytest.fixture
+    def mock_connection_factory(self, mocker: MockerFixture) -> AsyncMock:
+        async def factory(*args: Any, **kwargs: Any) -> WebTransportConnection:
+            conn = mocker.create_autospec(WebTransportConnection, instance=True)
+            type(conn).is_connected = mocker.PropertyMock(return_value=True)
+            conn.close = mocker.AsyncMock()
+            return conn
 
-    def test_len_method(self, targets: list[tuple[str, int]]) -> None:
-        lb = ConnectionLoadBalancer(targets=targets)
+        return cast(AsyncMock, mocker.AsyncMock(side_effect=factory))
 
-        assert len(lb) == len(targets)
-
-    def test_initialization_empty_targets(self) -> None:
-        with pytest.raises(ValueError, match="Targets list cannot be empty"):
-            ConnectionLoadBalancer(targets=[])
-
-    def test_initialization_duplicate_targets(self) -> None:
-        targets = [("server1.com", 443), ("server2.com", 4433), ("server1.com", 443)]
-
-        lb = ConnectionLoadBalancer(targets=targets)
-
-        assert lb._targets == [("server1.com", 443), ("server2.com", 4433)]
-        assert len(lb._targets) == 2
-
-    def test_create_factory_method(self, targets: list[tuple[str, int]]) -> None:
-        lb = ConnectionLoadBalancer.create(targets=targets)
-
-        assert isinstance(lb, ConnectionLoadBalancer)
-        assert set(lb._targets) == set(targets)
+    @pytest.fixture
+    def mock_health_checker(self, mocker: MockerFixture) -> AsyncMock:
+        return cast(AsyncMock, mocker.AsyncMock(return_value=True))
 
     @pytest.mark.asyncio
-    async def test_async_context_manager(self, targets: list[tuple[str, int]], mocker: MockerFixture) -> None:
-        start_mock = mocker.patch.object(ConnectionLoadBalancer, "_start_health_check_task")
-        shutdown_mock = mocker.patch.object(ConnectionLoadBalancer, "shutdown", new_callable=mocker.AsyncMock)
-
-        async with ConnectionLoadBalancer(targets=targets) as lb:
-            start_mock.assert_called_once()
-            assert isinstance(lb, ConnectionLoadBalancer)
-
+    async def test_aexit_with_exception(
+        self,
+        mock_connection_factory: Callable[..., Awaitable[WebTransportConnection]],
+        mock_health_checker: Callable[..., Awaitable[bool]],
+        mocker: MockerFixture,
+    ) -> None:
+        lb = ConnectionLoadBalancer(
+            targets=[("host1", 443)],
+            connection_factory=mock_connection_factory,
+            health_checker=mock_health_checker,
+        )
+        shutdown_mock = mocker.patch.object(lb, "shutdown", new_callable=AsyncMock)
+        with pytest.raises(ValueError, match="Test exception"):
+            async with lb:
+                raise ValueError("Test exception")
         shutdown_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_shutdown(self, lb: ConnectionLoadBalancer, mocker: MockerFixture) -> None:
-        close_all_mock = mocker.patch.object(lb, "close_all_connections", new_callable=mocker.AsyncMock)
-        assert lb._health_check_task is not None
-        task = lb._health_check_task
-
-        await lb.shutdown()
-
-        assert task.done()
-        close_all_mock.assert_awaited_once()
+    async def test_close_all_connections_no_active(self, load_balancer: ConnectionLoadBalancer) -> None:
+        await load_balancer.close_all_connections()
 
     @pytest.mark.asyncio
-    async def test_shutdown_cancellation(self, lb: ConnectionLoadBalancer, mocker: MockerFixture) -> None:
-        hanging_task = asyncio.create_task(asyncio.sleep(3600))
-        lb._health_check_task = hanging_task
-        close_all_mock = mocker.patch.object(lb, "close_all_connections", new_callable=mocker.AsyncMock)
-        shutdown_task = asyncio.create_task(lb.shutdown())
+    async def test_close_all_connections_with_errors(
+        self, load_balancer: ConnectionLoadBalancer, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        conn1 = await load_balancer.get_connection(config=ClientConfig())
+        conn2 = await load_balancer.get_connection(config=ClientConfig())
+        cast(AsyncMock, conn1.close).side_effect = ValueError("Close failed")
+
+        await load_balancer.close_all_connections()
         await asyncio.sleep(0)
 
-        shutdown_task.cancel()
-        try:
-            await shutdown_task
-        except asyncio.CancelledError:
-            pytest.fail("shutdown() should not have propagated CancelledError")
-
-        close_all_mock.assert_awaited_once()
-        hanging_task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await hanging_task
+        cast(AsyncMock, conn1.close).assert_awaited_once()
+        cast(AsyncMock, conn2.close).assert_awaited_once()
+        stats = await load_balancer.get_load_balancer_stats()
+        assert stats["active_connections"] == 0
+        assert "Errors occurred while closing connections" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_close_all_connections_no_connections(
-        self, lb: ConnectionLoadBalancer, mocker: MockerFixture
-    ) -> None:
-        task_group_mock = mocker.patch("asyncio.TaskGroup")
-
-        await lb.close_all_connections()
-
-        task_group_mock.assert_not_called()
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("strategy", ["round_robin", "weighted", "least_latency"])
-    async def test_get_connection_new(
-        self,
-        lb: ConnectionLoadBalancer,
-        mock_client_config: Any,
-        mock_connection: Any,
-        mocker: MockerFixture,
-        strategy: str,
-    ) -> None:
-        mock_create_client = mocker.patch(
-            "pywebtransport.connection.load_balancer.WebTransportConnection.create_client", return_value=mock_connection
-        )
-        mocker.patch("random.choices", return_value=[("server2.com", 4433)])
-
-        connection = await lb.get_connection(config=mock_client_config, strategy=strategy)
-
-        assert connection is mock_connection
-        mock_create_client.assert_awaited_once()
-        target_key = f"{mock_create_client.call_args.kwargs['host']}:{mock_create_client.call_args.kwargs['port']}"
-        assert lb._target_latencies[target_key] > 0
-
-    @pytest.mark.asyncio
-    async def test_get_connection_reuse(
-        self,
-        lb: ConnectionLoadBalancer,
-        mock_client_config: Any,
-        mock_connection: Any,
-        mocker: MockerFixture,
-    ) -> None:
-        mock_create_client = mocker.patch(
-            "pywebtransport.connection.load_balancer.WebTransportConnection.create_client", return_value=mock_connection
-        )
-        target_to_use = ("server1.com", 443)
-        mocker.patch.object(lb, "_get_next_target", new_callable=mocker.AsyncMock, return_value=target_to_use)
-
-        conn1 = await lb.get_connection(config=mock_client_config)
-        conn2 = await lb.get_connection(config=mock_client_config)
-
-        assert conn1 is conn2
-        mock_create_client.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_get_connection_concurrent_waiter(
-        self, lb: ConnectionLoadBalancer, mock_client_config: Any, mocker: MockerFixture
-    ) -> None:
-        target = lb._targets[0]
-        mocker.patch.object(lb, "_get_next_target", new_callable=mocker.AsyncMock, return_value=target)
-        creation_started = asyncio.Event()
-        creation_finished = asyncio.Event()
-        mock_instance = mocker.create_autospec(WebTransportConnection, instance=True)
-
-        async def slow_create(*args: Any, **kwargs: Any) -> WebTransportConnection:
-            creation_started.set()
-            await creation_finished.wait()
-            return mock_instance
-
-        mock_create_client = mocker.patch(
-            "pywebtransport.connection.load_balancer.WebTransportConnection.create_client", side_effect=slow_create
-        )
-
-        task1 = asyncio.create_task(lb.get_connection(config=mock_client_config))
-        await creation_started.wait()
-        task2 = asyncio.create_task(lb.get_connection(config=mock_client_config))
-        await asyncio.sleep(0)
-        creation_finished.set()
-        results = await asyncio.gather(task1, task2)
-
-        assert results[0] is mock_instance
-        assert results[1] is mock_instance
-        mock_create_client.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_get_connection_with_stale_connection(
-        self, lb: ConnectionLoadBalancer, mock_client_config: Any, mocker: MockerFixture
-    ) -> None:
-        target = lb._targets[0]
-        target_key = f"{target[0]}:{target[1]}"
-        stale_connection = mocker.create_autospec(WebTransportConnection, instance=True)
-        stale_connection.is_connected = False
-        lb._connections[target_key] = stale_connection
-        new_connection = mocker.create_autospec(WebTransportConnection, instance=True)
-        new_connection.is_connected = True
-        mock_create_client = mocker.patch(
-            "pywebtransport.connection.load_balancer.WebTransportConnection.create_client", return_value=new_connection
-        )
-        mocker.patch.object(lb, "_get_next_target", new_callable=mocker.AsyncMock, return_value=target)
-
-        connection = await lb.get_connection(config=mock_client_config)
-
-        assert connection is new_connection
-        mock_create_client.assert_awaited_once()
-        assert lb._connections[target_key] is new_connection
-
-    @pytest.mark.asyncio
-    async def test_get_connection_failure(
-        self, lb: ConnectionLoadBalancer, mock_client_config: Any, mocker: MockerFixture
-    ) -> None:
-        target_to_fail = lb._targets[0]
-        mocker.patch.object(lb, "_get_next_target", new_callable=mocker.AsyncMock, return_value=target_to_fail)
-        mocker.patch(
-            "pywebtransport.connection.load_balancer.WebTransportConnection.create_client",
-            side_effect=ConnectionError(message="Failed to connect"),
-        )
-        target_key = f"{target_to_fail[0]}:{target_to_fail[1]}"
-
-        with pytest.raises(ConnectionError):
-            await lb.get_connection(config=mock_client_config)
-
-        assert target_key in lb._failed_targets
-
-    @pytest.mark.asyncio
-    async def test_get_connection_no_available_targets(
-        self, lb: ConnectionLoadBalancer, mock_client_config: Any
-    ) -> None:
-        for host, port in lb._targets:
-            lb._failed_targets.add(f"{host}:{port}")
-
+    async def test_get_connection_all_targets_failed(self, load_balancer: ConnectionLoadBalancer) -> None:
+        load_balancer._failed_targets.add("host1:443")
+        load_balancer._failed_targets.add("host2:443")
         with pytest.raises(ConnectionError, match="No available targets"):
-            await lb.get_connection(config=mock_client_config)
+            await load_balancer.get_connection(config=ClientConfig())
 
     @pytest.mark.asyncio
-    async def test_round_robin_strategy(
+    async def test_get_connection_creates_new(
         self,
-        lb: ConnectionLoadBalancer,
-        mock_client_config: Any,
-        mocker: MockerFixture,
-        targets: list[tuple[str, int]],
+        load_balancer: ConnectionLoadBalancer,
+        mock_connection_factory: AsyncMock,
     ) -> None:
-        mock_create_client = mocker.patch(
-            "pywebtransport.connection.load_balancer.WebTransportConnection.create_client"
-        )
-        expected_targets = targets[1:] + targets[:1]
+        config = ClientConfig()
+        connection = await load_balancer.get_connection(config=config, path="/test")
 
-        for expected_host, expected_port in expected_targets:
-            await lb.get_connection(config=mock_client_config, strategy="round_robin")
-            mock_create_client.assert_awaited_with(
-                config=mock_client_config, host=expected_host, port=expected_port, path="/"
-            )
-            lb._connections.clear()
+        assert connection.is_connected
+        mock_connection_factory.assert_awaited_once_with(config=config, host="host2", port=443, path="/test")
 
-        await lb.get_connection(config=mock_client_config, strategy="round_robin")
-        expected_host, expected_port = expected_targets[0]
-        mock_create_client.assert_awaited_with(
-            config=mock_client_config, host=expected_host, port=expected_port, path="/"
+    @pytest.mark.asyncio
+    async def test_get_connection_dogpiling_prevention(
+        self,
+        mock_connection_factory: AsyncMock,
+        mock_health_checker: AsyncMock,
+    ) -> None:
+        lb = ConnectionLoadBalancer(
+            targets=[("host1", 443)],
+            connection_factory=mock_connection_factory,
+            health_checker=mock_health_checker,
         )
+        config = ClientConfig()
+        original_side_effect = mock_connection_factory.side_effect
+
+        async def delayed_factory(*args: Any, **kwargs: Any) -> WebTransportConnection:
+            await asyncio.sleep(0.01)
+            factory_callable = cast(Callable[..., Awaitable[WebTransportConnection]], original_side_effect)
+            return await factory_callable(*args, **kwargs)
+
+        mock_connection_factory.side_effect = delayed_factory
+
+        async with lb:
+            tasks = [lb.get_connection(config=config) for _ in range(5)]
+            results = await asyncio.gather(*tasks)
+
+        assert mock_connection_factory.call_count == 1
+        assert len(set(results)) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_connection_factory_failure(
+        self, load_balancer: ConnectionLoadBalancer, mock_connection_factory: AsyncMock
+    ) -> None:
+        mock_connection_factory.side_effect = ConnectionError("Failed to connect")
+        with pytest.raises(ConnectionError, match="Failed to connect"):
+            await load_balancer.get_connection(config=ClientConfig(), strategy="round_robin")
+
+        stats = await load_balancer.get_load_balancer_stats()
+        assert stats["failed_targets"] == 1
+
+    @pytest.mark.asyncio
+    async def test_get_connection_recreates_if_disconnected(
+        self,
+        load_balancer: ConnectionLoadBalancer,
+        mock_connection_factory: AsyncMock,
+        mocker: MockerFixture,
+    ) -> None:
+        config = ClientConfig()
+        conn1 = await load_balancer.get_connection(config=config, strategy="round_robin")
+        type(conn1).is_connected = mocker.PropertyMock(return_value=False)  # type: ignore[method-assign]
+        conn2 = await load_balancer.get_connection(config=config, strategy="round_robin")
+
+        assert conn1 is not conn2
+        assert mock_connection_factory.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_connection_reuses_existing(
+        self,
+        load_balancer: ConnectionLoadBalancer,
+        mock_connection_factory: AsyncMock,
+    ) -> None:
+        config = ClientConfig()
+        conn1 = await load_balancer.get_connection(config=config, strategy="round_robin")
+        await load_balancer.get_connection(config=config, strategy="round_robin")
+        conn3 = await load_balancer.get_connection(config=config, strategy="round_robin")
+
+        assert conn3 is conn1
+        assert mock_connection_factory.await_count == 2
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "strategy, setup",
-        [("least_latency", "setup_latencies"), ("weighted", "setup_zero_weights"), ("invalid_strategy", None)],
+        "strategy, setup_mock",
+        [
+            (
+                "weighted",
+                lambda mocker: mocker.patch("random.choices", return_value=[("host1", 443)]),
+            ),
+            ("least_latency", None),
+            ("unknown_strategy", None),
+        ],
     )
-    async def test_get_next_target_strategies(
+    async def test_get_connection_strategies(
         self,
-        lb: ConnectionLoadBalancer,
-        strategy: str,
-        setup: str,
+        load_balancer: ConnectionLoadBalancer,
+        mock_connection_factory: AsyncMock,
         mocker: MockerFixture,
+        strategy: str,
+        setup_mock: Callable[[MockerFixture], Any] | None,
     ) -> None:
-        if setup == "setup_latencies":
-            lb._target_latencies[lb._get_target_key(host=lb._targets[0][0], port=lb._targets[0][1])] = 0.5
-            lb._target_latencies[lb._get_target_key(host=lb._targets[1][0], port=lb._targets[1][1])] = 0.1
-            lb._target_latencies[lb._get_target_key(host=lb._targets[2][0], port=lb._targets[2][1])] = 0.8
-            host, port = await lb._get_next_target(strategy="least_latency")
-            assert (host, port) == lb._targets[1]
-        elif setup == "setup_zero_weights":
-            for key in lb._target_weights:
-                lb._target_weights[key] = 0.0
-            mock_choice = mocker.patch("random.choice", return_value=lb._targets[2])
-            target = await lb._get_next_target(strategy="weighted")
-            mock_choice.assert_called_once()
-            assert target == lb._targets[2]
-        elif strategy == "invalid_strategy":
+        if setup_mock:
+            setup_mock(mocker)
+
+        if strategy == "least_latency":
+            load_balancer._target_latencies = {"host1:443": 0.2, "host2:443": 0.1}
+
+        if strategy == "unknown_strategy":
             with pytest.raises(ValueError, match="Unknown load balancing strategy"):
-                await lb._get_next_target(strategy="invalid_strategy")
+                await load_balancer.get_connection(config=ClientConfig(), strategy=strategy)
+            return
+
+        await load_balancer.get_connection(config=ClientConfig(), strategy=strategy)
+
+        if strategy == "weighted":
+            mock_connection_factory.assert_awaited_with(config=ANY, host="host1", port=443, path=ANY)
+        elif strategy == "least_latency":
+            mock_connection_factory.assert_awaited_with(config=ANY, host="host2", port=443, path=ANY)
 
     @pytest.mark.asyncio
-    async def test_update_target_weight(self, lb: ConnectionLoadBalancer) -> None:
-        target = lb._targets[0]
-        target_key = f"{target[0]}:{target[1]}"
+    async def test_get_connection_weighted_all_zero_weight(
+        self, load_balancer: ConnectionLoadBalancer, mocker: MockerFixture
+    ) -> None:
+        choice_mock = mocker.patch("random.choice", return_value=("host1", 443))
+        await load_balancer.update_target_weight(host="host1", port=443, weight=0.0)
+        await load_balancer.update_target_weight(host="host2", port=443, weight=0.0)
 
-        await lb.update_target_weight(host=target[0], port=target[1], weight=5.0)
-        assert lb._target_weights[target_key] == 5.0
-
-        await lb.update_target_weight(host=target[0], port=target[1], weight=-1.0)
-        assert lb._target_weights[target_key] == 0.0
-
-    @pytest.mark.asyncio
-    async def test_update_target_weight_nonexistent_target(self, lb: ConnectionLoadBalancer) -> None:
-        initial_weights = lb._target_weights.copy()
-
-        await lb.update_target_weight(host="nonexistent.com", port=1234, weight=99.0)
-
-        assert lb._target_weights == initial_weights
+        await load_balancer.get_connection(config=ClientConfig(), strategy="weighted")
+        choice_mock.assert_called_once_with([("host1", 443), ("host2", 443)])
 
     @pytest.mark.asyncio
-    async def test_get_target_stats(self, lb: ConnectionLoadBalancer, mock_connection: Any) -> None:
-        target1 = lb._targets[0]
-        target2 = lb._targets[1]
-        key1 = f"{target1[0]}:{target1[1]}"
-        key2 = f"{target2[0]}:{target2[1]}"
-        mock_connection.remote_address = (target1[0], target1[1])
-        lb._connections[key1] = mock_connection
-        lb._failed_targets.add(key2)
-        lb._target_latencies[key1] = 0.123
-
-        stats = await lb.get_target_stats()
-
-        assert stats[key1]["connected"] is True
-        assert stats[key1]["failed"] is False
-        assert stats[key1]["latency"] == 0.123
-        assert stats[key2]["connected"] is False
-        assert stats[key2]["failed"] is True
+    async def test_get_target_stats(self, load_balancer: ConnectionLoadBalancer) -> None:
+        await load_balancer.get_connection(config=ClientConfig())
+        stats = await load_balancer.get_target_stats()
+        assert "host1:443" in stats
+        assert "host2:443" in stats
+        assert stats["host2:443"]["connected"] is True
+        assert stats["host1:443"]["connected"] is False
 
     @pytest.mark.asyncio
-    async def test_get_load_balancer_stats(self, lb: ConnectionLoadBalancer, mock_connection: Any) -> None:
-        lb._failed_targets.add(lb._get_target_key(host=lb._targets[0][0], port=lb._targets[0][1]))
-        lb._connections[lb._get_target_key(host=lb._targets[1][0], port=lb._targets[1][1])] = mock_connection
+    @pytest.mark.parametrize("error", [ValueError("Checker error"), asyncio.CancelledError()])
+    async def test_health_check_checker_raises_exception(
+        self,
+        load_balancer: ConnectionLoadBalancer,
+        mock_health_checker: AsyncMock,
+        mocker: MockerFixture,
+        error: Exception,
+    ) -> None:
+        load_balancer._failed_targets.add("host1:443")
+        mock_health_checker.side_effect = error
+        health_check_started = asyncio.Event()
 
-        stats = await lb.get_load_balancer_stats()
+        async def side_effect(_: float) -> None:
+            health_check_started.set()
+            raise asyncio.CancelledError
 
-        assert stats["total_targets"] == 3
+        mocker.patch("asyncio.sleep", side_effect=side_effect)
+        await health_check_started.wait()
+
+        mock_health_checker.assert_called()
+        stats = await load_balancer.get_load_balancer_stats()
         assert stats["failed_targets"] == 1
-        assert stats["active_connections"] == 1
-        assert stats["available_targets"] == 2
-
-    @pytest.mark.asyncio
-    async def test_start_health_check_task_already_running(
-        self, targets: list[tuple[str, int]], mocker: MockerFixture
-    ) -> None:
-        async with ConnectionLoadBalancer(targets=targets) as lb:
-            mocker.patch.object(lb, "_health_check_loop", new=lambda: None)
-            mock_create_task = mocker.spy(asyncio, "create_task")
-
-            lb._start_health_check_task()
-
-            mock_create_task.assert_not_called()
-
-    def test_start_health_check_task_no_running_loop(
-        self, targets: list[tuple[str, int]], mocker: MockerFixture
-    ) -> None:
-        def mock_create_task(coro: Coroutine[Any, Any, None]) -> None:
-            coro.close()
-            raise RuntimeError("no running loop")
-
-        mocker.patch("pywebtransport.connection.load_balancer.asyncio.create_task", side_effect=mock_create_task)
-        logger_mock = mocker.patch("pywebtransport.connection.load_balancer.logger")
-        lb = ConnectionLoadBalancer(targets=targets)
-
-        lb._start_health_check_task()
-
-        logger_mock.warning.assert_called_once_with("Could not start health check task: no running event loop.")
-        assert lb._health_check_task is None
-
-    @pytest.mark.asyncio
-    async def test_health_check_loop_target_restored(
-        self, mocker: MockerFixture, targets: list[tuple[str, int]]
-    ) -> None:
-        mock_test_conn = mocker.patch(
-            "pywebtransport.connection.load_balancer.test_tcp_connection",
-            return_value=True,
-        )
-        async with ConnectionLoadBalancer(targets=targets, health_check_interval=0.01) as lb:
-            target = lb._targets[0]
-            target_key = f"{target[0]}:{target[1]}"
-            lb._failed_targets.add(target_key)
-
-            await asyncio.sleep(0.05)
-
-            mock_test_conn.assert_awaited_with(host=target[0], port=target[1], timeout=lb._health_check_timeout)
-            assert target_key not in lb._failed_targets
-
-    @pytest.mark.asyncio
-    async def test_health_check_loop_target_still_failed(
-        self, mocker: MockerFixture, targets: list[tuple[str, int]]
-    ) -> None:
-        mocker.patch("pywebtransport.connection.load_balancer.test_tcp_connection", return_value=False)
-        async with ConnectionLoadBalancer(targets=targets, health_check_interval=0.01) as lb:
-            target = lb._targets[0]
-            target_key = f"{target[0]}:{target[1]}"
-            lb._failed_targets.add(target_key)
-
-            await asyncio.sleep(0.05)
-
-            assert target_key in lb._failed_targets
-
-    @pytest.mark.asyncio
-    async def test_health_check_loop_ignores_check_exceptions(
-        self, mocker: MockerFixture, targets: list[tuple[str, int]]
-    ) -> None:
-        target_key = f"{targets[0][0]}:{targets[0][1]}"
-        mocker.patch(
-            "pywebtransport.connection.load_balancer.test_tcp_connection",
-            side_effect=Exception("TCP check failed unexpectedly"),
-        )
-        async with ConnectionLoadBalancer(targets=targets, health_check_interval=0.01) as lb:
-            lb._failed_targets.add(target_key)
-
-            await asyncio.sleep(0.05)
-
-            assert target_key in lb._failed_targets
 
     @pytest.mark.asyncio
     async def test_health_check_loop_critical_error(
-        self, targets: list[tuple[str, int]], mocker: MockerFixture
+        self,
+        mocker: MockerFixture,
+        caplog: pytest.LogCaptureFixture,
+        mock_connection_factory: Callable[..., Awaitable[WebTransportConnection]],
+        mock_health_checker: Callable[..., Awaitable[bool]],
     ) -> None:
-        logger_mock = mocker.patch("pywebtransport.connection.load_balancer.logger")
-        error = ValueError("Critical loop error")
-        error_logged = asyncio.Event()
-        mocker.patch(
-            "pywebtransport.connection.load_balancer.asyncio.sleep", side_effect=[error, asyncio.CancelledError]
+        lb = ConnectionLoadBalancer(
+            targets=[("host1", 443)],
+            connection_factory=mock_connection_factory,
+            health_checker=mock_health_checker,
+            health_check_interval=0.01,
         )
-        logger_mock.error.side_effect = lambda *args, **kwargs: error_logged.set()
+        original_sleep = asyncio.sleep
+        error = ValueError("Critical Error")
 
-        async with ConnectionLoadBalancer(targets=targets, health_check_interval=0.01):
-            await asyncio.wait_for(error_logged.wait(), timeout=1.0)
+        with pytest.raises(ValueError, match="Critical Error"):
+            async with lb:
+                assert lb._health_check_task is not None
+                task = lb._health_check_task
+                mocker.patch("asyncio.sleep", side_effect=error)
+                await original_sleep(0.05)
+                assert task.done()
+                assert task.exception() is error
+                assert "Health check loop critical error: Critical Error" in caplog.text
 
-        logger_mock.error.assert_called_once_with("Health check loop critical error: %s", error, exc_info=error)
+    @pytest.mark.asyncio
+    async def test_health_check_loop_no_failed_targets(
+        self,
+        load_balancer: ConnectionLoadBalancer,
+        mock_health_checker: AsyncMock,
+        mocker: MockerFixture,
+    ) -> None:
+        sleep_call_count = 0
+        original_sleep = asyncio.sleep
+
+        async def side_effect(_: float) -> None:
+            nonlocal sleep_call_count
+            sleep_call_count += 1
+            if sleep_call_count >= 2:
+                raise asyncio.CancelledError
+            await original_sleep(0)
+
+        mocker.patch("asyncio.sleep", side_effect=side_effect)
+        await original_sleep(0.05)
+
+        assert sleep_call_count >= 2
+        mock_health_checker.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_health_check_loop_no_lock(
+        self,
+        mock_connection_factory: Callable[..., Awaitable[WebTransportConnection]],
+        mock_health_checker: Callable[..., Awaitable[bool]],
+    ) -> None:
+        lb = ConnectionLoadBalancer(
+            targets=[("h", 1)],
+            connection_factory=mock_connection_factory,
+            health_checker=mock_health_checker,
+        )
+        await lb._health_check_loop()
+
+    @pytest.mark.asyncio
+    async def test_health_check_loop_recovers_target(
+        self,
+        load_balancer: ConnectionLoadBalancer,
+        mock_health_checker: AsyncMock,
+        mocker: MockerFixture,
+    ) -> None:
+        load_balancer._failed_targets.add("host1:443")
+        health_check_started = asyncio.Event()
+
+        async def sleep_side_effect(*args: Any, **kwargs: Any) -> None:
+            health_check_started.set()
+            raise asyncio.CancelledError
+
+        mocker.patch("asyncio.sleep", side_effect=sleep_side_effect)
+        await health_check_started.wait()
+
+        mock_health_checker.assert_called()
+        stats = await load_balancer.get_load_balancer_stats()
+        assert stats["failed_targets"] == 0
+
+    @pytest.mark.asyncio
+    async def test_health_check_task_group_exception(
+        self,
+        load_balancer: ConnectionLoadBalancer,
+        mocker: MockerFixture,
+    ) -> None:
+        load_balancer._failed_targets.add("malformed_key")
+        health_check_started = asyncio.Event()
+
+        async def side_effect(_: float) -> None:
+            health_check_started.set()
+            raise asyncio.CancelledError
+
+        mocker.patch("asyncio.sleep", side_effect=side_effect)
+        await health_check_started.wait()
+
+    def test_initialization(
+        self,
+        mock_connection_factory: Callable[..., Awaitable[WebTransportConnection]],
+        mock_health_checker: Callable[..., Awaitable[bool]],
+    ) -> None:
+        lb = ConnectionLoadBalancer(
+            targets=[("host1", 443)],
+            connection_factory=mock_connection_factory,
+            health_checker=mock_health_checker,
+        )
+        assert len(lb) == 1
+
+    def test_initialization_no_targets(
+        self,
+        mock_connection_factory: Callable[..., Awaitable[WebTransportConnection]],
+        mock_health_checker: Callable[..., Awaitable[bool]],
+    ) -> None:
+        with pytest.raises(ValueError, match="Targets list cannot be empty"):
+            ConnectionLoadBalancer(
+                targets=[],
+                connection_factory=mock_connection_factory,
+                health_checker=mock_health_checker,
+            )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "method_name, kwargs",
         [
+            ("get_connection", {"config": ClientConfig()}),
             ("close_all_connections", {}),
-            ("get_connection", {"config": None}),
             ("get_load_balancer_stats", {}),
             ("get_target_stats", {}),
             ("update_target_weight", {"host": "h", "port": 1, "weight": 1.0}),
         ],
     )
-    async def test_methods_fail_if_not_activated(
-        self, targets: list[tuple[str, int]], method_name: str, kwargs: dict[str, Any]
+    async def test_methods_on_uninitialized_raises_error(
+        self,
+        mock_connection_factory: Callable[..., Awaitable[WebTransportConnection]],
+        mock_health_checker: Callable[..., Awaitable[bool]],
+        method_name: str,
+        kwargs: dict[str, Any],
     ) -> None:
-        lb = ConnectionLoadBalancer(targets=targets)
-        method: Callable[..., Coroutine[Any, Any, Any]] = getattr(lb, method_name)
-
+        lb = ConnectionLoadBalancer(
+            targets=[("host1", 443)],
+            connection_factory=mock_connection_factory,
+            health_checker=mock_health_checker,
+        )
+        method = getattr(lb, method_name)
         with pytest.raises(ConnectionError, match="has not been activated"):
-            if "config" in kwargs:
-                kwargs["config"] = ClientConfig()
             await method(**kwargs)
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_tasks_and_closes_connections(
+        self, load_balancer: ConnectionLoadBalancer, mocker: MockerFixture
+    ) -> None:
+        task_is_paused = asyncio.Event()
+        task_can_continue = asyncio.Event()
+
+        async def side_effect(delay: float) -> None:
+            task_is_paused.set()
+            await task_can_continue.wait()
+
+        mocker.patch("asyncio.sleep", side_effect=side_effect)
+
+        conn = await load_balancer.get_connection(config=ClientConfig())
+        await task_is_paused.wait()
+
+        assert load_balancer._health_check_task is not None
+        health_task = load_balancer._health_check_task
+        assert not health_task.done()
+
+        await load_balancer.shutdown()
+
+        assert health_task.done()
+        task_can_continue.set()
+        cast(AsyncMock, conn.close).assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_catches_cancelled_error(
+        self, load_balancer: ConnectionLoadBalancer, mocker: MockerFixture
+    ) -> None:
+        original_sleep = asyncio.sleep
+
+        async def side_effect(delay: float) -> None:
+            await original_sleep(delay)
+            raise asyncio.CancelledError
+
+        mocker.patch("asyncio.sleep", side_effect=side_effect)
+        await original_sleep(0.05)
+        await load_balancer.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_start_health_check_task_already_running(self, load_balancer: ConnectionLoadBalancer) -> None:
+        initial_task = load_balancer._health_check_task
+        assert initial_task is not None
+        load_balancer._start_health_check_task()
+        assert load_balancer._health_check_task is initial_task
+
+    @pytest.mark.asyncio
+    async def test_update_target_weight(self, load_balancer: ConnectionLoadBalancer, mocker: MockerFixture) -> None:
+        choices_mock = mocker.patch("random.choices", return_value=[("host2", 443)])
+        await load_balancer.update_target_weight(host="host1", port=443, weight=0.0)
+        await load_balancer.update_target_weight(host="host2", port=443, weight=100.0)
+        await load_balancer.get_connection(config=ClientConfig(), strategy="weighted")
+
+        assert choices_mock.call_args.kwargs["weights"] == [0.0, 100.0]
+
+    @pytest.mark.asyncio
+    async def test_update_target_weight_nonexistent_target(self, load_balancer: ConnectionLoadBalancer) -> None:
+        await load_balancer.update_target_weight(host="nonexistent", port=123, weight=100.0)
+        stats = await load_balancer.get_target_stats()
+        assert "nonexistent:123" not in stats

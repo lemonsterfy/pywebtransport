@@ -1,18 +1,21 @@
-"""WebTransport Datagram Subpackage."""
+"""Abstractions for the WebTransport datagram transport layer."""
 
 from .broadcaster import DatagramBroadcaster
-from .monitor import DatagramMonitor
 from .reliability import DatagramReliabilityLayer
 from .structured import StructuredDatagramTransport
-from .transport import DatagramMessage, DatagramQueue, DatagramStats, WebTransportDatagramTransport
+from .transport import (
+    DatagramMessage,
+    DatagramStats,
+    DatagramTransportDiagnostics,
+    WebTransportDatagramTransport,
+)
 
-__all__ = [
+__all__: list[str] = [
     "DatagramBroadcaster",
     "DatagramMessage",
-    "DatagramMonitor",
-    "DatagramQueue",
     "DatagramReliabilityLayer",
     "DatagramStats",
+    "DatagramTransportDiagnostics",
     "StructuredDatagramTransport",
     "WebTransportDatagramTransport",
 ]

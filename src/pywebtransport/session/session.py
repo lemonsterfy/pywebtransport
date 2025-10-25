@@ -1,13 +1,13 @@
-"""WebTransport session core implementation."""
+"""Core object representing a logical WebTransport session."""
 
 from __future__ import annotations
 
 import asyncio
 import weakref
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 
 from pywebtransport.config import ClientConfig
 from pywebtransport.connection import WebTransportConnection
@@ -20,29 +20,59 @@ from pywebtransport.constants import (
 from pywebtransport.datagram import WebTransportDatagramTransport
 from pywebtransport.events import Event, EventEmitter
 from pywebtransport.exceptions import FlowControlError, SessionError, StreamError, TimeoutError, session_not_ready
+from pywebtransport.manager.stream import StreamManager, StreamType
 from pywebtransport.protocol import WebTransportProtocolHandler
-from pywebtransport.stream import StreamManager, WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from pywebtransport.stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
 from pywebtransport.types import EventType, Headers, SessionId, SessionState, StreamDirection, StreamId
 from pywebtransport.utils import format_duration, get_logger, get_timestamp
 
-if TYPE_CHECKING:
-    from pywebtransport.datagram.structured import StructuredDatagramTransport
-    from pywebtransport.pubsub.manager import PubSubManager
-    from pywebtransport.rpc.manager import RpcManager
-    from pywebtransport.stream.structured import StructuredStream
-    from pywebtransport.types import Serializer
+__all__: list[str] = ["SessionDiagnostics", "SessionStats", "WebTransportSession"]
+
+logger = get_logger(name=__name__)
 
 
-__all__ = ["SessionStats", "WebTransportSession"]
+@dataclass(frozen=True, kw_only=True)
+class SessionDiagnostics:
+    """A structured, immutable snapshot of a session's health."""
 
-logger = get_logger(name="session.session")
+    stats: SessionStats
+    state: SessionState
+    is_connection_active: bool
+    datagram_receive_buffer_size: int
+    send_credit_available: int
+    receive_credit_available: int
 
-StreamType = WebTransportStream | WebTransportReceiveStream | WebTransportSendStream
+    @property
+    def issues(self) -> list[str]:
+        """Get a list of potential issues based on the current diagnostics."""
+        issues: list[str] = []
+        stats = self.stats
+
+        if self.state not in [SessionState.CONNECTED, SessionState.CLOSED]:
+            issues.append(f"Session stuck in {self.state} state")
+
+        total_operations = stats.streams_created + stats.datagrams_sent
+        total_errors = stats.stream_errors + stats.protocol_errors
+        if total_operations > 50 and (total_errors / total_operations) > 0.1:
+            issues.append(f"High error rate: {total_errors}/{total_operations}")
+
+        if stats.uptime > 3600 and stats.active_streams == 0:
+            issues.append("Session appears stale (long uptime with no active streams)")
+
+        if not self.is_connection_active:
+            issues.append("Underlying connection not available or not connected")
+
+        if self.datagram_receive_buffer_size > 100:
+            issues.append(
+                f"Large datagram receive buffer ({self.datagram_receive_buffer_size}) indicates slow processing."
+            )
+
+        return issues
 
 
 @dataclass(kw_only=True)
 class SessionStats:
-    """Represents statistics for a WebTransport session."""
+    """Statistics for a WebTransport session."""
 
     session_id: SessionId
     created_at: float
@@ -95,8 +125,7 @@ class WebTransportSession(EventEmitter):
     """A long-lived logical connection for streams and datagrams."""
 
     _datagram_transport: WebTransportDatagramTransport
-    _pubsub_manager: PubSubManager
-    _rpc_manager: RpcManager
+    path_params: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -106,48 +135,40 @@ class WebTransportSession(EventEmitter):
         max_streams: int = DEFAULT_MAX_STREAMS,
         max_incoming_streams: int = DEFAULT_MAX_INCOMING_STREAMS,
         stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL,
+        path: str | None = None,
+        headers: Headers | None = None,
+        control_stream_id: StreamId | None = None,
     ) -> None:
         """Initialize the WebTransport session."""
         super().__init__()
         self._connection = weakref.ref(connection)
         self._session_id = session_id
-        self._max_streams = max_streams
-        self._cleanup_interval = stream_cleanup_interval
-        self._config = connection.config
-        self._control_stream_id: StreamId | None = None
         self._state: SessionState = SessionState.CONNECTING
+        self._config = connection.config
         self._protocol_handler: WebTransportProtocolHandler | None = connection.protocol_handler
-        self._path: str = ""
-        self._headers: Headers = {}
+        self.stream_manager: StreamManager | None = None
+
+        self._path: str = path or ""
+        self._headers: Headers = headers or {}
+        self._control_stream_id: StreamId | None = control_stream_id
         self._created_at = get_timestamp()
         self._ready_at: float | None = None
         self._closed_at: float | None = None
-        self._max_incoming_streams = max_incoming_streams
-        self.stream_manager: StreamManager | None = None
-        self._incoming_streams: asyncio.Queue[StreamType | None] | None = None
         self._stats = SessionStats(session_id=self._session_id, created_at=self._created_at)
+
+        self._max_streams = max_streams
+        self._max_incoming_streams = max_incoming_streams
+        self._cleanup_interval = stream_cleanup_interval
+        self._incoming_streams: asyncio.Queue[StreamType | None] | None = None
+
         self._ready_event: asyncio.Event | None = None
         self._closed_event: asyncio.Event | None = None
         self._data_credit_event: asyncio.Event | None = None
         self._bidi_stream_credit_event: asyncio.Event | None = None
         self._uni_stream_credit_event: asyncio.Event | None = None
+
         self._is_initialized = False
         logger.debug("WebTransportSession.__init__ completed for session %s", session_id)
-
-    @property
-    def is_closed(self) -> bool:
-        """Check if the session is closed."""
-        return self._state == SessionState.CLOSED
-
-    @property
-    def is_ready(self) -> bool:
-        """Check if the session is ready for communication."""
-        return self._state == SessionState.CONNECTED
-
-    @property
-    def state(self) -> SessionState:
-        """Get the current session state."""
-        return self._state
 
     @property
     def connection(self) -> WebTransportConnection | None:
@@ -158,6 +179,16 @@ class WebTransportSession(EventEmitter):
     def headers(self) -> Headers:
         """Get a copy of the initial headers for the session."""
         return self._headers.copy()
+
+    @property
+    def is_closed(self) -> bool:
+        """Check if the session is closed."""
+        return self._state == SessionState.CLOSED
+
+    @property
+    def is_ready(self) -> bool:
+        """Check if the session is ready for communication."""
+        return self._state == SessionState.CONNECTED
 
     @property
     def path(self) -> str:
@@ -175,35 +206,9 @@ class WebTransportSession(EventEmitter):
         return self._session_id
 
     @property
-    async def datagrams(self) -> WebTransportDatagramTransport:
-        """Access the datagram transport, creating it on first access."""
-        if self.is_closed:
-            raise SessionError(message=f"Session {self.session_id} is closed.")
-
-        if not hasattr(self, "_datagram_transport"):
-            logger.debug("Lazily creating datagram transport for session %s", self.session_id)
-            self._datagram_transport = WebTransportDatagramTransport(session=self)
-            await self._datagram_transport.initialize()
-
-        return self._datagram_transport
-
-    @property
-    def pubsub(self) -> PubSubManager:
-        """Access the Publish/Subscribe manager for this session."""
-        if not hasattr(self, "_pubsub_manager"):
-            from pywebtransport.pubsub.manager import PubSubManager
-
-            self._pubsub_manager = PubSubManager(session=self)
-        return self._pubsub_manager
-
-    @property
-    def rpc(self) -> RpcManager:
-        """Access the RPC manager for this session."""
-        if not hasattr(self, "_rpc_manager"):
-            from pywebtransport.rpc.manager import RpcManager
-
-            self._rpc_manager = RpcManager(session=self, concurrency_limit=self._config.rpc_concurrency_limit)
-        return self._rpc_manager
+    def state(self) -> SessionState:
+        """Get the current session state."""
+        return self._state
 
     async def __aenter__(self) -> Self:
         """Enter async context, initializing and waiting for the session to be ready."""
@@ -226,12 +231,7 @@ class WebTransportSession(EventEmitter):
         """Close the session and all associated streams."""
         if self._state in (SessionState.CLOSING, SessionState.CLOSED):
             return
-        if (
-            not self._is_initialized
-            or self._incoming_streams is None
-            or self._closed_event is None
-            or self.stream_manager is None
-        ):
+        if not self._is_initialized or self._incoming_streams is None or self._closed_event is None:
             raise SessionError(
                 message=(
                     "WebTransportSession is not initialized."
@@ -241,25 +241,21 @@ class WebTransportSession(EventEmitter):
 
         self._state = SessionState.CLOSING
         logger.debug("Closing session %s...", self._session_id)
-
-        first_exception: BaseException | None = None
+        first_exception: Exception | ExceptionGroup[Exception] | None = None
 
         try:
-            try:
-                async with asyncio.TaskGroup() as tg:
+            async with asyncio.TaskGroup() as tg:
+                if self.stream_manager:
                     tg.create_task(self.stream_manager.shutdown())
-                    if hasattr(self, "_datagram_transport"):
-                        tg.create_task(self._datagram_transport.close())
-                    if hasattr(self, "_pubsub_manager"):
-                        tg.create_task(self._pubsub_manager.close())
-                    if hasattr(self, "_rpc_manager"):
-                        tg.create_task(self._rpc_manager.close())
-            except* Exception as eg:
-                first_exception = eg
-                logger.error(
-                    "Errors during parallel resource cleanup for %s: %s", self.session_id, eg.exceptions, exc_info=eg
-                )
+                if hasattr(self, "_datagram_transport"):
+                    tg.create_task(self._datagram_transport.close())
+        except* Exception as eg:
+            first_exception = eg
+            logger.error(
+                "Errors during parallel resource cleanup for %s: %s", self.session_id, eg.exceptions, exc_info=eg
+            )
 
+        try:
             if self._incoming_streams:
                 await self._incoming_streams.put(None)
             if self._protocol_handler:
@@ -267,14 +263,20 @@ class WebTransportSession(EventEmitter):
             if close_connection:
                 if connection := self.connection:
                     if not connection.is_closed:
-                        try:
-                            await connection.close()
-                        except Exception as e:
-                            if first_exception is None:
-                                first_exception = e
-                            logger.error(
-                                "Error closing parent connection for %s: %s", self.session_id, e, exc_info=True
-                            )
+                        await connection.close()
+        except Exception as e:
+            logger.error("Error during serial resource cleanup for %s: %s", self.session_id, e, exc_info=True)
+            if first_exception is None:
+                first_exception = e
+            else:
+                existing_exceptions = (
+                    first_exception.exceptions if isinstance(first_exception, ExceptionGroup) else (first_exception,)
+                )
+                new_exceptions = e.exceptions if isinstance(e, ExceptionGroup) else (e,)
+                first_exception = ExceptionGroup(
+                    "Multiple errors during session close",
+                    existing_exceptions + new_exceptions,
+                )
         finally:
             self._teardown_event_handlers()
             self._state = SessionState.CLOSED
@@ -295,12 +297,17 @@ class WebTransportSession(EventEmitter):
         if self._is_initialized:
             return
 
-        self.stream_manager = StreamManager.create(
-            session=self,
+        def stream_factory_adapter(is_unidirectional: bool) -> Awaitable[StreamId]:
+            return self._create_stream_on_protocol(is_unidirectional=is_unidirectional)
+
+        self.stream_manager = StreamManager(
+            stream_factory=stream_factory_adapter,
+            session_factory=lambda: self,
             max_streams=self._max_streams,
             stream_cleanup_interval=self._cleanup_interval,
         )
         await self.stream_manager.__aenter__()
+
         self._incoming_streams = asyncio.Queue(maxsize=self._max_incoming_streams)
         self._ready_event = asyncio.Event()
         self._closed_event = asyncio.Event()
@@ -374,6 +381,31 @@ class WebTransportSession(EventEmitter):
             msg = f"Timed out creating bidirectional stream after {effective_timeout}s."
             raise StreamError(message=msg) from None
 
+    async def create_datagram_transport(self) -> WebTransportDatagramTransport:
+        """Create a datagram transport for this session."""
+        if hasattr(self, "_datagram_transport"):
+            return self._datagram_transport
+
+        if self.is_closed:
+            raise SessionError(message=f"Session {self.session_id} is closed.")
+        if not self.protocol_handler:
+            raise SessionError(message="Protocol handler is not available.")
+
+        def sender_callback(data: bytes) -> None:
+            if self.protocol_handler:
+                self.protocol_handler.send_webtransport_datagram(session_id=self.session_id, data=data)
+
+        max_size = getattr(self.protocol_handler.quic_connection, "_max_datagram_size", 1200)
+
+        transport = WebTransportDatagramTransport(
+            session_id=self.session_id,
+            datagram_sender=sender_callback,
+            max_datagram_size=max_size,
+        )
+        await transport.initialize()
+        self._datagram_transport = transport
+        return transport
+
     async def create_unidirectional_stream(self, *, timeout: float | None = None) -> WebTransportSendStream:
         """Create a new unidirectional stream."""
         if not self.is_ready:
@@ -403,37 +435,6 @@ class WebTransportSession(EventEmitter):
             msg = f"Timed out creating unidirectional stream after {effective_timeout}s."
             raise StreamError(message=msg) from None
 
-    async def create_structured_datagram_transport(
-        self,
-        *,
-        serializer: Serializer,
-        registry: dict[int, type[Any]],
-    ) -> StructuredDatagramTransport:
-        """Create a new structured datagram transport for sending and receiving objects."""
-        from pywebtransport.datagram.structured import StructuredDatagramTransport
-
-        datagram_transport = await self.datagrams
-        structured_datagram_transport = StructuredDatagramTransport(
-            datagram_transport=datagram_transport,
-            serializer=serializer,
-            registry=registry,
-        )
-        return structured_datagram_transport
-
-    async def create_structured_stream(
-        self,
-        *,
-        serializer: Serializer,
-        registry: dict[int, type[Any]],
-        timeout: float | None = None,
-    ) -> StructuredStream:
-        """Create a new structured bidirectional stream for sending and receiving objects."""
-        from pywebtransport.stream.structured import StructuredStream
-
-        raw_stream = await self.create_bidirectional_stream(timeout=timeout)
-        structured_stream = StructuredStream(stream=raw_stream, serializer=serializer, registry=registry)
-        return structured_stream
-
     async def incoming_streams(self) -> AsyncIterator[StreamType]:
         """Iterate over all incoming streams (both uni- and bidirectional)."""
         if not self._is_initialized or self._incoming_streams is None:
@@ -454,133 +455,48 @@ class WebTransportSession(EventEmitter):
             except asyncio.TimeoutError:
                 continue
 
-    async def debug_state(self) -> dict[str, Any]:
-        """Get a detailed, structured snapshot of the session state for debugging."""
-        transport_stats = await self.get_session_stats()
-        streams = await self.stream_manager.get_all_streams() if self.stream_manager else []
-
-        stream_info_list: list[dict[str, Any]] = []
-        for stream in streams:
-            info: dict[str, Any] = {
-                "stream_id": stream.stream_id,
-                "state": stream.state,
-                "direction": stream.direction,
-            }
-            if hasattr(stream, "bytes_sent"):
-                info["bytes_sent"] = stream.bytes_sent
-            if hasattr(stream, "bytes_received"):
-                info["bytes_received"] = stream.bytes_received
-            stream_info_list.append(info)
-
-        datagram_stats: dict[str, Any] = {"available": False}
-        if hasattr(self, "_datagram_transport"):
-            datagram_stats = {
-                "available": True,
-                "max_size": self._datagram_transport.max_datagram_size,
-                "sent": self._datagram_transport.datagrams_sent,
-                "received": self._datagram_transport.datagrams_received,
-                "send_buffer": self._datagram_transport.get_send_buffer_size(),
-                "receive_buffer": self._datagram_transport.get_receive_buffer_size(),
-            }
-
-        debug_report: dict[str, Any] = {
-            "session": {
-                "id": self.session_id,
-                "state": self.state,
-                "path": self.path,
-                "headers": self.headers,
-            },
-            "statistics": transport_stats,
-            "streams": stream_info_list,
-            "datagrams": datagram_stats,
-        }
-
-        if hasattr(self, "_pubsub_manager"):
-            debug_report["pubsub_stats"] = self._pubsub_manager.stats.to_dict()
-
-        connection = self.connection
-        debug_report["connection"] = {
-            "id": connection.connection_id if connection else None,
-            "state": connection.state if connection else "N/A",
-        }
-        return debug_report
-
-    async def diagnose_issues(self) -> list[str]:
-        """Diagnose and report potential issues with a session."""
-        issues: list[str] = []
-        stats = await self.get_session_stats()
-
-        if not self.is_ready and not self.is_closed:
-            issues.append(f"Session stuck in {self.state} state")
-
-        total_operations = stats.get("streams_created", 0) + stats.get("datagrams_sent", 0)
-        total_errors = stats.get("stream_errors", 0) + stats.get("protocol_errors", 0)
-        if total_operations > 50 and (total_errors / total_operations) > 0.1:
-            issues.append(f"High error rate: {total_errors}/{total_operations}")
-
-        uptime = stats.get("uptime", 0)
-        active_streams = stats.get("active_streams", 0)
-        if uptime > 3600 and active_streams == 0:
-            issues.append("Session appears stale (long uptime with no active streams)")
-
-        if not (connection := self.connection) or not connection.is_connected:
-            issues.append("Underlying connection not available or not connected")
-
-        if hasattr(self, "_datagram_transport"):
-            receive_buffer_size = self._datagram_transport.get_receive_buffer_size()
-            if receive_buffer_size > 100:
-                issues.append(f"Large datagram receive buffer ({receive_buffer_size}) indicates slow processing.")
-
-        return issues
-
-    async def get_session_stats(self) -> dict[str, Any]:
-        """Get an up-to-date dictionary of current session statistics."""
+    async def diagnostics(self) -> SessionDiagnostics:
+        """Get a snapshot of the session's diagnostics and statistics."""
         if self.stream_manager:
             manager_stats = await self.stream_manager.get_stats()
             self._stats.streams_created = manager_stats.get("total_created", 0)
             self._stats.streams_closed = manager_stats.get("total_closed", 0)
 
         if hasattr(self, "_datagram_transport"):
-            datagram_stats = self._datagram_transport.stats
-            self._stats.datagrams_sent = datagram_stats.get("datagrams_sent", 0)
-            self._stats.datagrams_received = datagram_stats.get("datagrams_received", 0)
+            datagram_diagnostics = self._datagram_transport.diagnostics
+            self._stats.datagrams_sent = datagram_diagnostics.stats.datagrams_sent
+            self._stats.datagrams_received = datagram_diagnostics.stats.datagrams_received
 
-        return self._stats.to_dict()
+        datagram_buffer_size = 0
+        if hasattr(self, "_datagram_transport"):
+            datagram_buffer_size = self._datagram_transport.get_receive_buffer_size()
 
-    async def get_summary(self) -> dict[str, Any]:
-        """Get a structured summary of a session for monitoring dashboards."""
-        stats = await self.get_session_stats()
+        connection = self.connection
+        is_conn_active = bool(connection and connection.is_connected)
 
-        return {
-            "session_id": self.session_id,
-            "state": self.state,
-            "path": self.path,
-            "uptime": stats.get("uptime", 0),
-            "streams": {
-                "total_created": stats.get("streams_created", 0),
-                "active": stats.get("active_streams", 0),
-                "bidirectional": stats.get("bidirectional_streams", 0),
-                "unidirectional": stats.get("unidirectional_streams", 0),
-            },
-            "data": {
-                "bytes_sent": stats.get("bytes_sent", 0),
-                "bytes_received": stats.get("bytes_received", 0),
-                "datagrams_sent": stats.get("datagrams_sent", 0),
-                "datagrams_received": stats.get("datagrams_received", 0),
-            },
-            "errors": {
-                "stream_errors": stats.get("stream_errors", 0),
-                "protocol_errors": stats.get("protocol_errors", 0),
-            },
-        }
+        send_credit, receive_credit = 0, 0
+        if connection and connection.protocol_handler:
+            if session_info := connection.get_session_info(session_id=self._session_id):
+                send_credit = session_info.peer_max_data - session_info.local_data_sent
+                receive_credit = session_info.local_max_data - session_info.peer_data_sent
+
+        return SessionDiagnostics(
+            stats=self._stats,
+            state=self._state,
+            is_connection_active=is_conn_active,
+            datagram_receive_buffer_size=datagram_buffer_size,
+            send_credit_available=send_credit,
+            receive_credit_available=receive_credit,
+        )
 
     async def monitor_health(self, *, check_interval: float = 60.0) -> None:
         """Monitor the health of a session continuously until it is closed."""
         logger.debug("Starting health monitoring for session %s", self.session_id)
         try:
             while not self.is_closed:
-                if (connection := self.connection) and hasattr(connection, "info") and connection.info.last_activity:
-                    if (get_timestamp() - connection.info.last_activity) > 300:
+                if (connection := self.connection) and hasattr(connection, "diagnostics"):
+                    last_activity = connection.diagnostics.stats.last_activity
+                    if last_activity and (get_timestamp() - last_activity) > 300:
                         logger.warning(
                             "Session %s appears inactive (no connection activity)",
                             self.session_id,
@@ -630,9 +546,8 @@ class WebTransportSession(EventEmitter):
         if not (isinstance(event.data, dict) and event.data.get("session_id") == self._session_id):
             return
 
-        datagram_transport = await self.datagrams
-        if hasattr(datagram_transport, "_on_datagram_received"):
-            await datagram_transport._on_datagram_received(event=event)
+        if hasattr(self, "_datagram_transport"):
+            await self._datagram_transport.receive_from_protocol(data=event.data["data"])
 
     async def _on_max_data_updated(self, event: Event) -> None:
         """Handle session max data update event."""
@@ -675,9 +590,12 @@ class WebTransportSession(EventEmitter):
             self._state = SessionState.CONNECTED
             self._ready_at = get_timestamp()
             self._stats.ready_at = self._ready_at
-            self._path = event.data.get("path", "/")
-            self._headers = event.data.get("headers", {})
-            self._control_stream_id = event.data.get("stream_id")
+            if "path" in event.data:
+                self._path = event.data["path"]
+            if "headers" in event.data:
+                self._headers = event.data["headers"]
+            if "control_stream_id" in event.data:
+                self._control_stream_id = event.data["control_stream_id"]
             self._ready_event.set()
             await self.emit(
                 event_type=EventType.SESSION_READY,
@@ -708,7 +626,10 @@ class WebTransportSession(EventEmitter):
 
             await stream.initialize()
             if initial_payload := event.data.get("initial_payload"):
-                await stream._on_data_received(event=Event(type="", data=initial_payload))
+                payload_event = Event(
+                    type=EventType.STREAM_DATA_RECEIVED, data={**initial_payload, "stream_id": stream_id}
+                )
+                await stream._on_data_received(event=payload_event)
 
             if self.stream_manager is None:
                 raise SessionError(message="StreamManager is not available.")
@@ -761,7 +682,7 @@ class WebTransportSession(EventEmitter):
     def _sync_protocol_state(self) -> None:
         """Synchronize session state from the underlying protocol layer."""
         logger.debug("Syncing protocol state for session %s", self._session_id)
-        if not self._protocol_handler:
+        if not (connection := self.connection):
             return
         if not self._ready_event:
             logger.warning(
@@ -770,14 +691,17 @@ class WebTransportSession(EventEmitter):
             )
             return
 
-        if session_info := self._protocol_handler.get_session_info(session_id=self._session_id):
+        if session_info := connection.get_session_info(session_id=self._session_id):
             if session_info.state == SessionState.CONNECTED:
                 logger.info("Syncing ready state for session %s (protocol already connected)", self._session_id)
                 self._state = SessionState.CONNECTED
                 self._ready_at = session_info.ready_at or get_timestamp()
-                self._path = session_info.path
-                self._headers = session_info.headers.copy() if session_info.headers else {}
-                self._control_stream_id = session_info.stream_id
+                if not self._path:
+                    self._path = session_info.path
+                if not self._headers:
+                    self._headers = session_info.headers.copy() if session_info.headers else {}
+                if self._control_stream_id is None:
+                    self._control_stream_id = session_info.control_stream_id
                 self._ready_event.set()
 
     def _teardown_event_handlers(self) -> None:

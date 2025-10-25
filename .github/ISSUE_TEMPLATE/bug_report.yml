@@ -1,6 +1,6 @@
 # PyWebTransport Bug Report GitHub Issue Form
 
-name: "🐞 Bug Report"
+name: "Bug Report"
 description: "Report a bug to help us improve the library."
 title: "[Bug]: A brief description of the bug"
 labels: ["bug", "triage"]

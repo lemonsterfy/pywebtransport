@@ -9,31 +9,29 @@ This module provides module-level constants, error codes, and default configurat
 ### General Web Standard Identifiers
 
 - `ALPN_H3` (`str`): The ALPN identifier for HTTP/3. `Default: "h3"`.
-- `ALPN_H3_29` (`str`): The ALPN identifier for HTTP/3 draft 29. `Default: "h3-29"`.
-- `ALPN_H3_32` (`str`): The ALPN identifier for HTTP/3 draft 32. `Default: "h3-32"`.
-- `ORIGIN_HEADER` (`str`): The HTTP "Origin" header field name. `Default: "origin"`.
-- `SECURE_SCHEMES` (`tuple[str, str]`): URL schemes considered secure. `Default: ("https", "wss")`.
 - `USER_AGENT_HEADER` (`str`): The HTTP "User-Agent" header field name. `Default: "user-agent"`.
-- `WEBTRANSPORT_MIME_TYPE` (`str`): The MIME type for WebTransport session requests. `Default: "application/webtransport"`.
-- `WEBTRANSPORT_SCHEMES` (`tuple[str, str]`): URL schemes used for WebTransport. `Default: ("https", "wss")`.
+- `WEBTRANSPORT_SCHEME` (`str`): The URL scheme used for WebTransport. `Default: "https"`.
 
 ### Protocol-Defined Constants
 
 - `BIDIRECTIONAL_STREAM` (`int`): The QUIC stream type identifier for bidirectional streams. `Default: 0x0`.
 - `CLOSE_WEBTRANSPORT_SESSION_TYPE` (`int`): The Capsule type for closing a WebTransport session. `Default: 0x2843`.
 - `DRAIN_WEBTRANSPORT_SESSION_TYPE` (`int`): The Capsule type for draining a WebTransport session. `Default: 0x78AE`.
-- `DRAFT_VERSION` (`int`): The supported WebTransport draft version. `Default: 13`.
 - `H3_FRAME_TYPE_DATA` (`int`): The H3 frame type for data frames. `Default: 0x0`.
 - `H3_FRAME_TYPE_HEADERS` (`int`): The H3 frame type for headers. `Default: 0x1`.
+- `H3_FRAME_TYPE_CANCEL_PUSH` (`int`): The H3 frame type for cancelling a push. `Default: 0x3`.
 - `H3_FRAME_TYPE_SETTINGS` (`int`): The H3 frame type for settings. `Default: 0x4`.
+- `H3_FRAME_TYPE_PUSH_PROMISE` (`int`): The H3 frame type for push promises. `Default: 0x5`.
+- `H3_FRAME_TYPE_GOAWAY` (`int`): The H3 frame type for GOAWAY frames. `Default: 0x7`.
+- `H3_FRAME_TYPE_MAX_PUSH_ID` (`int`): The H3 frame type for max push ID. `Default: 0xD`.
 - `H3_FRAME_TYPE_WEBTRANSPORT_STREAM` (`int`): The H3 frame type used for WebTransport stream data. `Default: 0x41`.
 - `H3_STREAM_TYPE_CONTROL` (`int`): The H3 stream type for the control stream. `Default: 0x00`.
-- `H3_STREAM_TYPE_QPACK_DECODER` (`int`): The H3 stream type for the QPACK decoder. `Default: 0x03`.
+- `H3_STREAM_TYPE_PUSH` (`int`): The H3 stream type for a push stream. `Default: 0x1`.
 - `H3_STREAM_TYPE_QPACK_ENCODER` (`int`): The H3 stream type for the QPACK encoder. `Default: 0x02`.
+- `H3_STREAM_TYPE_QPACK_DECODER` (`int`): The H3 stream type for the QPACK decoder. `Default: 0x03`.
 - `H3_STREAM_TYPE_WEBTRANSPORT` (`int`): The H3 stream type for a WebTransport stream. `Default: 0x54`.
 - `MAX_DATAGRAM_SIZE` (`int`): The maximum theoretical size of a UDP datagram. `Default: 65535`.
 - `MAX_STREAM_ID` (`int`): The maximum possible stream ID in QUIC. `Default: 2**62 - 1`.
-- `SEC_WEBTRANSPORT_HTTP3_DRAFT13` (`str`): The Sec-WebTransport-Http3-Draft header value. `Default: "webtransport"`.
 - `SETTINGS_ENABLE_CONNECT_PROTOCOL` (`int`): The H3 setting to enable the CONNECT method. `Default: 0x8`.
 - `SETTINGS_H3_DATAGRAM` (`int`): The H3 setting to enable datagrams. `Default: 0x33`.
 - `SETTINGS_QPACK_BLOCKED_STREAMS` (`int`): The H3 setting for QPACK blocked streams. `Default: 0x7`.
@@ -43,7 +41,6 @@ This module provides module-level constants, error codes, and default configurat
 - `SETTINGS_WT_INITIAL_MAX_STREAMS_UNI` (`int`): The H3 setting for WebTransport initial max unidirectional streams. `Default: 0x2B64`.
 - `SETTINGS_WT_MAX_SESSIONS` (`int`): The H3 setting to enable WebTransport and indicate max sessions. `Default: 0x14E9CD29`.
 - `UNIDIRECTIONAL_STREAM` (`int`): The QUIC stream type identifier for unidirectional streams. `Default: 0x2`.
-- `WEBTRANSPORT_HEADER` (`str`): The "WebTransport" header field name. `Default: "webtransport"`.
 - `WT_DATA_BLOCKED_TYPE` (`int`): The Capsule type for `DATA_BLOCKED`. `Default: 0x190B4D41`.
 - `WT_MAX_DATA_TYPE` (`int`): The Capsule type for `MAX_DATA`. `Default: 0x190B4D3D`.
 - `WT_MAX_STREAMS_BIDI_TYPE` (`int`): The Capsule type for `MAX_STREAMS` (bidirectional). `Default: 0x190B4D3F`.
@@ -54,6 +51,7 @@ This module provides module-level constants, error codes, and default configurat
 ### Library Defaults & Utils
 
 - `DEFAULT_ACCESS_LOG` (`bool`): Default server access log state. `Default: True`.
+- `DEFAULT_ALPN_PROTOCOLS` (`tuple[str]`): Default ALPN protocols. `Default: ("h3",)`.
 - `DEFAULT_AUTO_RECONNECT` (`bool`): Default client auto-reconnect state. `Default: False`.
 - `DEFAULT_BIND_HOST` (`str`): Default host for the server to bind to. `Default: "localhost"`.
 - `DEFAULT_BUFFER_SIZE` (`int`): Default stream buffer size. `Default: 65536`.
@@ -76,10 +74,10 @@ This module provides module-level constants, error codes, and default configurat
 - `DEFAULT_INITIAL_MAX_STREAMS_UNI` (`int`): Default initial max unidirectional streams. `Default: 0`.
 - `DEFAULT_KEEP_ALIVE` (`bool`): Default TCP keep-alive state. `Default: True`.
 - `DEFAULT_KEYFILE` (`str`): Default path for a private key file. `Default: ""`.
-- `DEFAULT_LOG_FORMAT` (`str`): Default format string for logging.
 - `DEFAULT_LOG_LEVEL` (`str`): Default logging level. `Default: "INFO"`.
 - `DEFAULT_MAX_DATAGRAM_SIZE` (`int`): Default maximum datagram size. `Default: 65535`.
 - `DEFAULT_MAX_INCOMING_STREAMS` (`int`): Default maximum concurrent incoming streams. `Default: 100`.
+- `DEFAULT_MAX_MESSAGE_SIZE` (`int`): Default maximum message size for structured streams. `Default: 1048576`.
 - `DEFAULT_MAX_PENDING_EVENTS_PER_SESSION` (`int`): Default maximum buffered events per pending session. `Default: 16`.
 - `DEFAULT_MAX_RETRIES` (`int`): Default maximum number of connection retries. `Default: 3`.
 - `DEFAULT_MAX_RETRY_DELAY` (`float`): Default maximum delay between connection retries. `Default: 30.0`.
@@ -88,7 +86,6 @@ This module provides module-level constants, error codes, and default configurat
 - `DEFAULT_MAX_STREAMS_PER_CONNECTION` (`int`): Alias for `DEFAULT_MAX_STREAMS`. `Default: 100`.
 - `DEFAULT_MAX_TOTAL_PENDING_EVENTS` (`int`): Default global maximum for buffered events. `Default: 1000`.
 - `DEFAULT_PENDING_EVENT_TTL` (`float`): Default TTL for buffered events in seconds. `Default: 5.0`.
-- `DEFAULT_PORT` (`int`): Default port for insecure connections. `Default: 80`.
 - `DEFAULT_PROXY_CONNECT_TIMEOUT` (`float`): Default timeout for establishing a connection through a proxy. `Default: 10.0`.
 - `DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE` (`int`): Default subscription queue size for the Pub/Sub manager. `Default: 16`.
 - `DEFAULT_READ_TIMEOUT` (`float`): Default timeout for stream read operations. `Default: 60.0`.
@@ -97,19 +94,17 @@ This module provides module-level constants, error codes, and default configurat
 - `DEFAULT_RPC_CONCURRENCY_LIMIT` (`int`): Default concurrency limit for the RPC manager. `Default: 100`.
 - `DEFAULT_SECURE_PORT` (`int`): Default port for secure connections. `Default: 443`.
 - `DEFAULT_SERVER_MAX_CONNECTIONS` (`int`): Default maximum concurrent connections for a server. `Default: 3000`.
-- `DEFAULT_SERVER_VERIFY_MODE` (`ssl.VerifyMode`): Default SSL verification mode for the server. `Default: ssl.CERT_NONE`.
+- `DEFAULT_SERVER_VERIFY_MODE` (`ssl.VerifyMode`): Default SSL verification mode for the server. `Default: ssl.CERT_OPTIONAL`.
 - `DEFAULT_SESSION_CLEANUP_INTERVAL` (`float`): Default interval for cleaning up closed sessions. `Default: 60.0`.
 - `DEFAULT_STREAM_CLEANUP_INTERVAL` (`float`): Default interval for cleaning up closed streams. `Default: 15.0`.
 - `DEFAULT_STREAM_CREATION_TIMEOUT` (`float`): Default timeout for creating a new stream. `Default: 10.0`.
 - `DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI` (`int`): Default stream increment for bidirectional flow control. `Default: 10`.
 - `DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI` (`int`): Default stream increment for unidirectional flow control. `Default: 10`.
-- `DEFAULT_VERSION` (`str`): Default protocol version. `Default: "h3"`.
+- `DEFAULT_STREAM_LINE_LIMIT` (`int`): Default line limit for line-based structured streams. `Default: 65536`.
 - `DEFAULT_WEBTRANSPORT_PATH` (`str`): Default path for WebTransport endpoint. `Default: "/webtransport"`.
 - `DEFAULT_WRITE_TIMEOUT` (`float`): Default timeout for stream write operations. `Default: 30.0`.
 - `MAX_BUFFER_SIZE` (`int`): The maximum buffer size for streams. `Default: 1048576`.
-- `RECOMMENDED_BUFFER_SIZES` (`dict[str, int]`): Pre-defined buffer sizes for different use cases.
 - `SUPPORTED_CONGESTION_CONTROL_ALGORITHMS` (`tuple[str, str]`): Supported congestion control algorithms. `Default: ("reno", "cubic")`.
-- `SUPPORTED_VERSIONS` (`tuple[str, ...]`): Supported protocol versions.
 
 ## ErrorCodes Class
 
@@ -202,7 +197,7 @@ A `TypedDict` that defines the structure of a client configuration dictionary.
 - `max_streams` (`int`): Maximum number of concurrent streams per connection.
 - `max_total_pending_events` (`int`): Global maximum for buffered events.
 - `pending_event_ttl` (`float`): TTL for buffered events in seconds.
-- `proxy` (`ProxyConfig | None`): Configuration object for using an HTTP proxy.
+- `proxy` (`Any`): Configuration object for using an HTTP proxy.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
 - `retry_backoff` (`float`): The backoff factor for connection retries.
 - `retry_delay` (`float`): Initial delay in seconds between connection retries.
@@ -262,14 +257,10 @@ A `TypedDict` that defines the structure of a server configuration dictionary.
 - `verify_mode` (`ssl.VerifyMode`): The SSL verification mode for client certificates.
 - `write_timeout` (`float | None`): Timeout in seconds for stream write operations.
 
-## Defaults Class
+## Utility Functions
 
-A utility class that provides safe access to default configurations.
-
-### Class Methods
-
-- **`def get_client_config() -> ClientConfigDefaults`**: Returns a copy of the default client configuration dictionary.
-- **`def get_server_config() -> ServerConfigDefaults`**: Returns a copy of the default server configuration dictionary.
+- **`def get_default_client_config() -> ClientConfigDefaults`**: Returns a copy of the default client configuration dictionary.
+- **`def get_default_server_config() -> ServerConfigDefaults`**: Returns a copy of the default server configuration dictionary.
 
 ## See Also
 

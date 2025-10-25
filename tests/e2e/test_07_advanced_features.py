@@ -27,7 +27,7 @@ logger = logging.getLogger("test_advanced_features")
 async def test_session_statistics() -> bool:
     """Test the retrieval and correctness of session-level statistics."""
     logger.info("--- Test 07A: Session Statistics ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -45,12 +45,12 @@ async def test_session_statistics() -> bool:
                 await stream.write_all(data=f"Stats test {i + 1}".encode())
                 await stream.read_all()
 
-            datagram_transport = await session.datagrams
+            datagram_transport = await session.create_datagram_transport()
             for i in range(5):
                 await datagram_transport.send(data=f"Datagram {i + 1}".encode())
 
             await asyncio.sleep(0.1)
-            final_stats = await session.get_session_stats()
+            final_stats = (await session.diagnostics()).stats.to_dict()
             logger.info("Final session statistics retrieved.")
 
             streams_ok = final_stats.get("streams_created", 0) >= 3
@@ -72,7 +72,7 @@ async def test_session_statistics() -> bool:
 async def test_connection_info() -> bool:
     """Test the retrieval of underlying connection information."""
     logger.info("--- Test 07B: Connection Information ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -89,7 +89,7 @@ async def test_connection_info() -> bool:
                 return False
 
             logger.info("Retrieving connection information...")
-            info = connection.info
+            info = connection.diagnostics.stats
             logger.info("   - Connection ID: %s", connection.connection_id)
             logger.info("   - State: %s", connection.state.value)
             logger.info("   - Remote Address: %s", connection.remote_address)
@@ -109,7 +109,7 @@ async def test_connection_info() -> bool:
 async def test_client_statistics() -> bool:
     """Test the retrieval of client-wide statistics across multiple connections."""
     logger.info("--- Test 07C: Client-Wide Statistics ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -125,7 +125,7 @@ async def test_client_statistics() -> bool:
                 await session.close()
                 await asyncio.sleep(0.2)
 
-            final_stats = client.stats
+            final_stats = (await client.diagnostics()).stats.to_dict()
             connections = final_stats.get("connections", {})
             performance = final_stats.get("performance", {})
             logger.info("Final client statistics:")
@@ -147,7 +147,7 @@ async def test_client_statistics() -> bool:
 async def test_stream_management() -> bool:
     """Test advanced stream management features."""
     logger.info("--- Test 07D: Stream Management ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -170,7 +170,7 @@ async def test_stream_management() -> bool:
                 logger.info("   - Total created: %s", manager_stats.get("total_created", 0))
                 logger.info("   - Current count: %s", manager_stats.get("current_count", 0))
 
-                all_streams = await stream_manager.get_all_streams()
+                all_streams = await stream_manager.get_all_resources()
                 if len(all_streams) == 5:
                     logger.info("SUCCESS: Stream management working correctly.")
                 else:
@@ -193,7 +193,7 @@ async def test_stream_management() -> bool:
 async def test_datagram_statistics() -> bool:
     """Test retrieval of detailed statistics for the datagram transport."""
     logger.info("--- Test 07E: Datagram Statistics ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -204,14 +204,14 @@ async def test_datagram_statistics() -> bool:
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagram_transport = await session.datagrams
+            datagram_transport = await session.create_datagram_transport()
 
             logger.info("Sending datagrams to generate statistics...")
             for i in range(5):
                 await datagram_transport.send(data=f"Datagram stats test {i}".encode())
 
             await asyncio.sleep(0.1)
-            final_stats = datagram_transport.stats
+            final_stats = datagram_transport.diagnostics.stats.to_dict()
 
             logger.info("Final datagram statistics:")
             logger.info("   - Datagrams Sent: %s", final_stats.get("datagrams_sent", 0))
@@ -231,7 +231,7 @@ async def test_datagram_statistics() -> bool:
 async def test_performance_monitoring() -> bool:
     """Test a simple performance monitoring loop over multiple transfers."""
     logger.info("--- Test 07F: Performance Monitoring ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -266,7 +266,7 @@ async def test_performance_monitoring() -> bool:
 async def test_session_lifecycle_events() -> bool:
     """Test the basic session lifecycle event flow."""
     logger.info("--- Test 07G: Session Lifecycle Events ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,

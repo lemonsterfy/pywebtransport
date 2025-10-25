@@ -9,11 +9,11 @@ PyWebTransport is the canonical, async-native WebTransport stack for Python, ena
 **Key Features:**
 
 - **Full Async Support**: Built from the ground up on `asyncio` for high-performance, non-blocking I/O.
-- **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for pooling, auto-reconnection, and proxying.
+- **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for fleet management, auto-reconnection, and browser-like navigation.
 - **Advanced Messaging**: Built-in managers for Pub/Sub and RPC (JSON-RPC 2.0 compliant), plus pluggable serializers (`JSON`, `MsgPack`, `Protobuf`) for structured data.
 - **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
-- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and monitoring.
-- **Event-Driven Architecture**: A powerful `EventEmitter` and `EventBus` system for decoupled, asynchronous communication between components.
+- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, monitoring, pooling, and resource management.
+- **Event-Driven Architecture**: A powerful `EventEmitter` system for decoupled, asynchronous communication between components.
 - **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
 
 ## Core Concepts
@@ -66,7 +66,7 @@ Datagrams offer low-latency, unreliable, and out-of-order messaging, ideal for r
 ### Getting Started
 
 - **[Installation](installation.md)** - Setup and installation guide.
-- **[Quick Start](quickstart.md)** - 5-minute tutorial to get running.
+- **[Quick Start](quickstart.md)** - Learn how to install the library.
 
 ### API Reference
 

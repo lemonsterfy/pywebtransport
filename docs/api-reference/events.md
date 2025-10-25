@@ -1,12 +1,12 @@
 # API Reference: events
 
-This module provides a powerful, asynchronous, event-driven framework.
+This module provides the core components for the library's event-driven architecture.
 
 ---
 
 ## Event Class
 
-The base data class for all events within the system.
+A versatile base class for all system events.
 
 **Note on Usage**: The constructor for `Event` requires all parameters to be passed as keyword arguments.
 
@@ -44,7 +44,7 @@ The base data class for all events within the system.
 
 ## EventEmitter Class
 
-The core class for managing and dispatching events.
+An emitter for handling and dispatching events asynchronously.
 
 ### Constructor
 
@@ -66,40 +66,13 @@ The core class for managing and dispatching events.
 - **`def once(self, *, event_type: EventType | str, handler: EventHandler) -> None`**: Registers a handler that will be invoked only once.
 - **`def pause(self) -> None`**: Pauses event processing, queuing any new events.
 - **`def remove_all_listeners(self, *, event_type: EventType | str | None = None) -> None`**: Removes all listeners for a specific or all event types.
-- **`def resume(self) -> asyncio.Task | None`**: Resumes processing and dispatches all queued events.
+- **`def resume(self) -> asyncio.Task[None] | None`**: Resumes processing and dispatches all queued events.
 - **`def set_max_listeners(self, *, max_listeners: int) -> None`**: Sets the maximum number of listeners allowed per event type.
 - **`async def wait_for(self, *, event_type: EventType | str, timeout: Timeout | None = None, condition: Callable[[Event], bool] | None = None) -> Event`**: Waits for a specific event that matches an optional condition.
 
-## EventBus Class
+## Type Aliases
 
-A global, singleton event bus for decoupled, application-wide communication.
-
-**Note on Usage**: The `EventBus` is a singleton and should be accessed via `EventBus.get_instance()` or the `create_event_bus()` factory function.
-
-### Class Methods
-
-- **`async def get_instance(cls) -> EventBus`**: Asynchronously retrieves the singleton instance of the bus.
-
-### Instance Methods
-
-- **`async def close(self) -> None`**: Closes the event bus and its underlying emitter.
-- **`def clear_all_subscriptions(self) -> None`**: Clears all subscriptions on the bus.
-- **`async def emit(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None`**: Creates and dispatches an event on the global bus.
-- **`def get_subscription_count(self) -> int`**: Returns the number of active subscriptions.
-- **`async def publish(self, *, event: Event) -> None`**: Publishes a pre-constructed `Event` object to all subscribers.
-- **`def subscribe(self, *, event_type: EventType | str, handler: EventHandler, once: bool = False) -> str`**: Subscribes a handler and returns a unique subscription ID.
-- **`def unsubscribe(self, *, subscription_id: str) -> None`**: Removes a subscription using its ID.
-
-## Module-Level Functions and Decorators
-
-### Functions
-
-- **`async def create_event_bus() -> EventBus`**: An async factory function that returns the global `EventBus` instance.
-- **`def create_event_emitter(*, max_listeners: int = 100) -> EventEmitter`**: A factory function that creates a new, standalone `EventEmitter` instance.
-
-### Decorators
-
-- **`@event_handler(*, event_type: EventType | str)`**: A decorator to mark a function as a handler for a specific event type.
+- `EventHandler` (`Callable[[Event], Awaitable[None] | None]`): A callable that handles an `Event`. Can be a coroutine or a regular function.
 
 ## See Also
 

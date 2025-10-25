@@ -37,7 +37,7 @@ async def test_connection_timeout() -> bool:
     """Test the handling of a connection timeout to an unreachable port."""
     logger.info("--- Test 06A: Connection Timeout ---")
     unreachable_url = f"https://{SERVER_HOST}:9999/"
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=2.0,
         initial_max_data=1024 * 1024,
@@ -68,7 +68,7 @@ async def test_invalid_server_address() -> bool:
         "https://invalid-hostname-for-testing.local/",
         "http://127.0.0.1:4433/",
     ]
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=3.0,
         initial_max_data=1024 * 1024,
@@ -95,7 +95,7 @@ async def test_invalid_server_address() -> bool:
 async def test_stream_errors() -> bool:
     """Test error handling for various stream operations."""
     logger.info("--- Test 06C: Stream Error Handling ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -130,7 +130,7 @@ async def test_stream_errors() -> bool:
 async def test_read_timeout() -> bool:
     """Test the handling of a stream read timeout."""
     logger.info("--- Test 06D: Stream Read Timeout ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         read_timeout=1.0,
         initial_max_data=1024 * 1024,
@@ -163,7 +163,7 @@ async def test_read_timeout() -> bool:
 async def test_session_closure_handling() -> bool:
     """Test that operations on a closed session correctly raise errors."""
     logger.info("--- Test 06E: Operations on Closed Session ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -191,7 +191,7 @@ async def test_session_closure_handling() -> bool:
 
             logger.info("Testing datagram send on closed session...")
             try:
-                datagram_transport = await session.datagrams
+                datagram_transport = await session.create_datagram_transport()
                 await datagram_transport.send(data=b"This should fail")
                 logger.error("FAILURE: Datagram send on closed session should have failed.")
                 return False
@@ -210,7 +210,7 @@ async def test_session_closure_handling() -> bool:
 async def test_datagram_errors() -> bool:
     """Test error handling for datagram operations, like oversized payloads."""
     logger.info("--- Test 06F: Datagram Error Handling ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -221,7 +221,7 @@ async def test_datagram_errors() -> bool:
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagram_transport = await session.datagrams
+            datagram_transport = await session.create_datagram_transport()
             max_size = datagram_transport.max_datagram_size
             logger.info("Max datagram size: %s bytes.", max_size)
 
@@ -246,7 +246,7 @@ async def test_datagram_errors() -> bool:
 async def test_resource_exhaustion() -> bool:
     """Test handling of resource exhaustion, specifically the stream limit."""
     logger.info("--- Test 06G: Resource Exhaustion (Stream Limit) ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,
@@ -284,7 +284,7 @@ async def test_resource_exhaustion() -> bool:
 async def test_malformed_operations() -> bool:
     """Test handling of malformed API operations."""
     logger.info("--- Test 06H: Malformed Operations ---")
-    config = ClientConfig.create(
+    config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
         initial_max_data=1024 * 1024,

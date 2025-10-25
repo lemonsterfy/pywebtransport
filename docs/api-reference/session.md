@@ -4,69 +4,22 @@ This document provides a reference for the `pywebtransport.session` subpackage, 
 
 ---
 
-## WebTransportSession Class
+## SessionDiagnostics Class
 
-The primary user-facing class that represents a single, long-lived logical connection.
+A structured, immutable snapshot of a session's health.
 
-**Note on Usage**: `WebTransportSession` is not instantiated directly but is typically provided by a `WebTransportClient` or a server application.
+### Attributes
+
+- `stats` (`SessionStats`): The full statistics object for the session.
+- `state` (`SessionState`): The current state of the session.
+- `is_connection_active` (`bool`): `True` if the underlying connection is available and connected.
+- `datagram_receive_buffer_size` (`int`): The current size of the datagram receive buffer.
+- `send_credit_available` (`int`): Available flow control credit for sending data.
+- `receive_credit_available` (`int`): Available flow control credit for receiving data.
 
 ### Properties
 
-- `connection` (`WebTransportConnection | None`): A weak reference to the parent `WebTransportConnection`.
-- `datagrams` (`WebTransportDatagramTransport`): Asynchronously accesses the datagram transport, creating it on first use.
-- `headers` (`Headers`): A copy of the initial HTTP headers used to establish the session.
-- `is_closed` (`bool`): `True` if the session is fully closed.
-- `is_ready` (`bool`): `True` if the session is connected and ready for use.
-- `path` (`str`): The URL path associated with the session.
-- `protocol_handler` (`WebTransportProtocolHandler | None`): The underlying protocol handler.
-- `pubsub` (`PubSubManager`): Lazily accesses the Publish/Subscribe manager for this session.
-- `rpc` (`RpcManager`): Lazily accesses the RPC manager for this session.
-- `session_id` (`SessionId`): The unique ID of the session.
-- `state` (`SessionState`): The current state of the session.
-
-### Instance Methods
-
-- **`async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None`**: Closes the session and all its associated resources.
-- **`async def create_bidirectional_stream(self, *, timeout: float | None = None) -> WebTransportStream`**: Creates and returns a new bidirectional stream.
-- **`async def create_structured_datagram_transport(self, *, serializer: Serializer, registry: dict[int, type[Any]]) -> StructuredDatagramTransport`**: Creates a new structured datagram transport for sending and receiving objects.
-- **`async def create_structured_stream(self, *, serializer: Serializer, registry: dict[int, type[Any]], timeout: float | None = None) -> StructuredStream`**: Creates a new structured bidirectional stream for sending and receiving objects.
-- **`async def create_unidirectional_stream(self, *, timeout: float | None = None) -> WebTransportSendStream`**: Creates and returns a new unidirectional (send-only) stream.
-- **`async def debug_state(self) -> dict[str, Any]`**: Returns a detailed, structured snapshot of the session's internal state for debugging.
-- **`async def diagnose_issues(self) -> list[str]`**: Runs checks and returns a list of strings describing potential issues.
-- **`async def get_session_stats(self) -> dict[str, Any]`**: Returns a dictionary of current, detailed statistics for the session.
-- **`async def get_summary(self) -> dict[str, Any]`**: Returns a structured summary of the session, suitable for monitoring.
-- **`async def incoming_streams(self) -> AsyncIterator[StreamType]`**: Returns an async iterator that yields incoming streams from the remote peer.
-- **`async def initialize(self) -> None`**: Initializes asyncio resources for the session.
-- **`async def monitor_health(self, *, check_interval: float = 60.0) -> None`**: A long-running task that continuously monitors session health.
-- **`async def ready(self, *, timeout: float = 30.0) -> None`**: Waits until the session is fully established and ready.
-- **`async def wait_closed(self) -> None`**: Waits until the session is fully closed.
-
-## SessionManager Class
-
-A helper class for managing the lifecycle of multiple `WebTransportSession` objects.
-
-**Note on Usage**: `SessionManager` must be used as an asynchronous context manager (`async with ...`).
-
-### Constructor
-
-- **`def __init__(self, *, max_sessions: int = 10000, session_cleanup_interval: float = 60.0) -> None`**: Initializes the session manager.
-
-### Class Methods
-
-- **`def create(*, max_sessions: int = 10000, session_cleanup_interval: float = 60.0) -> SessionManager`**: Factory method to create a new session manager instance.
-
-### Instance Methods
-
-- **`async def add_session(self, *, session: WebTransportSession) -> SessionId`**: Adds a session to be managed.
-- **`async def cleanup_closed_sessions(self) -> int`**: Finds and removes any sessions that are marked as closed.
-- **`async def close_all_sessions(self) -> None`**: Closes all sessions currently being managed.
-- **`async def get_all_sessions(self) -> list[WebTransportSession]`**: Returns a list of all managed sessions.
-- **`async def get_session(self, *, session_id: SessionId) -> WebTransportSession | None`**: Retrieves a session by its ID.
-- **`def get_session_count(self) -> int`**: Get the current number of active sessions (non-locking).
-- **`async def get_sessions_by_state(self, *, state: SessionState) -> list[WebTransportSession]`**: Filters and returns sessions that are in a specific state.
-- **`async def get_stats(self) -> dict[str, Any]`**: Returns detailed statistics about the managed sessions.
-- **`async def remove_session(self, *, session_id: SessionId) -> WebTransportSession | None`**: Removes a session from the manager.
-- **`async def shutdown(self) -> None`**: Stops the background cleanup task and closes all sessions.
+- `issues` (`list[str]`): Get a list of potential issues based on the current diagnostics.
 
 ## SessionStats Class
 
@@ -95,6 +48,36 @@ A dataclass that holds a comprehensive set of statistics for a `WebTransportSess
 ### Instance Methods
 
 - **`def to_dict(self) -> dict[str, Any]`**: Converts the session statistics to a dictionary.
+
+## WebTransportSession Class
+
+The primary user-facing class that represents a single, long-lived logical connection.
+
+**Note on Usage**: `WebTransportSession` is not instantiated directly but is typically provided by a `WebTransportClient` or a server application.
+
+### Properties
+
+- `connection` (`WebTransportConnection | None`): A weak reference to the parent `WebTransportConnection`.
+- `headers` (`Headers`): A copy of the initial HTTP headers used to establish the session.
+- `is_closed` (`bool`): `True` if the session is fully closed.
+- `is_ready` (`bool`): `True` if the session is connected and ready for use.
+- `path` (`str`): The URL path associated with the session.
+- `protocol_handler` (`WebTransportProtocolHandler | None`): The underlying protocol handler.
+- `session_id` (`SessionId`): The unique ID of the session.
+- `state` (`SessionState`): The current state of the session.
+
+### Instance Methods
+
+- **`async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None`**: Closes the session and all its associated resources.
+- **`async def create_bidirectional_stream(self, *, timeout: float | None = None) -> WebTransportStream`**: Creates and returns a new bidirectional stream.
+- **`async def create_datagram_transport(self) -> WebTransportDatagramTransport`**: Creates a datagram transport for this session.
+- **`async def create_unidirectional_stream(self, *, timeout: float | None = None) -> WebTransportSendStream`**: Creates and returns a new unidirectional (send-only) stream.
+- **`async def diagnostics(self) -> SessionDiagnostics`**: Get a snapshot of the session's diagnostics and statistics.
+- **`async def incoming_streams(self) -> AsyncIterator[StreamType]`**: Returns an async iterator that yields incoming streams from the remote peer.
+- **`async def initialize(self) -> None`**: Initializes asyncio resources for the session.
+- **`async def monitor_health(self, *, check_interval: float = 60.0) -> None`**: A long-running task that continuously monitors session health.
+- **`async def ready(self, *, timeout: float = 30.0) -> None`**: Waits until the session is fully established and ready.
+- **`async def wait_closed(self) -> None`**: Waits until the session is fully closed.
 
 ## See Also
 

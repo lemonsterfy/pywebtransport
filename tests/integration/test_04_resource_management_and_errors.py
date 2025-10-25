@@ -18,7 +18,6 @@ pytestmark = pytest.mark.asyncio
 
 
 async def idle_handler(session: WebTransportSession) -> None:
-    """A simple handler that does nothing but wait for closure."""
     try:
         await session.wait_closed()
     except asyncio.CancelledError:
@@ -33,7 +32,6 @@ async def idle_handler(session: WebTransportSession) -> None:
 async def test_max_connections_limit_rejection(
     server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig
 ) -> None:
-    """Verify the server rejects a new connection when its connection limit is reached."""
     server_app.route(path="/")(idle_handler)
     host, port = server
     url = f"https://{host}:{port}/"
@@ -49,7 +47,6 @@ async def test_max_connections_limit_rejection(
 
 @pytest.mark.parametrize("server_app", [{"max_streams_per_connection": 2}], indirect=True)
 async def test_max_streams_limit(server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig) -> None:
-    """Verify the client correctly enforces the stream limit received from the server."""
     server_app.route(path="/")(idle_handler)
     host, port = server
     url = f"https://{host}:{port}/"
@@ -68,29 +65,28 @@ async def test_max_streams_limit(server_app: ServerApp, server: tuple[str, int],
 async def test_server_cleans_up_closed_connection(
     server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig
 ) -> None:
-    """Verify the server's ConnectionManager removes a connection after the client closes it."""
     server_app.route(path="/")(idle_handler)
     host, port = server
     url = f"https://{host}:{port}/"
-    connection_manager = server_app.server._connection_manager
+    connection_manager = server_app.server.connection_manager
 
-    assert connection_manager.get_connection_count() == 0
+    assert len(await connection_manager.get_all_resources()) == 0
 
     async with WebTransportClient(config=client_config) as client:
         async with await client.connect(url=url) as session:
             assert session.is_ready
 
             timeout_at = asyncio.get_running_loop().time() + 1.0
-            while connection_manager.get_connection_count() < 1:
+            while len(await connection_manager.get_all_resources()) < 1:
                 if asyncio.get_running_loop().time() > timeout_at:
                     pytest.fail("Connection was not added to manager in time.")
                 await asyncio.sleep(0.05)
-            assert connection_manager.get_connection_count() == 1
+            assert len(await connection_manager.get_all_resources()) == 1
 
     timeout_at = asyncio.get_running_loop().time() + 2.0
-    while connection_manager.get_connection_count() > 0:
+    while len(await connection_manager.get_all_resources()) > 0:
         if asyncio.get_running_loop().time() > timeout_at:
             pytest.fail("Server did not clean up closed connection in time.")
         await asyncio.sleep(0.05)
 
-    assert connection_manager.get_connection_count() == 0
+    assert len(await connection_manager.get_all_resources()) == 0

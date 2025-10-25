@@ -34,12 +34,15 @@ nav:
   - API Reference:
       - Overview: api-reference/index.md
       - Client: api-reference/client.md
-      - Configuration: api-reference/config.md
+      - Config: api-reference/config.md
       - Connection: api-reference/connection.md
       - Constants: api-reference/constants.md
       - Datagram: api-reference/datagram.md
       - Events: api-reference/events.md
       - Exceptions: api-reference/exceptions.md
+      - Manager: api-reference/manager.md
+      - Monitor: api-reference/monitor.md
+      - Pool: api-reference/pool.md
       - Protocol: api-reference/protocol.md
       - Pub/Sub: api-reference/pubsub.md
       - RPC: api-reference/rpc.md

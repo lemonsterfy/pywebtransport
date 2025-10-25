@@ -1,6 +1,6 @@
 # PyWebTransport Documentation Issue GitHub Issue Form
 
-name: "📚 Documentation Issue"
+name: "Documentation Issue"
 description: "Report an issue or suggest an improvement for the documentation."
 title: "[Docs]: A brief description of the documentation issue"
 labels: ["documentation"]

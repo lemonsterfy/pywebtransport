@@ -1,4 +1,4 @@
-"""WebTransport Browser Client."""
+"""High-level client that emulates a browser's navigation model."""
 
 from __future__ import annotations
 
@@ -7,31 +7,25 @@ from types import TracebackType
 from typing import Self
 
 from pywebtransport.client.client import WebTransportClient
-from pywebtransport.config import ClientConfig
 from pywebtransport.exceptions import ClientError
 from pywebtransport.session import WebTransportSession
 from pywebtransport.utils import get_logger
 
-__all__ = ["WebTransportBrowser"]
+__all__: list[str] = ["WebTransportBrowser"]
 
-logger = get_logger(name="client.browser")
+logger = get_logger(name=__name__)
 
 
 class WebTransportBrowser:
     """A browser-like WebTransport client with a managed lifecycle and history."""
 
-    def __init__(self, *, config: ClientConfig | None = None) -> None:
+    def __init__(self, *, client: WebTransportClient) -> None:
         """Initialize the browser-like WebTransport client."""
-        self._client = WebTransportClient(config=config)
+        self._client = client
         self._history: list[str] = []
         self._history_index: int = -1
         self._current_session: WebTransportSession | None = None
         self._lock: asyncio.Lock | None = None
-
-    @classmethod
-    def create(cls, *, config: ClientConfig | None = None) -> Self:
-        """Factory method to create a new browser-like client instance."""
-        return cls(config=config)
 
     @property
     def current_session(self) -> WebTransportSession | None:
@@ -41,7 +35,6 @@ class WebTransportBrowser:
     async def __aenter__(self) -> Self:
         """Enter the async context, initializing resources."""
         self._lock = asyncio.Lock()
-        await self._client.__aenter__()
         return self
 
     async def __aexit__(
@@ -68,7 +61,6 @@ class WebTransportBrowser:
             if self._current_session and not self._current_session.is_closed:
                 await self._current_session.close()
 
-            await self._client.close()
             self._current_session = None
             self._history.clear()
             self._history_index = -1
