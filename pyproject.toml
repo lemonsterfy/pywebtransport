@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pywebtransport"
 dynamic = ["version"]
-description = "The canonical, async-native WebTransport stack for Python."
+description = "An async-native WebTransport stack for Python."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -60,7 +60,7 @@ test = [
 
 [project.urls]
 Homepage = "https://github.com/lemonsterfy/pywebtransport"
-Documentation = "https://pywebtransport.readthedocs.io"
+Documentation = "https://docs.pywebtransport.org"
 Repository = "https://github.com/lemonsterfy/pywebtransport.git"
 Issues = "https://github.com/lemonsterfy/pywebtransport/issues"
 Changelog = "https://github.com/lemonsterfy/pywebtransport/blob/main/CHANGELOG.md"
