@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/lemonsterfy/pywebtransport/workflows/CI/badge.svg)](https://github.com/lemonsterfy/pywebtransport/actions)
 [![Coverage](https://codecov.io/gh/lemonsterfy/pywebtransport/branch/main/graph/badge.svg)](https://codecov.io/gh/lemonsterfy/pywebtransport)
-[![Docs](https://readthedocs.org/projects/pywebtransport/badge/?version=latest)](https://pywebtransport.readthedocs.io/en/latest/)
+[![Docs](https://readthedocs.org/projects/pywebtransport/badge/?version=latest)](https://docs.pywebtransport.org/en/latest/)
 
-The canonical, async-native WebTransport stack for Python.
+An async-native WebTransport stack for Python.
 
 ## Features
 
@@ -148,7 +148,7 @@ if __name__ == "__main__":
 
 **Dependencies:**
 
-- aioquic >= 1.2.0
+- aioquic >= 1.3.0
 - cryptography >= 45.0.4
 
 ## Contributing
@@ -171,6 +171,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
+- <a href="https://www.fastly.com/" target="_blank" rel="noopener noreferrer">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Fastly_logo.svg" alt="Fastly" width="80">
+  </a>
+  for providing critical infrastructure and services.
 - [aioquic](https://github.com/aiortc/aioquic) for the underlying QUIC protocol implementation.
 - [WebTransport Working Group](https://datatracker.ietf.org/wg/webtrans/) for defining and standardizing the WebTransport protocol.
 

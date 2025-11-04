@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.8.1] - 2025-11-04
+
+This is a maintenance and consistency release focused on harmonizing the project's external presentation and ensuring metadata accuracy following the large v0.8.0 refactor. It includes critical updates to documentation links, descriptive language, and infrastructure information.
+
+### Added
+
+- **Acknowledgments**: Added a new section to the `README.md` acknowledging Fastly's critical infrastructure and services support.
+
+### Changed
+
+- **Project Description Harmonization**: Systematically refined the project's descriptive language across all core files (`__init__.py`, `pyproject.toml`, documentation, and `PHILOSOPHY.md`) to ensure a unified, rigorous, and technical tone.
+- **Documentation Infrastructure Migration**: Updated all configuration files and external links (e.g., in `pyproject.toml`, `mkdocs.yml`, `README.md`) to reflect the migration to the official custom documentation domain: `https://docs.pywebtransport.org`.
+- **Metadata Synchronization**: Updated the minimum required version for the `aioquic` dependency in `README.md` to `1.3.0` for consistency with the version locked in the v0.8.0 release.
+
+### Fixed
+
+- **Fixed Documentation URL Inconsistencies**: Ensured all project metadata and user-facing documents point to the correct, newly configured documentation URL.
+
 ## [0.8.0] - 2025-10-25
 
 This is a major internal refactoring release focused entirely on improving **code health**, **maintainability**, and **testability** across the entire library in preparation for future API stabilization. It addresses significant architectural issues identified in a comprehensive code audit, primarily focusing on eliminating widespread code duplication and resolving complex dependency issues through systematic refactoring and the application of Dependency Injection (DI). While introducing numerous internal improvements and robustness fixes, this release also streamlines the public API surface by removing redundant or unsafe interfaces.
@@ -416,7 +434,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.6.1...v0.7.0

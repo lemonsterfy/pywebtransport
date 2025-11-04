@@ -4,7 +4,7 @@ This document outlines the core principles that guide the design and development
 
 ---
 
-PyWebTransport is engineered to be a canonical, production-grade implementation of the WebTransport protocol for the Python ecosystem. Our philosophy prioritizes standards compliance, a clean architecture, and long-term maintainability.
+PyWebTransport is engineered to be a **standards-compliant and robust** implementation of the WebTransport protocol for the Python ecosystem. Our philosophy prioritizes standards compliance, a clean architecture, and long-term maintainability.
 
 ### 1. Strict Adherence to Standards
 

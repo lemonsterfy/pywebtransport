@@ -1,10 +1,13 @@
 # PyWebTransport Documentation
 
-Welcome to PyWebTransport, the canonical, async-native WebTransport stack for Python.
+Welcome to PyWebTransport, an async-native WebTransport stack for Python.
 
 ## What is PyWebTransport?
 
-PyWebTransport is the canonical, async-native WebTransport stack for Python, enabling low-latency, bidirectional communication over QUIC and HTTP/3. It provides a complete, robust implementation of streams and datagrams alongside a high-level application framework, with a focus on standards compliance, performance, and reliability
+This library enables low-latency, bidirectional communication over QUIC and HTTP/3.
+It provides a complete, robust implementation of streams and datagrams
+alongside a high-level application framework, with a focus on standards compliance,
+performance, and reliability.
 
 **Key Features:**
 

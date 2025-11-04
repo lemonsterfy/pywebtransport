@@ -6,7 +6,7 @@ Complete reference documentation for PyWebTransport's public APIs.
 
 ## Overview
 
-PyWebTransport provides a comprehensive, production-grade WebTransport implementation for Python with a pure async/await design. The API is structured in layers, from a high-level application framework to low-level protocol control, enabling both rapid development and fine-grained customization.
+PyWebTransport provides a comprehensive and robust WebTransport implementation for Python with a pure async/await design. The API is structured in layers, from a high-level application framework to low-level protocol control, enabling both rapid development and fine-grained customization.
 
 **Key Features:**
 
