@@ -24,21 +24,22 @@ class _AsyncObjectPool(ABC, Generic[T]):
 
         self._factory = factory
         self._max_size = max_size
-        self._lock = asyncio.Lock()
-        self._semaphore = asyncio.Semaphore(value=max_size)
+        self._lock: asyncio.Lock | None = None
+        self._semaphore: asyncio.Semaphore | None = None
         self._pool: deque[T] = deque()
         self._active_count = 0
         self._closed = False
 
     async def __aenter__(self) -> Self:
-        """Enter the async context."""
+        """Enter the async context and initialize async resources."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(value=self._max_size)
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and close the pool."""
         await self.close()
@@ -50,15 +51,32 @@ class _AsyncObjectPool(ABC, Generic[T]):
 
         self._closed = True
 
-        async with self._lock:
-            close_tasks = [self._dispose(obj) for obj in self._pool]
+        objects_to_dispose: list[T] = []
+        if self._lock:
+            async with self._lock:
+                objects_to_dispose = list(self._pool)
+                self._pool.clear()
+        else:
+            objects_to_dispose = list(self._pool)
             self._pool.clear()
-            await asyncio.gather(*close_tasks, return_exceptions=True)
+
+        if objects_to_dispose:
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    for obj in objects_to_dispose:
+                        tg.create_task(coro=self._dispose(obj))
+            except* Exception as eg:
+                raise RuntimeError(f"Errors occurred during pool cleanup: {eg.exceptions}") from eg
 
     async def acquire(self) -> T:
         """Acquire an object from the pool, creating a new one if necessary."""
         if self._closed:
             raise RuntimeError("Cannot acquire from a closed pool.")
+        if self._lock is None or self._semaphore is None:
+            raise RuntimeError(
+                "_AsyncObjectPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
 
         await self._semaphore.acquire()
 
@@ -81,6 +99,15 @@ class _AsyncObjectPool(ABC, Generic[T]):
 
     async def release(self, obj: T) -> None:
         """Release an object, returning it to the pool."""
+        if self._lock is None or self._semaphore is None:
+            if self._closed:
+                await self._dispose(obj)
+                return
+            raise RuntimeError(
+                "_AsyncObjectPool has not been activated. It must be used as an "
+                "asynchronous context manager (`async with ...`)."
+            )
+
         if self._closed:
             await self._dispose(obj)
             return
@@ -110,10 +137,7 @@ class _PooledObject(AsyncContextManager[T]):
         return self._obj
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Release the object back to the pool."""
         if self._obj is not None:

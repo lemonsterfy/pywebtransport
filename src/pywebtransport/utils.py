@@ -48,6 +48,19 @@ class Timer:
         end = self.end_time or time.time()
         return end - self.start_time
 
+    def __enter__(self) -> Self:
+        """Start the timer upon entering the context."""
+        self.start()
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
+    ) -> None:
+        """Stop the timer and log the duration upon exiting the context."""
+        elapsed = self.stop()
+        logger = get_logger(name="timer")
+        logger.debug("%s took %s", self.name, format_duration(seconds=elapsed))
+
     def start(self) -> None:
         """Start the timer."""
         self.start_time = time.time()
@@ -61,31 +74,21 @@ class Timer:
         self.end_time = time.time()
         return self.elapsed
 
-    def __enter__(self) -> Self:
-        """Start the timer upon entering the context."""
-        self.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        """Stop the timer and log the duration upon exiting the context."""
-        elapsed = self.stop()
-        logger = get_logger(name="timer")
-        logger.debug("%s took %s", self.name, format_duration(seconds=elapsed))
-
 
 def create_quic_configuration(
-    *, is_client: bool, alpn_protocols: list[str], congestion_control_algorithm: str, max_datagram_size: int
+    *,
+    alpn_protocols: list[str],
+    congestion_control_algorithm: str,
+    idle_timeout: float,
+    is_client: bool,
+    max_datagram_size: int,
 ) -> QuicConfiguration:
     """Create a QUIC configuration from specific, required parameters."""
     return QuicConfiguration(
-        is_client=is_client,
         alpn_protocols=alpn_protocols,
         congestion_control_algorithm=congestion_control_algorithm,
+        idle_timeout=idle_timeout,
+        is_client=is_client,
         max_datagram_frame_size=max_datagram_size,
     )
 
@@ -121,7 +124,7 @@ def format_duration(*, seconds: float) -> str:
 
 
 def generate_self_signed_cert(
-    *, hostname: str, output_dir: str = ".", key_size: int = 2048, days_valid: int = 365
+    *, hostname: str, output_dir: str = ".", days_valid: int = 365, key_size: int = 2048
 ) -> tuple[str, str]:
     """Generate a self-signed certificate and key for testing purposes."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)

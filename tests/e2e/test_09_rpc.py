@@ -50,7 +50,7 @@ async def test_rpc_basic_add() -> bool:
                 rpc_stream = await session.create_bidirectional_stream()
                 async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     logger.info("Calling remote procedure: add(a=2, b=3)")
-                    result = await rpc.call("add", 2, 3)
+                    result = await rpc.call(method="add", params=[2, 3])
                     logger.info("Received result: %s", result)
 
                     if result == 5:
@@ -82,7 +82,7 @@ async def test_rpc_complex_types() -> bool:
                 async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     user_id = 123
                     logger.info("Calling remote procedure: get_user(user_id=%d)", user_id)
-                    result_dict = await rpc.call("get_user", user_id)
+                    result_dict = await rpc.call(method="get_user", params=[user_id])
                     logger.info("Received result: %s", result_dict)
 
                     expected_obj = UserData(id=user_id, name=f"User {user_id}")
@@ -115,7 +115,7 @@ async def test_rpc_notification() -> bool:
                 async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     message = "This is a test notification."
                     logger.info("Calling remote procedure: log_message('%s')", message)
-                    result = await rpc.call("log_message", message)
+                    result = await rpc.call(method="log_message", params=[message])
                     logger.info("Received result: %s", result)
 
                     if result is None:
@@ -147,7 +147,7 @@ async def test_rpc_error_handling() -> bool:
                 async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     logger.info("Calling remote procedure that will raise an error: divide(10, 0)")
                     try:
-                        await rpc.call("divide", 10, 0)
+                        await rpc.call(method="divide", params=[10, 0])
                         logger.error("FAILURE: RPC call should have raised an exception.")
                         return False
                     except RpcError as e:
@@ -179,7 +179,7 @@ async def test_rpc_concurrency() -> bool:
             async with session:
                 rpc_stream = await session.create_bidirectional_stream()
                 async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
-                    calls = [rpc.call("add", i, i) for i in range(5)]
+                    calls = [rpc.call(method="add", params=[i, i]) for i in range(5)]
                     logger.info("Dispatching 5 concurrent 'add' calls...")
                     results = await asyncio.gather(*calls)
                     logger.info("Received results: %s", results)
@@ -214,7 +214,7 @@ async def test_rpc_timeout() -> bool:
                 async with RpcManager(stream=rpc_stream, session_id=session.session_id) as rpc:
                     logger.info("Calling slow remote procedure with a 1s timeout...")
                     try:
-                        await rpc.call("slow_operation", 2, timeout=1.0)
+                        await rpc.call(method="slow_operation", params=[2], timeout=1.0)
                         logger.error("FAILURE: RPC call should have timed out.")
                         return False
                     except RpcTimeoutError:

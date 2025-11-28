@@ -37,37 +37,33 @@ class TestServerMonitor:
     def test_check_for_alerts_deduplication(self, monitor: ServerMonitor, mocker: MockerFixture) -> None:
         alert = {"reason": "Test reason"}
         monitor._alerts.append(alert)
-        mocker.patch.object(
-            monitor,
-            "get_health_status",
-            return_value={"status": "degraded", "reason": "Test reason"},
-        )
+        mocker.patch.object(monitor, "get_health_status", return_value={"status": "degraded", "reason": "Test reason"})
+
         monitor._check_for_alerts()
+
         assert len(monitor._alerts) == 1
 
     def test_check_for_alerts_failure(self, monitor: ServerMonitor, mocker: MockerFixture) -> None:
         mocker.patch.object(monitor, "get_health_status", side_effect=ValueError)
         logger_mock = mocker.patch("pywebtransport.monitor.server.logger.error")
+
         monitor._check_for_alerts()
+
         logger_mock.assert_called_once()
 
     def test_check_for_alerts_no_trigger(self, monitor: ServerMonitor, mocker: MockerFixture) -> None:
-        mocker.patch.object(
-            monitor,
-            "get_health_status",
-            return_value={"status": "healthy", "reason": "OK"},
-        )
+        mocker.patch.object(monitor, "get_health_status", return_value={"status": "healthy", "reason": "OK"})
+
         monitor._check_for_alerts()
+
         assert not monitor._alerts
 
     def test_check_for_alerts_trigger(self, monitor: ServerMonitor, mocker: MockerFixture) -> None:
         logger_mock = mocker.patch("pywebtransport.monitor.server.logger.warning")
-        mocker.patch.object(
-            monitor,
-            "get_health_status",
-            return_value={"status": "degraded", "reason": "Test reason"},
-        )
+        mocker.patch.object(monitor, "get_health_status", return_value={"status": "degraded", "reason": "Test reason"})
+
         monitor._check_for_alerts()
+
         assert len(monitor._alerts) == 1
         assert monitor._alerts[0]["reason"] == "Test reason"
         logger_mock.assert_called_once()
@@ -79,21 +75,27 @@ class TestServerMonitor:
         logger_mock = mocker.patch("pywebtransport.monitor.server.logger.error")
 
         await monitor._collect_metrics()
+
         assert not monitor._metrics_history
         logger_mock.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_collect_metrics_success(self, monitor: ServerMonitor, mock_server: WebTransportServer) -> None:
         await monitor._collect_metrics()
+
         assert len(monitor._metrics_history) == 1
         metrics = monitor._metrics_history[0]
         assert "timestamp" in metrics
-        assert metrics["stats"]["connections"]["active"] == 0
+        assert "stats" in metrics
+        assert "connection_states" in metrics
+        assert metrics["stats"]["connections_accepted"] == 0
         cast(AsyncMock, mock_server.diagnostics).assert_awaited_once()
 
     def test_get_current_metrics(self, monitor: ServerMonitor) -> None:
         assert monitor.get_current_metrics() is None
+
         monitor._metrics_history.append({"test": "data"})
+
         assert monitor.get_current_metrics() == {"test": "data"}
 
     @pytest.mark.parametrize(
@@ -108,26 +110,18 @@ class TestServerMonitor:
                 "degraded",
                 "Low connection success rate",
             ),
-            (
-                {"stats": {"connections_accepted": 10, "connections_rejected": 1}},
-                True,
-                "idle",
-                "no active connections",
-            ),
+            ({"stats": {"connections_accepted": 10, "connections_rejected": 1}}, True, "idle", "no active connections"),
             (
                 {
-                    "stats": {
-                        "connections": {"active": 5},
-                        "connections_accepted": 10,
-                        "connections_rejected": 1,
-                    }
+                    "stats": {"connections_accepted": 10, "connections_rejected": 1},
+                    "connection_states": {ConnectionState.CONNECTED.value: 5},
                 },
                 True,
                 "healthy",
                 "operating normally",
             ),
             (
-                {"stats": {"connections_accepted": 5, "connections_rejected": 1}},
+                {"stats": {"connections_accepted": 5, "connections_rejected": 1}, "connection_states": {}},
                 True,
                 "idle",
                 "no active connections",
@@ -146,13 +140,9 @@ class TestServerMonitor:
     ) -> None:
         if metrics is not None:
             monitor._metrics_history.append(metrics)
-        mocker.patch.object(
-            type(mock_server),
-            "is_serving",
-            new_callable=PropertyMock,
-            return_value=is_serving,
-        )
+        mocker.patch.object(type(mock_server), "is_serving", new_callable=PropertyMock, return_value=is_serving)
 
         status = monitor.get_health_status()
+
         assert status["status"] == expected_status
         assert expected_reason in status["reason"]

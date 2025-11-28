@@ -47,8 +47,6 @@ async def test_stream_creation() -> bool:
 
             logger.info("Stream created successfully!")
             logger.info("   - Stream ID: %s", stream.stream_id)
-            logger.info("   - Stream state: %s", stream.state.value)
-            logger.info("   - Readable: %s, Writable: %s", stream.is_readable, stream.is_writable)
 
             await stream.close()
             logger.info("Stream closed.")
@@ -86,7 +84,7 @@ async def test_simple_echo() -> bool:
 
             test_message = b"Hello, WebTransport!"
             logger.info("Sending: %r", test_message)
-            await stream.write_all(data=test_message)
+            await stream.write(data=test_message, end_stream=True)
 
             logger.info("Waiting for echo response...")
             response_data = await stream.read_all()
@@ -133,7 +131,7 @@ async def test_multiple_messages() -> bool:
                 logger.info("Processing message %d/%d: %r", i + 1, len(messages), message)
                 stream = await session.create_bidirectional_stream()
                 try:
-                    await stream.write_all(data=message)
+                    await stream.write(data=message, end_stream=True)
                     response_data = await stream.read_all()
                     expected = b"ECHO: " + message
                     if response_data == expected:
@@ -142,8 +140,7 @@ async def test_multiple_messages() -> bool:
                     else:
                         logger.error("   - FAILURE: Echo for message %d mismatch!", i + 1)
                 finally:
-                    if not stream.is_closed:
-                        await stream.close()
+                    await stream.close()
 
             if success_count == len(messages):
                 logger.info("SUCCESS: All %d messages echoed correctly!", len(messages))

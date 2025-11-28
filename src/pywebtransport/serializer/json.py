@@ -30,8 +30,7 @@ class JSONSerializer(_BaseDataclassSerializer, Serializer):
             return self._convert_to_type(data=decoded_obj, target_type=obj_type)
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             raise SerializationError(
-                message="Data is not valid JSON or cannot be unpacked.",
-                original_exception=e,
+                message="Data is not valid JSON or cannot be unpacked.", original_exception=e
             ) from e
 
     def serialize(self, *, obj: Any) -> bytes:
@@ -46,6 +45,5 @@ class JSONSerializer(_BaseDataclassSerializer, Serializer):
             return json.dumps(obj=obj, default=default_handler, **self._kwargs).encode("utf-8")
         except TypeError as e:
             raise SerializationError(
-                message=f"Object of type {type(obj).__name__} is not JSON serializable.",
-                original_exception=e,
+                message=f"Object of type {type(obj).__name__} is not JSON serializable.", original_exception=e
             ) from e

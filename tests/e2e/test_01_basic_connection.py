@@ -9,6 +9,7 @@ import time
 from typing import Final
 
 from pywebtransport import ClientConfig, ConnectionError, TimeoutError, WebTransportClient
+from pywebtransport.types import SessionState
 
 SERVER_HOST: Final[str] = "127.0.0.1"
 SERVER_PORT: Final[int] = 4433
@@ -72,15 +73,12 @@ async def test_basic_connection() -> bool:
             logger.info("   - Connection time: %.3fs", connect_time)
             logger.info("   - Session ID: %s", session.session_id)
             logger.info("   - Session state: %s", session.state.value)
-            logger.info("   - Session ready: %s", session.is_ready)
 
-            if not session.is_ready:
-                logger.error("FAILED: Session not ready after connection")
+            if session.state != SessionState.CONNECTED:
+                logger.error("FAILED: Session not in CONNECTED state")
                 return False
 
-            logger.info("SUCCESS: Session is ready for communication!")
-            if session.connection:
-                logger.info("   - Remote address: %s", session.connection.remote_address)
+            logger.info("SUCCESS: Session is in CONNECTED state!")
 
             logger.info("Closing session...")
             await session.close()

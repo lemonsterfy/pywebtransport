@@ -8,18 +8,6 @@ from pywebtransport.client.utils import parse_webtransport_url, validate_url
 
 class TestUrlUtils:
     @pytest.mark.parametrize(
-        "url, expected",
-        [
-            ("https://example.com", ("example.com", 443, "/")),
-            ("https://localhost:8080/path", ("localhost", 8080, "/path")),
-            ("https://[::1]:9090/q?a=1#f", ("::1", 9090, "/q?a=1#f")),
-        ],
-    )
-    def test_parse_webtransport_url(self, url: str, expected: tuple[str, int, str]) -> None:
-        parsed_url = parse_webtransport_url(url=url)
-        assert parsed_url == expected
-
-    @pytest.mark.parametrize(
         "url, error_msg",
         [
             ("ftp://example.com", "Unsupported scheme 'ftp'"),
@@ -27,9 +15,22 @@ class TestUrlUtils:
             ("https://", "Missing hostname in URL"),
         ],
     )
-    def test_parse_webtransport_url_errors(self, url: str, error_msg: str) -> None:
+    def test_parse_webtransport_url_raises_error(self, url: str, error_msg: str) -> None:
         with pytest.raises(ConfigurationError, match=error_msg):
             parse_webtransport_url(url=url)
+
+    @pytest.mark.parametrize(
+        "url, expected",
+        [
+            ("https://example.com", ("example.com", 443, "/")),
+            ("https://localhost:8080/path", ("localhost", 8080, "/path")),
+            ("https://[::1]:9090/q?a=1#f", ("::1", 9090, "/q?a=1#f")),
+        ],
+    )
+    def test_parse_webtransport_url_success(self, url: str, expected: tuple[str, int, str]) -> None:
+        parsed_url = parse_webtransport_url(url=url)
+
+        assert parsed_url == expected
 
     @pytest.mark.parametrize(
         "url, expected",
@@ -43,4 +44,5 @@ class TestUrlUtils:
     )
     def test_validate_url(self, url: str, expected: bool) -> None:
         result = validate_url(url=url)
+
         assert result is expected

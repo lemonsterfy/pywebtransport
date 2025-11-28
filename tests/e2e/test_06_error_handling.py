@@ -12,7 +12,6 @@ from pywebtransport import (
     ClientConfig,
     ClientError,
     ConnectionError,
-    DatagramError,
     SessionError,
     StreamError,
     TimeoutError,
@@ -132,7 +131,6 @@ async def test_read_timeout() -> bool:
     logger.info("--- Test 06D: Stream Read Timeout ---")
     config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
-        read_timeout=1.0,
         initial_max_data=1024 * 1024,
         initial_max_streams_bidi=100,
         initial_max_streams_uni=100,
@@ -145,12 +143,14 @@ async def test_read_timeout() -> bool:
             logger.info("Attempting to read from a stream with no data (should time out)...")
             start_time = time.time()
             try:
-                await stream.read(size=1024)
+                async with asyncio.timeout(delay=1.0):
+                    await stream.read(max_bytes=1024)
                 logger.error("FAILURE: Read operation should have timed out.")
                 return False
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 duration = time.time() - start_time
                 logger.info("SUCCESS: Read correctly timed out after %.1fs.", duration)
+                await stream.close()
                 return True
             except Exception as e:
                 logger.error("FAILURE: Unexpected exception during read: %s", e)
@@ -183,7 +183,7 @@ async def test_session_closure_handling() -> bool:
                 await session.create_bidirectional_stream()
                 logger.error("FAILURE: Stream creation on closed session should have failed.")
                 return False
-            except (StreamError, SessionError, ClientError):
+            except SessionError:
                 logger.info("   - SUCCESS: Stream creation correctly failed.")
             except Exception as e:
                 logger.error("   - FAILURE: Unexpected error: %s", e)
@@ -191,91 +191,16 @@ async def test_session_closure_handling() -> bool:
 
             logger.info("Testing datagram send on closed session...")
             try:
-                datagram_transport = await session.create_datagram_transport()
-                await datagram_transport.send(data=b"This should fail")
+                await session.send_datagram(data=b"This should fail")
                 logger.error("FAILURE: Datagram send on closed session should have failed.")
                 return False
-            except (DatagramError, SessionError, ClientError):
+            except SessionError:
                 logger.info("   - SUCCESS: Datagram send correctly failed.")
             except Exception as e:
                 logger.error("   - FAILURE: Unexpected error: %s", e)
                 return False
 
             return True
-    except Exception as e:
-        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
-        return False
-
-
-async def test_datagram_errors() -> bool:
-    """Test error handling for datagram operations, like oversized payloads."""
-    logger.info("--- Test 06F: Datagram Error Handling ---")
-    config = ClientConfig(
-        verify_mode=ssl.CERT_NONE,
-        connect_timeout=10.0,
-        initial_max_data=1024 * 1024,
-        initial_max_streams_bidi=100,
-        initial_max_streams_uni=100,
-    )
-
-    try:
-        async with WebTransportClient(config=config) as client:
-            session = await client.connect(url=SERVER_URL)
-            datagram_transport = await session.create_datagram_transport()
-            max_size = datagram_transport.max_datagram_size
-            logger.info("Max datagram size: %s bytes.", max_size)
-
-            logger.info("Testing oversized datagram...")
-            try:
-                oversized_data = b"X" * (max_size + 1)
-                await datagram_transport.send(data=oversized_data)
-                logger.error("FAILURE: Oversized datagram send should have failed.")
-                return False
-            except DatagramError:
-                logger.info("   - SUCCESS: Oversized datagram correctly failed with DatagramError.")
-            except Exception as e:
-                logger.error("   - FAILURE: Unexpected error for oversized datagram: %s", e)
-                return False
-
-            return True
-    except Exception as e:
-        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
-        return False
-
-
-async def test_resource_exhaustion() -> bool:
-    """Test handling of resource exhaustion, specifically the stream limit."""
-    logger.info("--- Test 06G: Resource Exhaustion (Stream Limit) ---")
-    config = ClientConfig(
-        verify_mode=ssl.CERT_NONE,
-        connect_timeout=10.0,
-        initial_max_data=1024 * 1024,
-        initial_max_streams_bidi=100,
-        initial_max_streams_uni=100,
-    )
-
-    try:
-        async with WebTransportClient(config=config) as client:
-            session = await client.connect(url=SERVER_URL)
-            logger.info("Attempting to create streams until limit is reached...")
-            streams = []
-            max_attempts = 200
-            limit_hit = False
-            for i in range(max_attempts):
-                try:
-                    stream = await session.create_bidirectional_stream()
-                    streams.append(stream)
-                except StreamError:
-                    logger.info("SUCCESS: Stream creation limit correctly hit after %d streams.", i)
-                    limit_hit = True
-                    break
-            else:
-                logger.warning("WARNING: Created all %d streams without hitting a limit.", max_attempts)
-
-            for stream in streams:
-                await stream.close()
-
-            return limit_hit
     except Exception as e:
         logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
         return False
@@ -324,8 +249,6 @@ async def main() -> int:
         ("Stream Error Handling", test_stream_errors),
         ("Read Timeout", test_read_timeout),
         ("Operations on Closed Session", test_session_closure_handling),
-        ("Datagram Error Handling", test_datagram_errors),
-        ("Resource Exhaustion", test_resource_exhaustion),
         ("Malformed Operations", test_malformed_operations),
     ]
     passed = 0
@@ -341,7 +264,7 @@ async def main() -> int:
                 logger.error("%s: FAILED", test_name)
         except Exception as e:
             logger.error("%s: CRASHED - %s", test_name, e, exc_info=True)
-        await asyncio.sleep(1)
+        await asyncio.sleep(delay=1)
 
     logger.info("")
     logger.info("=" * 60)

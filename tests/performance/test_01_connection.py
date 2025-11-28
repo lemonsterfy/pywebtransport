@@ -3,14 +3,14 @@
 import asyncio
 import logging
 import ssl
-from typing import Final
+from typing import Any, Final, cast
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
 from pywebtransport import ClientConfig, ConnectionError, WebTransportClient
 
-CONCURRENCY_LEVEL: Final[int] = 100
+CONCURRENCY_LEVEL: Final[int] = 1000
 SERVER_URL: Final[str] = "https://127.0.0.1:4433"
 CONNECTION_TEST_ENDPOINT: Final[str] = "/connection_test"
 
@@ -94,7 +94,8 @@ class TestConnectionPerformance:
             successful_connections >= CONCURRENCY_LEVEL * 0.95
         ), f"High failure rate: Only {successful_connections}/{CONCURRENCY_LEVEL} succeeded."
 
-        mean_time = benchmark.stats["mean"]
+        stats = cast(dict[str, Any], benchmark.stats)
+        mean_time = stats["mean"]
         connections_per_second = CONCURRENCY_LEVEL / mean_time if mean_time > 0 else 0
         benchmark.extra_info["connections_per_second"] = f"{connections_per_second:.2f}"
         logger.info("Connection Throughput: %.2f connections/sec", connections_per_second)

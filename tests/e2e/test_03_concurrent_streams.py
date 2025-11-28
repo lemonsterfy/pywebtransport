@@ -148,11 +148,11 @@ async def test_stream_lifecycle() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             stream = await session.create_bidirectional_stream()
-            logger.info("Stream created: %s, State: %s", stream.stream_id, stream.state.value)
+            logger.info("Stream created: %s", stream.stream_id)
 
             await stream.write_all(data=b"Lifecycle test")
             await stream.read_all()
-            logger.info("Data exchanged. State after write_all/read_all: %s", stream.state.value)
+            logger.info("Data exchanged.")
 
             try:
                 await stream.write(data=b"This should fail")

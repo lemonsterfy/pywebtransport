@@ -6,16 +6,17 @@ import asyncio
 import struct
 import weakref
 from collections import deque
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import TYPE_CHECKING, Self
 
-from pywebtransport.datagram.transport import DatagramMessage, WebTransportDatagramTransport
 from pywebtransport.exceptions import DatagramError, TimeoutError
 from pywebtransport.types import Data, EventType
 from pywebtransport.utils import ensure_bytes, get_logger, get_timestamp
 
 if TYPE_CHECKING:
     from pywebtransport.events import Event
+    from pywebtransport.session.session import WebTransportSession
 
 
 __all__: list[str] = ["DatagramReliabilityLayer"]
@@ -26,15 +27,9 @@ logger = get_logger(name=__name__)
 class DatagramReliabilityLayer:
     """Add a TCP-like reliability layer over an unreliable datagram transport."""
 
-    def __init__(
-        self,
-        datagram_transport: WebTransportDatagramTransport,
-        *,
-        ack_timeout: float = 2.0,
-        max_retries: int = 5,
-    ) -> None:
+    def __init__(self, session: WebTransportSession, *, ack_timeout: float = 2.0, max_retries: int = 5) -> None:
         """Initialize the datagram reliability layer."""
-        self._transport = weakref.ref(datagram_transport)
+        self._session = weakref.ref(session)
         self._ack_timeout = ack_timeout
         self._max_retries = max_retries
         self._closed = False
@@ -50,16 +45,13 @@ class DatagramReliabilityLayer:
         """Enter the async context and start background tasks."""
         self._lock = asyncio.Lock()
         self._incoming_queue = asyncio.Queue()
-        if transport := self._transport():
-            transport.on(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
+        if session := self._session():
+            session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
         self._start_background_tasks()
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and close the reliability layer."""
         await self.close()
@@ -71,8 +63,8 @@ class DatagramReliabilityLayer:
 
         self._closed = True
 
-        if transport := self._transport():
-            transport.off(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
+        if session := self._session():
+            session.events.off(event_type=EventType.DATAGRAM_RECEIVED, handler=self._on_datagram_received)
 
         if self._retry_task:
             self._retry_task.cancel()
@@ -100,7 +92,8 @@ class DatagramReliabilityLayer:
         if self._closed:
             raise DatagramError(message="Reliability layer is closed.")
         try:
-            return await asyncio.wait_for(self._incoming_queue.get(), timeout=timeout)
+            async with asyncio.timeout(delay=timeout):
+                return await self._incoming_queue.get()
         except asyncio.TimeoutError:
             raise TimeoutError(message=f"Receive timeout after {timeout}s") from None
 
@@ -109,7 +102,7 @@ class DatagramReliabilityLayer:
         if self._lock is None:
             raise DatagramError(message="Reliability layer has not been activated.")
 
-        transport = self._get_transport()
+        session = self._get_session()
         data_bytes = ensure_bytes(data=data)
 
         async with self._lock:
@@ -120,15 +113,15 @@ class DatagramReliabilityLayer:
             datagram = _ReliableDatagram(data=frame, sequence=seq)
             self._pending_acks[seq] = datagram
 
-        await transport.send(data=frame)
+        await session.send_datagram(data=frame)
         logger.debug("Sent reliable datagram with sequence %d", seq)
 
-    def _get_transport(self) -> WebTransportDatagramTransport:
-        """Get the underlying transport or raise an error if it is gone or closed."""
-        transport = self._transport()
-        if self._closed or not transport or transport.is_closed:
-            raise DatagramError(message="Reliability layer or underlying transport is closed.")
-        return transport
+    def _get_session(self) -> WebTransportSession:
+        """Get the underlying session or raise an error if it is gone or closed."""
+        session = self._session()
+        if self._closed or not session or session.is_closed:
+            raise DatagramError(message="Reliability layer or underlying session is closed.")
+        return session
 
     async def _handle_ack_message(self, *, payload: bytes) -> None:
         """Handle an incoming ACK message."""
@@ -154,10 +147,10 @@ class DatagramReliabilityLayer:
         data = payload[4:]
 
         try:
-            transport = self._get_transport()
+            session = self._get_session()
             ack_payload = str(seq).encode("utf-8")
             frame = self._pack_frame(message_type="ACK", payload=ack_payload)
-            await transport.send(data=frame, priority=2)
+            await session.send_datagram(data=frame)
         except DatagramError as e:
             logger.warning("Failed to send ACK for sequence %d: %s", seq, e, exc_info=True)
             return
@@ -167,7 +160,7 @@ class DatagramReliabilityLayer:
             return
 
         self._received_sequences.append(seq)
-        await self._incoming_queue.put(data)
+        await self._incoming_queue.put(item=data)
 
     async def _on_datagram_received(self, event: Event) -> None:
         """Handle all incoming datagrams from the underlying transport."""
@@ -208,7 +201,7 @@ class DatagramReliabilityLayer:
             return
         try:
             while not self._closed:
-                await asyncio.sleep(self._ack_timeout)
+                await asyncio.sleep(delay=self._ack_timeout)
                 current_time = get_timestamp()
                 to_retry: list[_ReliableDatagram] = []
 
@@ -219,9 +212,7 @@ class DatagramReliabilityLayer:
                                 if datagram.sequence is not None and datagram.sequence in self._pending_acks:
                                     del self._pending_acks[datagram.sequence]
                                 logger.warning(
-                                    "Gave up on sequence %s after %d retries.",
-                                    datagram.sequence,
-                                    datagram.retry_count,
+                                    "Gave up on sequence %s after %d retries.", datagram.sequence, datagram.retry_count
                                 )
                             else:
                                 to_retry.append(datagram)
@@ -230,7 +221,7 @@ class DatagramReliabilityLayer:
                     continue
 
                 try:
-                    transport = self._get_transport()
+                    session = self._get_session()
                 except DatagramError:
                     logger.warning("Could not retry datagrams, transport is closed.")
                     self._closed = True
@@ -242,14 +233,10 @@ class DatagramReliabilityLayer:
                             async with self._lock:
                                 datagram.retry_count += 1
                                 datagram.timestamp = get_timestamp()
-                            tg.create_task(transport.send(data=datagram.data))
+                            tg.create_task(coro=session.send_datagram(data=datagram.data))
                             logger.debug("Retrying sequence %s, attempt %d", datagram.sequence, datagram.retry_count)
                 except* Exception as eg:
-                    logger.warning(
-                        "Errors occurred during datagram retry: %s",
-                        eg.exceptions,
-                        exc_info=eg,
-                    )
+                    logger.warning("Errors occurred during datagram retry: %s", eg.exceptions, exc_info=eg)
 
         except asyncio.CancelledError:
             pass
@@ -260,7 +247,7 @@ class DatagramReliabilityLayer:
         """Start the background retry task if it is not already running."""
         if self._retry_task is None:
             try:
-                self._retry_task = asyncio.create_task(self._retry_loop())
+                self._retry_task = asyncio.create_task(coro=self._retry_loop())
             except RuntimeError:
                 logger.warning("Could not start reliability layer tasks: No running event loop.")
 
@@ -277,7 +264,11 @@ class DatagramReliabilityLayer:
             return None
 
 
-class _ReliableDatagram(DatagramMessage):
+@dataclass(kw_only=True)
+class _ReliableDatagram:
     """An internal datagram message with added reliability metadata."""
 
+    data: bytes
+    sequence: int
+    timestamp: float = field(default_factory=get_timestamp)
     retry_count: int = 0

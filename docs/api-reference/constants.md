@@ -30,7 +30,9 @@ This module provides module-level constants, error codes, and default configurat
 - `H3_STREAM_TYPE_QPACK_ENCODER` (`int`): The H3 stream type for the QPACK encoder. `Default: 0x02`.
 - `H3_STREAM_TYPE_QPACK_DECODER` (`int`): The H3 stream type for the QPACK decoder. `Default: 0x03`.
 - `H3_STREAM_TYPE_WEBTRANSPORT` (`int`): The H3 stream type for a WebTransport stream. `Default: 0x54`.
+- `MAX_CLOSE_REASON_BYTES` (`int`): The maximum length of the close reason string in bytes. `Default: 1024`.
 - `MAX_DATAGRAM_SIZE` (`int`): The maximum theoretical size of a UDP datagram. `Default: 65535`.
+- `MAX_PROTOCOL_STREAMS_LIMIT` (`int`): The absolute hard limit for protocol streams. `Default: 2**60`.
 - `MAX_STREAM_ID` (`int`): The maximum possible stream ID in QUIC. `Default: 2**62 - 1`.
 - `SETTINGS_ENABLE_CONNECT_PROTOCOL` (`int`): The H3 setting to enable the CONNECT method. `Default: 0x8`.
 - `SETTINGS_H3_DATAGRAM` (`int`): The H3 setting to enable datagrams. `Default: 0x33`.
@@ -39,12 +41,13 @@ This module provides module-level constants, error codes, and default configurat
 - `SETTINGS_WT_INITIAL_MAX_DATA` (`int`): The H3 setting for WebTransport initial max data. `Default: 0x2B61`.
 - `SETTINGS_WT_INITIAL_MAX_STREAMS_BIDI` (`int`): The H3 setting for WebTransport initial max bidirectional streams. `Default: 0x2B65`.
 - `SETTINGS_WT_INITIAL_MAX_STREAMS_UNI` (`int`): The H3 setting for WebTransport initial max unidirectional streams. `Default: 0x2B64`.
-- `SETTINGS_WT_MAX_SESSIONS` (`int`): The H3 setting to enable WebTransport and indicate max sessions. `Default: 0x14E9CD29`.
 - `UNIDIRECTIONAL_STREAM` (`int`): The QUIC stream type identifier for unidirectional streams. `Default: 0x2`.
 - `WT_DATA_BLOCKED_TYPE` (`int`): The Capsule type for `DATA_BLOCKED`. `Default: 0x190B4D41`.
 - `WT_MAX_DATA_TYPE` (`int`): The Capsule type for `MAX_DATA`. `Default: 0x190B4D3D`.
+- `WT_MAX_STREAM_DATA_TYPE` (`int`): The Capsule type for `MAX_STREAM_DATA`. `Default: 0x190B4D3E`.
 - `WT_MAX_STREAMS_BIDI_TYPE` (`int`): The Capsule type for `MAX_STREAMS` (bidirectional). `Default: 0x190B4D3F`.
 - `WT_MAX_STREAMS_UNI_TYPE` (`int`): The Capsule type for `MAX_STREAMS` (unidirectional). `Default: 0x190B4D40`.
+- `WT_STREAM_DATA_BLOCKED_TYPE` (`int`): The Capsule type for `STREAM_DATA_BLOCKED`. `Default: 0x190B4D42`.
 - `WT_STREAMS_BLOCKED_BIDI_TYPE` (`int`): The Capsule type for `STREAMS_BLOCKED` (bidirectional). `Default: 0x190B4D43`.
 - `WT_STREAMS_BLOCKED_UNI_TYPE` (`int`): The Capsule type for `STREAMS_BLOCKED` (unidirectional). `Default: 0x190B4D44`.
 
@@ -54,21 +57,19 @@ This module provides module-level constants, error codes, and default configurat
 - `DEFAULT_ALPN_PROTOCOLS` (`tuple[str]`): Default ALPN protocols. `Default: ("h3",)`.
 - `DEFAULT_AUTO_RECONNECT` (`bool`): Default client auto-reconnect state. `Default: False`.
 - `DEFAULT_BIND_HOST` (`str`): Default host for the server to bind to. `Default: "localhost"`.
-- `DEFAULT_BUFFER_SIZE` (`int`): Default stream buffer size. `Default: 65536`.
 - `DEFAULT_CERTFILE` (`str`): Default path for a certificate file. `Default: ""`.
 - `DEFAULT_CLIENT_MAX_CONNECTIONS` (`int`): Default maximum concurrent connections for a client. `Default: 100`.
+- `DEFAULT_CLIENT_MAX_SESSIONS` (`int`): Default maximum concurrent sessions per connection for a client. `Default: 100`.
 - `DEFAULT_CLIENT_VERIFY_MODE` (`ssl.VerifyMode`): Default SSL verification mode for the client. `Default: ssl.CERT_REQUIRED`.
 - `DEFAULT_CLOSE_TIMEOUT` (`float`): Default timeout for a graceful connection close. `Default: 5.0`.
 - `DEFAULT_CONNECT_TIMEOUT` (`float`): Default timeout for connection establishment. `Default: 30.0`.
 - `DEFAULT_CONGESTION_CONTROL_ALGORITHM` (`str`): Default congestion control algorithm. `Default: "cubic"`.
-- `DEFAULT_CONNECTION_CLEANUP_INTERVAL` (`float`): Default interval for cleaning up closed connections. `Default: 30.0`.
-- `DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL` (`float`): Default interval for checking connection idle status. `Default: 5.0`.
 - `DEFAULT_CONNECTION_IDLE_TIMEOUT` (`float`): Default timeout for idle connections. `Default: 60.0`.
 - `DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT` (`float`): Default timeout for sending keep-alive packets. `Default: 30.0`.
 - `DEFAULT_DEBUG` (`bool`): Default debug mode state. `Default: False`.
 - `DEFAULT_DEV_PORT` (`int`): Default port for the development server. `Default: 4433`.
 - `DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE` (`bool`): Default for flow control window auto-scaling. `Default: True`.
-- `DEFAULT_FLOW_CONTROL_WINDOW_SIZE` (`int`): Default size of the flow control window. `Default: 1048576`.
+- `DEFAULT_FLOW_CONTROL_WINDOW_SIZE` (`int`): Default size of the flow control window. `Default: 1048576` (1MB).
 - `DEFAULT_INITIAL_MAX_DATA` (`int`): Default initial max data for flow control. `Default: 0`.
 - `DEFAULT_INITIAL_MAX_STREAMS_BIDI` (`int`): Default initial max bidirectional streams. `Default: 0`.
 - `DEFAULT_INITIAL_MAX_STREAMS_UNI` (`int`): Default initial max unidirectional streams. `Default: 0`.
@@ -76,34 +77,28 @@ This module provides module-level constants, error codes, and default configurat
 - `DEFAULT_KEYFILE` (`str`): Default path for a private key file. `Default: ""`.
 - `DEFAULT_LOG_LEVEL` (`str`): Default logging level. `Default: "INFO"`.
 - `DEFAULT_MAX_DATAGRAM_SIZE` (`int`): Default maximum datagram size. `Default: 65535`.
-- `DEFAULT_MAX_INCOMING_STREAMS` (`int`): Default maximum concurrent incoming streams. `Default: 100`.
-- `DEFAULT_MAX_MESSAGE_SIZE` (`int`): Default maximum message size for structured streams. `Default: 1048576`.
+- `DEFAULT_MAX_MESSAGE_SIZE` (`int`): Default maximum message size for structured streams. `Default: 1048576` (1MB).
 - `DEFAULT_MAX_PENDING_EVENTS_PER_SESSION` (`int`): Default maximum buffered events per pending session. `Default: 16`.
 - `DEFAULT_MAX_RETRIES` (`int`): Default maximum number of connection retries. `Default: 3`.
 - `DEFAULT_MAX_RETRY_DELAY` (`float`): Default maximum delay between connection retries. `Default: 30.0`.
-- `DEFAULT_MAX_SESSIONS` (`int`): Default maximum concurrent sessions on the server. `Default: 10000`.
-- `DEFAULT_MAX_STREAMS` (`int`): Default maximum concurrent streams per connection. `Default: 100`.
-- `DEFAULT_MAX_STREAMS_PER_CONNECTION` (`int`): Alias for `DEFAULT_MAX_STREAMS`. `Default: 100`.
+- `DEFAULT_MAX_STREAM_READ_BUFFER` (`int`): Default maximum buffer size for stream reads. `Default: 65536`.
+- `DEFAULT_MAX_STREAM_WRITE_BUFFER` (`int`): Default maximum buffer size for stream writes. `Default: 1048576` (1MB).
 - `DEFAULT_MAX_TOTAL_PENDING_EVENTS` (`int`): Default global maximum for buffered events. `Default: 1000`.
 - `DEFAULT_PENDING_EVENT_TTL` (`float`): Default TTL for buffered events in seconds. `Default: 5.0`.
-- `DEFAULT_PROXY_CONNECT_TIMEOUT` (`float`): Default timeout for establishing a connection through a proxy. `Default: 10.0`.
 - `DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE` (`int`): Default subscription queue size for the Pub/Sub manager. `Default: 16`.
 - `DEFAULT_READ_TIMEOUT` (`float`): Default timeout for stream read operations. `Default: 60.0`.
+- `DEFAULT_RESOURCE_CLEANUP_INTERVAL` (`float`): Default interval for cleaning up closed resources (connections, sessions, streams). `Default: 15.0`.
 - `DEFAULT_RETRY_BACKOFF` (`float`): Default backoff factor for connection retries. `Default: 2.0`.
 - `DEFAULT_RETRY_DELAY` (`float`): Default initial delay for connection retries. `Default: 1.0`.
 - `DEFAULT_RPC_CONCURRENCY_LIMIT` (`int`): Default concurrency limit for the RPC manager. `Default: 100`.
 - `DEFAULT_SECURE_PORT` (`int`): Default port for secure connections. `Default: 443`.
 - `DEFAULT_SERVER_MAX_CONNECTIONS` (`int`): Default maximum concurrent connections for a server. `Default: 3000`.
+- `DEFAULT_SERVER_MAX_SESSIONS` (`int`): Default maximum concurrent sessions per connection for a server. `Default: 10000`.
 - `DEFAULT_SERVER_VERIFY_MODE` (`ssl.VerifyMode`): Default SSL verification mode for the server. `Default: ssl.CERT_OPTIONAL`.
-- `DEFAULT_SESSION_CLEANUP_INTERVAL` (`float`): Default interval for cleaning up closed sessions. `Default: 60.0`.
-- `DEFAULT_STREAM_CLEANUP_INTERVAL` (`float`): Default interval for cleaning up closed streams. `Default: 15.0`.
 - `DEFAULT_STREAM_CREATION_TIMEOUT` (`float`): Default timeout for creating a new stream. `Default: 10.0`.
 - `DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI` (`int`): Default stream increment for bidirectional flow control. `Default: 10`.
 - `DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI` (`int`): Default stream increment for unidirectional flow control. `Default: 10`.
-- `DEFAULT_STREAM_LINE_LIMIT` (`int`): Default line limit for line-based structured streams. `Default: 65536`.
-- `DEFAULT_WEBTRANSPORT_PATH` (`str`): Default path for WebTransport endpoint. `Default: "/webtransport"`.
 - `DEFAULT_WRITE_TIMEOUT` (`float`): Default timeout for stream write operations. `Default: 30.0`.
-- `MAX_BUFFER_SIZE` (`int`): The maximum buffer size for streams. `Default: 1048576`.
 - `SUPPORTED_CONGESTION_CONTROL_ALGORITHMS` (`tuple[str, str]`): Supported congestion control algorithms. `Default: ("reno", "cubic")`.
 
 ## ErrorCodes Class
@@ -149,7 +144,9 @@ An `IntEnum` class containing standardized WebTransport and QUIC error codes.
 - `H3_VERSION_FALLBACK` (`int`): `0x110`
 - `WT_SESSION_GONE` (`int`): `0x170D7B68`
 - `WT_BUFFERED_STREAM_REJECTED` (`int`): `0x3994BD84`
+- `WT_FLOW_CONTROL_ERROR` (`int`): `0x045D4487`
 - `WT_APPLICATION_ERROR_FIRST` (`int`): `0x52E4A40FA8DB`
+- `WT_APPLICATION_ERROR_LAST` (`int`): `0x52E5AC983162`
 - `QPACK_DECOMPRESSION_FAILED` (`int`): `0x200`
 - `QPACK_ENCODER_STREAM_ERROR` (`int`): `0x201`
 - `QPACK_DECODER_STREAM_ERROR` (`int`): `0x202`
@@ -173,8 +170,6 @@ A `TypedDict` that defines the structure of a client configuration dictionary.
 - `close_timeout` (`float`): Time in seconds to wait for a graceful connection closure.
 - `congestion_control_algorithm` (`str`): The congestion control algorithm to use.
 - `connect_timeout` (`float`): Time in seconds to wait for connection establishment.
-- `connection_cleanup_interval` (`float`): Interval in seconds for cleaning up closed connections.
-- `connection_idle_check_interval` (`float`): Interval in seconds for checking connection idle status.
 - `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed.
 - `connection_keepalive_timeout` (`float`): Time in seconds for sending keep-alive packets.
 - `debug` (`bool`): Flag to enable or disable debug mode.
@@ -189,21 +184,21 @@ A `TypedDict` that defines the structure of a client configuration dictionary.
 - `log_level` (`str`): The logging level for the client.
 - `max_connections` (`int`): Maximum number of concurrent connections.
 - `max_datagram_size` (`int`): Maximum size in bytes for an outgoing datagram.
-- `max_incoming_streams` (`int`): Maximum number of concurrent incoming streams.
+- `max_message_size` (`int`): Maximum size in bytes for a structured message.
 - `max_pending_events_per_session` (`int`): Maximum buffered events per pending session.
 - `max_retries` (`int`): Maximum number of retries for a failed connection.
 - `max_retry_delay` (`float`): Maximum delay in seconds between connection retries.
-- `max_stream_buffer_size` (`int`): Maximum size in bytes for a stream buffer.
-- `max_streams` (`int`): Maximum number of concurrent streams per connection.
+- `max_sessions` (`int`): Maximum number of concurrent sessions.
+- `max_stream_read_buffer` (`int`): Maximum size in bytes for a stream read buffer.
+- `max_stream_write_buffer` (`int`): Maximum size in bytes for a stream write buffer.
 - `max_total_pending_events` (`int`): Global maximum for buffered events.
 - `pending_event_ttl` (`float`): TTL for buffered events in seconds.
-- `proxy` (`Any`): Configuration object for using an HTTP proxy.
+- `pubsub_subscription_queue_size` (`int`): Size of the Pub/Sub subscription queue.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
+- `resource_cleanup_interval` (`float`): Interval in seconds for cleaning up closed resources.
 - `retry_backoff` (`float`): The backoff factor for connection retries.
 - `retry_delay` (`float`): Initial delay in seconds between connection retries.
 - `rpc_concurrency_limit` (`int`): The maximum number of concurrent RPC calls.
-- `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
-- `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.
 - `stream_creation_timeout` (`float`): Timeout in seconds for creating a new stream.
 - `stream_flow_control_increment_bidi` (`int`): Stream increment for bidirectional flow control.
 - `stream_flow_control_increment_uni` (`int`): Stream increment for unidirectional flow control.
@@ -224,8 +219,6 @@ A `TypedDict` that defines the structure of a server configuration dictionary.
 - `ca_certs` (`str | None`): Path to a CA certificate file for client verification.
 - `certfile` (`str`): Path to the server's certificate file.
 - `congestion_control_algorithm` (`str`): The congestion control algorithm to use.
-- `connection_cleanup_interval` (`float`): Interval in seconds for cleaning up closed connections.
-- `connection_idle_check_interval` (`float`): Interval in seconds for checking connection idle status.
 - `connection_idle_timeout` (`float`): Time in seconds after which an idle connection is closed.
 - `connection_keepalive_timeout` (`float`): Time in seconds for sending keep-alive packets.
 - `debug` (`bool`): Flag to enable or disable debug mode.
@@ -239,19 +232,19 @@ A `TypedDict` that defines the structure of a server configuration dictionary.
 - `log_level` (`str`): The logging level for the server.
 - `max_connections` (`int`): Maximum number of concurrent client connections.
 - `max_datagram_size` (`int`): Maximum size in bytes for an outgoing datagram.
-- `max_incoming_streams` (`int`): Maximum number of concurrent incoming streams per session.
+- `max_message_size` (`int`): Maximum size in bytes for a structured message.
 - `max_pending_events_per_session` (`int`): Maximum buffered events per pending session.
 - `max_sessions` (`int`): Maximum number of concurrent sessions per connection.
-- `max_stream_buffer_size` (`int`): Maximum size in bytes for a stream buffer.
-- `max_streams_per_connection` (`int`): Maximum number of concurrent streams per connection.
+- `max_stream_read_buffer` (`int`): Maximum size in bytes for a stream read buffer.
+- `max_stream_write_buffer` (`int`): Maximum size in bytes for a stream write buffer.
 - `max_total_pending_events` (`int`): Global maximum for buffered events.
 - `middleware` (`list[Any]`): A list of middleware to apply to incoming sessions.
 - `pending_event_ttl` (`float`): TTL for buffered events in seconds.
+- `pubsub_subscription_queue_size` (`int`): Size of the Pub/Sub subscription queue.
 - `read_timeout` (`float | None`): Timeout in seconds for stream read operations.
+- `resource_cleanup_interval` (`float`): Interval in seconds for cleaning up closed resources.
 - `rpc_concurrency_limit` (`int`): The maximum number of concurrent RPC calls per session.
-- `session_cleanup_interval` (`float`): Interval in seconds for cleaning up closed sessions.
-- `stream_buffer_size` (`int`): Default buffer size in bytes for streams.
-- `stream_cleanup_interval` (`float`): Interval in seconds for cleaning up closed streams.
+- `stream_creation_timeout` (`float`): Timeout in seconds for creating a new stream.
 - `stream_flow_control_increment_bidi` (`int`): Stream increment for bidirectional flow control.
 - `stream_flow_control_increment_uni` (`int`): Stream increment for unidirectional flow control.
 - `verify_mode` (`ssl.VerifyMode`): The SSL verification mode for client certificates.

@@ -4,80 +4,67 @@ This document provides a reference for the `pywebtransport.session` subpackage, 
 
 ---
 
-## SessionDiagnostics Class
+## WebTransportSession Class
 
-A structured, immutable snapshot of a session's health.
+A high-level handle for a WebTransport session. It manages the lifecycle of a specific WebTransport session over a shared QUIC connection, including stream creation and datagram transmission. This class implements the asynchronous context manager protocol (`async with`) to ensure sessions are properly closed.
 
-### Attributes
+### Constructor
 
-- `stats` (`SessionStats`): The full statistics object for the session.
-- `state` (`SessionState`): The current state of the session.
-- `is_connection_active` (`bool`): `True` if the underlying connection is available and connected.
-- `datagram_receive_buffer_size` (`int`): The current size of the datagram receive buffer.
-- `send_credit_available` (`int`): Available flow control credit for sending data.
-- `receive_credit_available` (`int`): Available flow control credit for receiving data.
+- **`def __init__(self, *, connection: WebTransportConnection, session_id: SessionId, path: str, headers: Headers, control_stream_id: StreamId | None) -> None`**: Initializes the WebTransport session handle.
 
 ### Properties
 
-- `issues` (`list[str]`): Get a list of potential issues based on the current diagnostics.
+- `events` (`EventEmitter`): The event emitter for session-level events (e.g., `STREAM_OPENED`, `DATAGRAM_RECEIVED`).
+- `headers` (`Headers`): A copy of the initial HTTP headers used to establish the session.
+- `is_closed` (`bool`): `True` if the session state is `CLOSED`.
+- `path` (`str`): The URL path associated with this session.
+- `session_id` (`SessionId`): The unique identifier for this session.
+- `state` (`SessionState`): The current state of the session (e.g., `CONNECTING`, `CONNECTED`, `CLOSED`).
 
-## SessionStats Class
+### Instance Methods
 
-A dataclass that holds a comprehensive set of statistics for a `WebTransportSession`.
+- **`async def close(self, *, error_code: int = 0, reason: str | None = None, close_connection: bool = False) -> None`**: Closes the WebTransport session. Optionally closes the underlying connection.
+- **`async def create_bidirectional_stream(self) -> WebTransportStream`**: Creates and returns a new bidirectional stream. Raises `TimeoutError` if stream creation exceeds the configured timeout.
+- **`async def create_unidirectional_stream(self) -> WebTransportSendStream`**: Creates and returns a new unidirectional (send-only) stream. Raises `TimeoutError` if stream creation exceeds the configured timeout.
+- **`async def diagnostics(self) -> SessionDiagnostics`**: Asynchronously retrieves a snapshot of the session's diagnostic information from the engine.
+- **`async def grant_data_credit(self, *, max_data: int) -> None`**: Manually grants data flow control credit (MAX_DATA) to the peer.
+- **`async def grant_streams_credit(self, *, max_streams: int, is_unidirectional: bool) -> None`**: Manually grants stream flow control credit (MAX_STREAMS) to the peer.
+- **`async def send_datagram(self, *, data: Data) -> None`**: Sends an unreliable datagram to the peer.
+
+## SessionDiagnostics Class
+
+A dataclass representing a snapshot of session diagnostics.
 
 ### Attributes
 
 - `session_id` (`SessionId`): The unique identifier for the session.
+- `control_stream_id` (`StreamId`): The ID of the H3 control stream associated with this session.
+- `state` (`SessionState`): The state of the session at the time of the snapshot.
+- `path` (`str`): The URL path.
+- `headers` (`Headers`): The initial headers.
 - `created_at` (`float`): Timestamp when the session was created.
-- `ready_at` (`float | None`): Timestamp when the session became ready. `Default: None`.
-- `closed_at` (`float | None`): Timestamp when the session was closed. `Default: None`.
-- `streams_created` (`int`): Total number of streams created. `Default: 0`.
-- `streams_closed` (`int`): Total number of streams closed. `Default: 0`.
-- `stream_errors` (`int`): Total number of stream errors. `Default: 0`.
-- `bidirectional_streams` (`int`): Number of bidirectional streams. `Default: 0`.
-- `unidirectional_streams` (`int`): Number of unidirectional streams. `Default: 0`.
-- `datagrams_sent` (`int`): Total datagrams sent. `Default: 0`.
-- `datagrams_received` (`int`): Total datagrams received. `Default: 0`.
-- `protocol_errors` (`int`): Number of protocol errors. `Default: 0`.
-
-### Properties
-
-- `active_streams` (`int`): Current number of active streams.
-- `uptime` (`float`): Total session uptime in seconds.
-
-### Instance Methods
-
-- **`def to_dict(self) -> dict[str, Any]`**: Converts the session statistics to a dictionary.
-
-## WebTransportSession Class
-
-The primary user-facing class that represents a single, long-lived logical connection.
-
-**Note on Usage**: `WebTransportSession` is not instantiated directly but is typically provided by a `WebTransportClient` or a server application.
-
-### Properties
-
-- `connection` (`WebTransportConnection | None`): A weak reference to the parent `WebTransportConnection`.
-- `headers` (`Headers`): A copy of the initial HTTP headers used to establish the session.
-- `is_closed` (`bool`): `True` if the session is fully closed.
-- `is_ready` (`bool`): `True` if the session is connected and ready for use.
-- `path` (`str`): The URL path associated with the session.
-- `protocol_handler` (`WebTransportProtocolHandler | None`): The underlying protocol handler.
-- `session_id` (`SessionId`): The unique ID of the session.
-- `state` (`SessionState`): The current state of the session.
-
-### Instance Methods
-
-- **`async def close(self, *, code: int = 0, reason: str = "", close_connection: bool = True) -> None`**: Closes the session and all its associated resources.
-- **`async def create_bidirectional_stream(self, *, timeout: float | None = None) -> WebTransportStream`**: Creates and returns a new bidirectional stream.
-- **`async def create_datagram_transport(self) -> WebTransportDatagramTransport`**: Creates a datagram transport for this session.
-- **`async def create_unidirectional_stream(self, *, timeout: float | None = None) -> WebTransportSendStream`**: Creates and returns a new unidirectional (send-only) stream.
-- **`async def diagnostics(self) -> SessionDiagnostics`**: Get a snapshot of the session's diagnostics and statistics.
-- **`async def incoming_streams(self) -> AsyncIterator[StreamType]`**: Returns an async iterator that yields incoming streams from the remote peer.
-- **`async def initialize(self) -> None`**: Initializes asyncio resources for the session.
-- **`async def monitor_health(self, *, check_interval: float = 60.0) -> None`**: A long-running task that continuously monitors session health.
-- **`async def ready(self, *, timeout: float = 30.0) -> None`**: Waits until the session is fully established and ready.
-- **`async def wait_closed(self) -> None`**: Waits until the session is fully closed.
+- `local_max_data` (`int`): The current local MAX_DATA limit.
+- `local_data_sent` (`int`): Total bytes sent by the local endpoint.
+- `peer_max_data` (`int`): The current peer MAX_DATA limit.
+- `peer_data_sent` (`int`): Total bytes sent by the peer.
+- `local_max_streams_bidi` (`int`): Local limit for bidirectional streams.
+- `local_streams_bidi_opened` (`int`): Number of bidirectional streams opened locally.
+- `peer_max_streams_bidi` (`int`): Peer limit for bidirectional streams.
+- `peer_streams_bidi_opened` (`int`): Number of bidirectional streams opened by peer.
+- `local_max_streams_uni` (`int`): Local limit for unidirectional streams.
+- `local_streams_uni_opened` (`int`): Number of unidirectional streams opened locally.
+- `peer_max_streams_uni` (`int`): Peer limit for unidirectional streams.
+- `peer_streams_uni_opened` (`int`): Number of unidirectional streams opened by peer.
+- `pending_bidi_stream_futures` (`list[Any]`): List of pending futures for bidirectional stream creation.
+- `pending_uni_stream_futures` (`list[Any]`): List of pending futures for unidirectional stream creation.
+- `datagrams_sent` (`int`): Total datagrams sent.
+- `datagram_bytes_sent` (`int`): Total datagram bytes sent.
+- `datagrams_received` (`int`): Total datagrams received.
+- `datagram_bytes_received` (`int`): Total datagram bytes received.
+- `close_code` (`int | None`): The error code if the session is closed.
+- `close_reason` (`str | None`): The reason string if the session is closed.
+- `closed_at` (`float | None`): Timestamp when the session was closed.
+- `ready_at` (`float | None`): Timestamp when the session became ready.
 
 ## See Also
 

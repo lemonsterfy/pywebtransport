@@ -26,27 +26,22 @@ from .test_04_data_transfer import test_performance_benchmark as run_04_performa
 from .test_04_data_transfer import test_small_data as run_04_small_data
 from .test_05_datagrams import test_basic_datagram as run_05_basic_datagram
 from .test_05_datagrams import test_datagram_burst as run_05_datagram_burst
-from .test_05_datagrams import test_datagram_priority as run_05_datagram_priority
-from .test_05_datagrams import test_datagram_queue_behavior as run_05_datagram_queue_behavior
 from .test_05_datagrams import test_datagram_sizes as run_05_datagram_sizes
-from .test_05_datagrams import test_datagram_ttl as run_05_datagram_ttl
-from .test_05_datagrams import test_json_datagrams as run_05_json_datagrams
 from .test_05_datagrams import test_multiple_datagrams as run_05_multiple_datagrams
 from .test_06_error_handling import test_connection_timeout as run_06_connection_timeout
-from .test_06_error_handling import test_datagram_errors as run_06_datagram_errors
 from .test_06_error_handling import test_invalid_server_address as run_06_invalid_address
 from .test_06_error_handling import test_malformed_operations as run_06_malformed_operations
 from .test_06_error_handling import test_read_timeout as run_06_read_timeout
-from .test_06_error_handling import test_resource_exhaustion as run_06_resource_exhaustion
 from .test_06_error_handling import test_session_closure_handling as run_06_session_closure
 from .test_06_error_handling import test_stream_errors as run_06_stream_errors
 from .test_07_advanced_features import test_client_statistics as run_07_client_statistics
 from .test_07_advanced_features import test_connection_info as run_07_connection_info
 from .test_07_advanced_features import test_datagram_statistics as run_07_datagram_statistics
 from .test_07_advanced_features import test_performance_monitoring as run_07_performance_monitoring
+from .test_07_advanced_features import test_server_diagnostics as run_07_server_diagnostics
 from .test_07_advanced_features import test_session_lifecycle_events as run_07_session_lifecycle_events
 from .test_07_advanced_features import test_session_statistics as run_07_session_statistics
-from .test_07_advanced_features import test_stream_management as run_07_stream_management
+from .test_07_advanced_features import test_stream_management_diagnostics as run_07_stream_management_diagnostics
 from .test_08_structured_messaging import test_json_messaging as run_08_json_messaging
 from .test_08_structured_messaging import test_msgpack_messaging as run_08_msgpack_messaging
 from .test_09_rpc import test_rpc_basic_add as run_09_basic_add
@@ -165,20 +160,8 @@ class TestE2eSuite:
     async def test_05_datagram_sizes(self) -> None:
         assert await run_05_datagram_sizes() is True, "Datagram size handling failed"
 
-    async def test_05_datagram_priority(self) -> None:
-        assert await run_05_datagram_priority() is True, "Datagram priority handling failed"
-
-    async def test_05_datagram_ttl(self) -> None:
-        assert await run_05_datagram_ttl() is True, "Datagram TTL handling failed"
-
-    async def test_05_json_datagrams(self) -> None:
-        assert await run_05_json_datagrams() is True, "JSON datagrams failed"
-
     async def test_05_datagram_burst(self) -> None:
         assert await run_05_datagram_burst() is True, "Datagram burst test failed"
-
-    async def test_05_datagram_queue_behavior(self) -> None:
-        assert await run_05_datagram_queue_behavior() is True, "Datagram queue behavior test failed"
 
     async def test_06_connection_timeout(self) -> None:
         assert await run_06_connection_timeout() is True, "Connection timeout handling failed"
@@ -195,12 +178,6 @@ class TestE2eSuite:
     async def test_06_session_closure(self) -> None:
         assert await run_06_session_closure() is True, "Session closure handling failed"
 
-    async def test_06_datagram_errors(self) -> None:
-        assert await run_06_datagram_errors() is True, "Datagram error handling failed"
-
-    async def test_06_resource_exhaustion(self) -> None:
-        assert await run_06_resource_exhaustion() is True, "Resource exhaustion handling failed"
-
     async def test_06_malformed_operations(self) -> None:
         assert await run_06_malformed_operations() is True, "Malformed API operations handling failed"
 
@@ -213,8 +190,8 @@ class TestE2eSuite:
     async def test_07_client_statistics(self) -> None:
         assert await run_07_client_statistics() is True, "Client statistics retrieval failed"
 
-    async def test_07_stream_management(self) -> None:
-        assert await run_07_stream_management() is True, "Stream management test failed"
+    async def test_07_stream_management_diagnostics(self) -> None:
+        assert await run_07_stream_management_diagnostics() is True, "Stream management diagnostics test failed"
 
     async def test_07_datagram_statistics(self) -> None:
         assert await run_07_datagram_statistics() is True, "Datagram statistics retrieval failed"
@@ -224,6 +201,9 @@ class TestE2eSuite:
 
     async def test_07_session_lifecycle_events(self) -> None:
         assert await run_07_session_lifecycle_events() is True, "Session lifecycle events tracking failed"
+
+    async def test_07_server_diagnostics(self) -> None:
+        assert await run_07_server_diagnostics() is True, "Server diagnostics retrieval failed"
 
     async def test_08_json_messaging(self) -> None:
         assert await run_08_json_messaging() is True, "Structured JSON messaging test failed"

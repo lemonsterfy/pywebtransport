@@ -39,10 +39,7 @@ class ServerCluster:
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and stop all servers."""
         await self.stop_all()
@@ -67,7 +64,7 @@ class ServerCluster:
         try:
             async with asyncio.TaskGroup() as tg:
                 for config in initial_configs:
-                    tasks.append(tg.create_task(self._create_and_start_server(config=config)))
+                    tasks.append(tg.create_task(coro=self._create_and_start_server(config=config)))
             started_servers = [task.result() for task in tasks]
         except* Exception as eg:
             logger.error("Failed to start server cluster: %s", eg.exceptions, exc_info=True)
@@ -77,7 +74,7 @@ class ServerCluster:
                 try:
                     async with asyncio.TaskGroup() as cleanup_tg:
                         for server in successful_servers:
-                            cleanup_tg.create_task(server.close())
+                            cleanup_tg.create_task(coro=server.close())
                 except* Exception as cleanup_eg:
                     logger.error("Errors during cluster startup cleanup: %s", cleanup_eg.exceptions, exc_info=True)
             raise eg.exceptions[0]
@@ -109,7 +106,7 @@ class ServerCluster:
             try:
                 async with asyncio.TaskGroup() as tg:
                     for server in servers_to_stop:
-                        tg.create_task(server.close())
+                        tg.create_task(coro=server.close())
             except* Exception as eg:
                 logger.error("Errors occurred while stopping server cluster: %s", eg.exceptions, exc_info=True)
                 raise eg
@@ -147,6 +144,33 @@ class ServerCluster:
             logger.error("Failed to add server to cluster: %s", e, exc_info=True)
             return None
 
+    async def remove_server(self, *, host: str, port: int) -> bool:
+        """Remove and stop a specific server from the cluster by its address."""
+        if self._lock is None:
+            raise ServerError(
+                message=(
+                    "ServerCluster has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
+            )
+
+        server_to_remove: WebTransportServer | None = None
+        async with self._lock:
+            for server in self._servers:
+                if server.local_address == (host, port):
+                    server_to_remove = server
+                    break
+
+            if server_to_remove:
+                self._servers.remove(server_to_remove)
+            else:
+                logger.warning("Server at %s:%s not found in cluster.", host, port)
+                return False
+
+        await server_to_remove.close()
+        logger.info("Removed server from cluster: %s:%s", host, port)
+        return True
+
     async def get_cluster_stats(self) -> dict[str, Any]:
         """Get deeply aggregated statistics for the entire cluster."""
         if self._lock is None:
@@ -167,7 +191,7 @@ class ServerCluster:
         try:
             async with asyncio.TaskGroup() as tg:
                 for s in servers_snapshot:
-                    tasks.append(tg.create_task(s.diagnostics()))
+                    tasks.append(tg.create_task(coro=s.diagnostics()))
         except* Exception as eg:
             logger.error("Failed to fetch stats from some servers: %s", eg.exceptions, exc_info=True)
             raise eg
@@ -212,33 +236,6 @@ class ServerCluster:
             )
         async with self._lock:
             return self._servers.copy()
-
-    async def remove_server(self, *, host: str, port: int) -> bool:
-        """Remove and stop a specific server from the cluster by its address."""
-        if self._lock is None:
-            raise ServerError(
-                message=(
-                    "ServerCluster has not been activated. It must be used as an "
-                    "asynchronous context manager (`async with ...`)."
-                )
-            )
-
-        server_to_remove: WebTransportServer | None = None
-        async with self._lock:
-            for server in self._servers:
-                if server.local_address == (host, port):
-                    server_to_remove = server
-                    break
-
-            if server_to_remove:
-                self._servers.remove(server_to_remove)
-            else:
-                logger.warning("Server at %s:%s not found in cluster.", host, port)
-                return False
-
-        await server_to_remove.close()
-        logger.info("Removed server from cluster: %s:%s", host, port)
-        return True
 
     async def _create_and_start_server(self, *, config: ServerConfig) -> WebTransportServer:
         """Create, activate, and start a single server instance."""

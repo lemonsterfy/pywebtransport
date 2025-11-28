@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import ssl
-from typing import Final, Protocol
+from typing import Any, Final, Protocol, cast
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
@@ -77,6 +77,7 @@ class TestRequestResponseLatency:
         response = benchmark(lambda: asyncio.run(run_full_cycle()))
         assert len(response) == expected_response_len
 
-        mean_time = benchmark.stats["mean"]
+        stats = cast(dict[str, Any], benchmark.stats)
+        mean_time = stats["mean"]
         benchmark.extra_info["latency_ms"] = mean_time * 1000
         benchmark.extra_info["payload_size_bytes"] = payload_size

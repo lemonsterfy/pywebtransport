@@ -1,6 +1,7 @@
 """E2E test for advanced WebTransport features."""
 
 import asyncio
+import json
 import logging
 import ssl
 import sys
@@ -45,24 +46,23 @@ async def test_session_statistics() -> bool:
                 await stream.write_all(data=f"Stats test {i + 1}".encode())
                 await stream.read_all()
 
-            datagram_transport = await session.create_datagram_transport()
             for i in range(5):
-                await datagram_transport.send(data=f"Datagram {i + 1}".encode())
+                await session.send_datagram(data=f"Datagram {i + 1}".encode())
 
             await asyncio.sleep(0.1)
-            final_stats = (await session.diagnostics()).stats.to_dict()
+            final_stats = await session.diagnostics()
             logger.info("Final session statistics retrieved.")
 
-            streams_ok = final_stats.get("streams_created", 0) >= 3
-            datagrams_ok = final_stats.get("datagrams_sent", 0) >= 5
+            streams_ok = final_stats.local_streams_bidi_opened >= 3
+            datagrams_ok = final_stats.datagrams_sent >= 5
 
             if streams_ok and datagrams_ok:
                 logger.info("SUCCESS: Session statistics appear correct.")
                 return True
             else:
                 logger.error("FAILURE: Session statistics mismatch.")
-                logger.error("   - Streams Created: %s (expected >= 3)", final_stats.get("streams_created", 0))
-                logger.error("   - Datagrams Sent: %s (expected >= 5)", final_stats.get("datagrams_sent", 0))
+                logger.error("   - Streams Created: %s (expected >= 3)", final_stats.local_streams_bidi_opened)
+                logger.error("   - Datagrams Sent: %s (expected >= 5)", final_stats.datagrams_sent)
                 return False
     except Exception as e:
         logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
@@ -83,19 +83,17 @@ async def test_connection_info() -> bool:
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            connection = session.connection
+            connection = session._connection
             if not connection:
                 logger.error("FAILURE: No connection object available on session.")
                 return False
 
             logger.info("Retrieving connection information...")
-            info = connection.diagnostics.stats
             logger.info("   - Connection ID: %s", connection.connection_id)
             logger.info("   - State: %s", connection.state.value)
             logger.info("   - Remote Address: %s", connection.remote_address)
-            logger.info("   - Uptime: %.2fs", info.uptime)
 
-            if connection.is_connected and info.remote_address:
+            if connection.is_connected and connection.remote_address:
                 logger.info("SUCCESS: Connection information retrieved successfully.")
                 return True
             else:
@@ -125,15 +123,13 @@ async def test_client_statistics() -> bool:
                 await session.close()
                 await asyncio.sleep(0.2)
 
-            final_stats = (await client.diagnostics()).stats.to_dict()
-            connections = final_stats.get("connections", {})
-            performance = final_stats.get("performance", {})
+            final_stats = (await client.diagnostics()).stats
             logger.info("Final client statistics:")
-            logger.info("   - Connections Attempted: %s", connections.get("attempted", 0))
-            logger.info("   - Connections Successful: %s", connections.get("successful", 0))
-            logger.info("   - Avg Connect Time: %.3fs", performance.get("avg_connect_time", 0))
+            logger.info("   - Connections Attempted: %s", final_stats.connections_attempted)
+            logger.info("   - Connections Successful: %s", final_stats.connections_successful)
+            logger.info("   - Avg Connect Time: %.3fs", final_stats.avg_connect_time)
 
-            if connections.get("attempted", 0) >= 3 and connections.get("successful", 0) >= 3:
+            if final_stats.connections_attempted >= 3 and final_stats.connections_successful >= 3:
                 logger.info("SUCCESS: Client statistics appear correct.")
                 return True
             else:
@@ -144,9 +140,9 @@ async def test_client_statistics() -> bool:
         return False
 
 
-async def test_stream_management() -> bool:
-    """Test advanced stream management features."""
-    logger.info("--- Test 07D: Stream Management ---")
+async def test_stream_management_diagnostics() -> bool:
+    """Test advanced stream management features via diagnostics."""
+    logger.info("--- Test 07D: Stream Management (Diagnostics) ---")
     config = ClientConfig(
         verify_mode=ssl.CERT_NONE,
         connect_timeout=10.0,
@@ -159,25 +155,19 @@ async def test_stream_management() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             logger.info("Connected, session: %s", session.session_id)
+            connection = session._connection
 
             streams = [await session.create_bidirectional_stream() for _ in range(5)]
             logger.info("Created %d streams.", len(streams))
 
-            if session.stream_manager:
-                stream_manager = session.stream_manager
-                manager_stats = await stream_manager.get_stats()
-                logger.info("Stream manager statistics:")
-                logger.info("   - Total created: %s", manager_stats.get("total_created", 0))
-                logger.info("   - Current count: %s", manager_stats.get("current_count", 0))
+            conn_diag = await connection.diagnostics()
+            logger.info("Connection diagnostics:")
+            logger.info("   - Stream count: %s", conn_diag.stream_count)
 
-                all_streams = await stream_manager.get_all_resources()
-                if len(all_streams) == 5:
-                    logger.info("SUCCESS: Stream management working correctly.")
-                else:
-                    logger.error("FAILURE: Stream manager count is incorrect.")
-                    return False
+            if conn_diag.stream_count == 5:
+                logger.info("SUCCESS: Connection diagnostics correctly report stream count.")
             else:
-                logger.error("FAILURE: session.stream_manager is not available.")
+                logger.error("FAILURE: Stream count is incorrect in connection diagnostics.")
                 return False
 
             for stream in streams:
@@ -204,20 +194,21 @@ async def test_datagram_statistics() -> bool:
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            datagram_transport = await session.create_datagram_transport()
-
             logger.info("Sending datagrams to generate statistics...")
+            total_bytes_sent = 0
             for i in range(5):
-                await datagram_transport.send(data=f"Datagram stats test {i}".encode())
+                data = f"Datagram stats test {i}".encode()
+                await session.send_datagram(data=data)
+                total_bytes_sent += len(data)
 
             await asyncio.sleep(0.1)
-            final_stats = datagram_transport.diagnostics.stats.to_dict()
+            final_stats = await session.diagnostics()
 
-            logger.info("Final datagram statistics:")
-            logger.info("   - Datagrams Sent: %s", final_stats.get("datagrams_sent", 0))
-            logger.info("   - Bytes Sent: %s", final_stats.get("bytes_sent", 0))
+            logger.info("Final session datagram statistics:")
+            logger.info("   - Datagrams Sent: %s", final_stats.datagrams_sent)
+            logger.info("   - Bytes Sent: %s", final_stats.datagram_bytes_sent)
 
-            if final_stats.get("datagrams_sent", 0) >= 5:
+            if final_stats.datagrams_sent >= 5 and final_stats.datagram_bytes_sent >= total_bytes_sent:
                 logger.info("SUCCESS: Datagram statistics appear correct.")
                 return True
             else:
@@ -250,8 +241,9 @@ async def test_performance_monitoring() -> bool:
                     stream = await session.create_bidirectional_stream()
                     start_time = time.time()
                     await stream.write_all(data=b"x" * size)
-                    await stream.read(size=size + 10)
+                    await stream.read(max_bytes=size + 10)
                     latencies.append(time.time() - start_time)
+                    await stream.close()
 
                 avg_rtt_ms = (sum(latencies) / len(latencies)) * 1000
                 logger.info("   - Avg RTT for %s bytes: %.1fms", size, avg_rtt_ms)
@@ -294,6 +286,43 @@ async def test_session_lifecycle_events() -> bool:
         return False
 
 
+async def test_server_diagnostics() -> bool:
+    """Test retrieving the server's diagnostics API."""
+    logger.info("--- Test 07H: Server-Side Diagnostics ---")
+    config = ClientConfig(
+        verify_mode=ssl.CERT_NONE,
+        connect_timeout=10.0,
+    )
+    try:
+        async with WebTransportClient(config=config) as client:
+            session = await client.connect(url=SERVER_URL + "diagnostics")
+            logger.info("Connected to /diagnostics endpoint...")
+            stream = await session.create_bidirectional_stream()
+            response_data = await stream.read_all()
+            if not response_data:
+                logger.error("FAILURE: Received no data from /diagnostics endpoint.")
+                return False
+
+            stats = json.loads(response_data)
+            logger.info("Received server diagnostics successfully.")
+
+            if (
+                "stats" in stats
+                and "connection_states" in stats
+                and "session_states" in stats
+                and stats["is_serving"] is True
+            ):
+                logger.info("SUCCESS: Server diagnostics structure is valid.")
+                return True
+            else:
+                logger.error("FAILURE: Server diagnostics data is incomplete or invalid.")
+                logger.error("Received: %s", stats)
+                return False
+    except Exception as e:
+        logger.error("FAILURE: An unexpected error occurred: %s", e, exc_info=True)
+        return False
+
+
 async def main() -> int:
     """Run the main entry point for the advanced features test suite."""
     logger.info("--- Starting Test 07: Advanced Features ---")
@@ -302,10 +331,11 @@ async def main() -> int:
         ("Session Statistics", test_session_statistics),
         ("Connection Information", test_connection_info),
         ("Client-Wide Statistics", test_client_statistics),
-        ("Stream Management", test_stream_management),
+        ("Stream Management (Diagnostics)", test_stream_management_diagnostics),
         ("Datagram Statistics", test_datagram_statistics),
         ("Performance Monitoring", test_performance_monitoring),
         ("Session Lifecycle Events", test_session_lifecycle_events),
+        ("Server-Side Diagnostics", test_server_diagnostics),
     ]
     passed = 0
     total = len(tests)

@@ -35,13 +35,13 @@ class ClientFleet:
         try:
             async with asyncio.TaskGroup() as tg:
                 for client in self._clients:
-                    tg.create_task(client.__aenter__())
+                    tg.create_task(coro=client.__aenter__())
         except* Exception as eg:
             logger.error("Failed to activate clients in fleet: %s", eg.exceptions, exc_info=eg)
             try:
                 async with asyncio.TaskGroup() as cleanup_tg:
                     for client in self._clients:
-                        cleanup_tg.create_task(client.close())
+                        cleanup_tg.create_task(coro=client.close())
             except* Exception as cleanup_eg:
                 logger.error(
                     "Errors during client fleet startup cleanup: %s", cleanup_eg.exceptions, exc_info=cleanup_eg
@@ -52,10 +52,7 @@ class ClientFleet:
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and close all clients in the fleet."""
         await self.close_all()
@@ -76,7 +73,7 @@ class ClientFleet:
         try:
             async with asyncio.TaskGroup() as tg:
                 for client in self._clients:
-                    tg.create_task(client.close())
+                    tg.create_task(coro=client.close())
         except* Exception as eg:
             logger.error("Errors occurred while closing client fleet: %s", eg.exceptions, exc_info=eg)
 
@@ -99,7 +96,7 @@ class ClientFleet:
         try:
             async with asyncio.TaskGroup() as tg:
                 for client in self._clients:
-                    tasks.append(tg.create_task(client.connect(url=url)))
+                    tasks.append(tg.create_task(coro=client.connect(url=url)))
         except* Exception as eg:
             logger.warning("Some clients in the fleet failed to connect: %s", eg.exceptions)
 

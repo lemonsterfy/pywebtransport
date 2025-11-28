@@ -1,7 +1,8 @@
 """Unit tests for the pywebtransport.monitor.client module."""
 
-from typing import cast
-from unittest.mock import AsyncMock, PropertyMock
+from dataclasses import asdict
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from pytest_mock import MockerFixture
@@ -24,13 +25,16 @@ class TestClientMonitor:
     def monitor(self, mock_client: WebTransportClient) -> ClientMonitor:
         return ClientMonitor(client=mock_client)
 
-    def test_check_for_alerts_malformed_metrics(self, monitor: ClientMonitor) -> None:
-        monitor._metrics_history.append({"stats": "not a dict"})
+    def test_check_for_alerts_empty_stats(self, monitor: ClientMonitor) -> None:
+        monitor._metrics_history.append({"stats": {}})
+
         monitor._check_for_alerts()
+
         assert not monitor._alerts
 
     def test_check_for_alerts_no_metrics(self, monitor: ClientMonitor) -> None:
         monitor._check_for_alerts()
+
         assert not monitor._alerts
 
     @pytest.mark.asyncio
@@ -41,27 +45,33 @@ class TestClientMonitor:
         logger_mock = mocker.patch("pywebtransport.monitor.client.logger.error")
 
         await monitor._collect_metrics()
+
         assert not monitor._metrics_history
         logger_mock.assert_called_once_with("Metrics collection failed: %s", mocker.ANY, exc_info=True)
 
     @pytest.mark.asyncio
     async def test_collect_metrics_success(self, monitor: ClientMonitor, mock_client: WebTransportClient) -> None:
         await monitor._collect_metrics()
+
         assert len(monitor._metrics_history) == 1
         metrics = monitor._metrics_history[0]
         assert "timestamp" in metrics
+        assert "stats" in metrics
         cast(AsyncMock, mock_client.diagnostics).assert_awaited_once()
 
     def test_create_alert_deduplication(self, monitor: ClientMonitor) -> None:
         monitor._create_alert(alert_type="test", message="This is a test")
         monitor._create_alert(alert_type="test", message="This is a test")
+
         assert len(monitor._alerts) == 1
 
         monitor._create_alert(alert_type="test", message="This is a new test")
+
         assert len(monitor._alerts) == 2
 
     def test_get_metrics_summary(self, monitor: ClientMonitor) -> None:
         summary = monitor.get_metrics_summary()
+
         assert summary["latest_metrics"] == {}
         assert summary["recent_alerts"] == []
         assert not summary["is_monitoring"]
@@ -78,19 +88,14 @@ class TestClientMonitor:
             ClientMonitor(client=mocker.MagicMock())
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "attempted, successful",
-        [
-            (5, 2),
-            (15, 14),
-        ],
-    )
+    @pytest.mark.parametrize("attempted, successful", [(5, 2), (15, 14)])
     async def test_low_success_rate_alert_not_triggered(
         self,
         monitor: ClientMonitor,
         mock_client: WebTransportClient,
         attempted: int,
         successful: int,
+        mocker: MockerFixture,
     ) -> None:
         stats = ClientStats(created_at=0)
         stats.connections_attempted = attempted
@@ -98,8 +103,18 @@ class TestClientMonitor:
         diagnostics = ClientDiagnostics(stats=stats, connection_states={})
         cast(AsyncMock, mock_client.diagnostics).return_value = diagnostics
 
+        def mock_asdict(obj: Any) -> dict[str, Any]:
+            d = asdict(obj)
+            if isinstance(obj, ClientDiagnostics):
+                d["stats"]["success_rate"] = obj.stats.success_rate
+                d["stats"]["avg_connect_time"] = obj.stats.avg_connect_time
+            return d
+
+        mocker.patch("pywebtransport.monitor.client.asdict", side_effect=mock_asdict)
+
         await monitor._collect_metrics()
         monitor._check_for_alerts()
+
         assert not monitor._alerts
 
     @pytest.mark.asyncio
@@ -113,8 +128,18 @@ class TestClientMonitor:
         diagnostics = ClientDiagnostics(stats=stats, connection_states={})
         cast(AsyncMock, mock_client.diagnostics).return_value = diagnostics
 
+        def mock_asdict(obj: Any) -> dict[str, Any]:
+            d = asdict(obj)
+            if isinstance(obj, ClientDiagnostics):
+                d["stats"]["success_rate"] = obj.stats.success_rate
+                d["stats"]["avg_connect_time"] = obj.stats.avg_connect_time
+            return d
+
+        mocker.patch("pywebtransport.monitor.client.asdict", side_effect=mock_asdict)
+
         await monitor._collect_metrics()
         monitor._check_for_alerts()
+
         assert len(monitor._alerts) == 1
         assert monitor._alerts[0]["type"] == "low_success_rate"
         logger_mock.assert_called_once()
@@ -128,10 +153,19 @@ class TestClientMonitor:
         stats.connections_successful = 2
         diagnostics = ClientDiagnostics(stats=stats, connection_states={})
         cast(AsyncMock, mock_client.diagnostics).return_value = diagnostics
-        mocker.patch.object(ClientStats, "avg_connect_time", new_callable=PropertyMock, return_value=4.9)
+
+        def mock_asdict(obj: Any) -> dict[str, Any]:
+            d = asdict(obj)
+            if isinstance(obj, ClientDiagnostics):
+                d["stats"]["success_rate"] = obj.stats.success_rate
+                d["stats"]["avg_connect_time"] = obj.stats.avg_connect_time
+            return d
+
+        mocker.patch("pywebtransport.monitor.client.asdict", side_effect=mock_asdict)
 
         await monitor._collect_metrics()
         monitor._check_for_alerts()
+
         assert not monitor._alerts
 
     @pytest.mark.asyncio
@@ -143,9 +177,18 @@ class TestClientMonitor:
         stats.connections_successful = 2
         diagnostics = ClientDiagnostics(stats=stats, connection_states={})
         cast(AsyncMock, mock_client.diagnostics).return_value = diagnostics
-        mocker.patch.object(ClientStats, "avg_connect_time", new_callable=PropertyMock, return_value=6.5)
+
+        def mock_asdict(obj: Any) -> dict[str, Any]:
+            d = asdict(obj)
+            if isinstance(obj, ClientDiagnostics):
+                d["stats"]["success_rate"] = obj.stats.success_rate
+                d["stats"]["avg_connect_time"] = obj.stats.avg_connect_time
+            return d
+
+        mocker.patch("pywebtransport.monitor.client.asdict", side_effect=mock_asdict)
 
         await monitor._collect_metrics()
         monitor._check_for_alerts()
+
         assert len(monitor._alerts) == 1
         assert monitor._alerts[0]["type"] == "slow_connections"

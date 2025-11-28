@@ -22,12 +22,7 @@ class _BaseMonitor(ABC, Generic[T]):
     """Implement asynchronous monitoring component base class."""
 
     def __init__(
-        self,
-        target: T,
-        *,
-        monitoring_interval: float = 30.0,
-        metrics_maxlen: int = 120,
-        alerts_maxlen: int = 100,
+        self, target: T, *, monitoring_interval: float = 30.0, metrics_maxlen: int = 120, alerts_maxlen: int = 100
     ) -> None:
         """Initialize the base monitor."""
         self._target = target
@@ -47,17 +42,14 @@ class _BaseMonitor(ABC, Generic[T]):
             return self
 
         try:
-            self._monitor_task = asyncio.create_task(self._monitor_loop())
+            self._monitor_task = asyncio.create_task(coro=self._monitor_loop())
             logger.info("%s monitoring started.", self.__class__.__name__)
         except RuntimeError:
             logger.error("Failed to start %s: No running event loop.", self.__class__.__name__, exc_info=True)
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and stop the monitoring task."""
         if self._monitor_task:
@@ -95,7 +87,7 @@ class _BaseMonitor(ABC, Generic[T]):
     async def _monitor_loop(self) -> None:
         """Run the main loop for periodically collecting metrics and checking health."""
         try:
-            await asyncio.sleep(0)
+            await asyncio.sleep(delay=0)
             while True:
                 collection_result = self._collect_metrics()
                 if asyncio.iscoroutine(collection_result):
@@ -105,7 +97,7 @@ class _BaseMonitor(ABC, Generic[T]):
                 if asyncio.iscoroutine(alert_check_result):
                     await alert_check_result
 
-                await asyncio.sleep(self._interval)
+                await asyncio.sleep(delay=self._interval)
         except asyncio.CancelledError:
             logger.info("%s loop has been cancelled.", self.__class__.__name__)
         except Exception as e:

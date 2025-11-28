@@ -17,15 +17,13 @@ An async-native WebTransport stack for Python.
 - **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
 - **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, monitoring, pooling, and resource management.
 - **Event-Driven Architecture**: A powerful `EventEmitter` system for decoupled, asynchronous communication between components.
-- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
+- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E, performance, benchmark) to ensure reliability and maintainability.
 
 ## Installation
 
 ```bash
 pip install pywebtransport
 ```
-
-For more detailed instructions, including virtual environments and platform-specific notes, see the [Installation Guide](docs/installation.md).
 
 ## Quick Start
 
@@ -35,14 +33,8 @@ For more detailed instructions, including virtual environments and platform-spec
 # server.py
 import asyncio
 
-from pywebtransport import (
-    ConnectionError,
-    ServerApp,
-    ServerConfig,
-    SessionError,
-    WebTransportSession,
-    WebTransportStream,
-)
+from pywebtransport import Event, ServerApp, ServerConfig, WebTransportSession, WebTransportStream
+from pywebtransport.types import EventType
 from pywebtransport.utils import generate_self_signed_cert
 
 generate_self_signed_cert(hostname="localhost")
@@ -57,35 +49,34 @@ app = ServerApp(
 )
 
 
-async def handle_datagrams(session: WebTransportSession) -> None:
-    try:
-        datagram_transport = await session.create_datagram_transport()
-        while True:
-            data = await datagram_transport.receive()
-            await datagram_transport.send(data=b"ECHO: " + data)
-    except (ConnectionError, SessionError, asyncio.CancelledError):
-        pass
-
-
-async def handle_streams(session: WebTransportSession) -> None:
-    try:
-        async for stream in session.incoming_streams():
-            if isinstance(stream, WebTransportStream):
-                data = await stream.read_all()
-                await stream.write_all(data=b"ECHO: " + data)
-    except (ConnectionError, SessionError, asyncio.CancelledError):
-        pass
-
-
 @app.route(path="/")
 async def echo_handler(session: WebTransportSession) -> None:
-    datagram_task = asyncio.create_task(handle_datagrams(session))
-    stream_task = asyncio.create_task(handle_streams(session))
+    async def on_datagram(event: Event) -> None:
+        if isinstance(event.data, dict) and isinstance(event.data.get("data"), bytes):
+            await session.send_datagram(data=b"ECHO: " + event.data["data"])
+
+    async def on_stream(event: Event) -> None:
+        if isinstance(event.data, dict):
+            stream = event.data.get("stream")
+            if isinstance(stream, WebTransportStream):
+                asyncio.create_task(handle_stream(stream))
+
+    session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=on_datagram)
+    session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
+
     try:
-        await session.wait_closed()
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     finally:
-        datagram_task.cancel()
-        stream_task.cancel()
+        session.events.off(event_type=EventType.DATAGRAM_RECEIVED, handler=on_datagram)
+        session.events.off(event_type=EventType.STREAM_OPENED, handler=on_stream)
+
+
+async def handle_stream(stream: WebTransportStream) -> None:
+    try:
+        data = await stream.read_all()
+        await stream.write_all(data=b"ECHO: " + data)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
@@ -100,6 +91,7 @@ import asyncio
 import ssl
 
 from pywebtransport import ClientConfig, WebTransportClient
+from pywebtransport.types import EventType
 
 
 async def main() -> None:
@@ -112,17 +104,17 @@ async def main() -> None:
     async with WebTransportClient(config=config) as client:
         session = await client.connect(url="https://127.0.0.1:4433/")
 
-        print("Connection established. Testing datagrams...")
-        datagram_transport = await session.create_datagram_transport()
-        await datagram_transport.send(data=b"Hello, Datagram!")
-        response = await datagram_transport.receive()
-        print(f"Datagram echo: {response!r}\n")
+        await session.send_datagram(data=b"Hello, Datagram!")
 
-        print("Testing streams...")
+        event = await session.events.wait_for(event_type=EventType.DATAGRAM_RECEIVED, timeout=5.0)
+        if isinstance(event.data, dict):
+            print(f"Datagram: {event.data.get('data')!r}")
+
         stream = await session.create_bidirectional_stream()
         await stream.write_all(data=b"Hello, Stream!")
+
         response = await stream.read_all()
-        print(f"Stream echo: {response!r}")
+        print(f"Stream: {response!r}")
 
         await session.close()
 
@@ -136,45 +128,31 @@ if __name__ == "__main__":
 
 ## Documentation
 
-- **[Installation Guide](docs/installation.md)** - Learn how to install the library.
-- **[Quick Start](docs/quickstart.md)** - Discover how to get started with basic client and server setup.
-- **[API Reference](docs/api-reference/)** - Explore the complete API documentation.
+- **[API Reference](docs/api-reference/index.md)** - Explore the complete API documentation.
 
 ## Requirements
 
-- Python 3.11+
-- asyncio support
+- Python 3.12+
 - TLS 1.3
-
-**Dependencies:**
-
-- aioquic >= 1.3.0
-- cryptography >= 45.0.4
 
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on the development setup, testing, and pull request process.
 
-**Development Setup:**
+## Sponsors
 
-```bash
-git clone https://github.com/lemonsterfy/pywebtransport.git
-cd pywebtransport
-pip install -r dev-requirements.txt
-pip install -e .
-tox
-```
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+<p>
+  <a href="https://www.fastly.com/" target="_blank" rel="noopener noreferrer">
+    <img
+      src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Fastly_logo.svg"
+      alt="Fastly"
+      width="100"
+    />
+  </a>
+</p>
 
 ## Acknowledgments
 
-- <a href="https://www.fastly.com/" target="_blank" rel="noopener noreferrer">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Fastly_logo.svg" alt="Fastly" width="80">
-  </a>
-  for providing critical infrastructure and services.
 - [aioquic](https://github.com/aiortc/aioquic) for the underlying QUIC protocol implementation.
 - [WebTransport Working Group](https://datatracker.ietf.org/wg/webtrans/) for defining and standardizing the WebTransport protocol.
 
@@ -183,3 +161,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: [GitHub Issues](https://github.com/lemonsterfy/pywebtransport/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/lemonsterfy/pywebtransport/discussions)
 - **Email**: lemonsterfy@gmail.com
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

@@ -6,9 +6,7 @@ This document provides a reference for the `pywebtransport.server` subpackage, w
 
 ## ServerApp Class
 
-The primary high-level framework for building WebTransport applications.
-
-**Note on Usage**: `ServerApp` must be used as an asynchronous context manager (`async with ...`).
+The primary high-level framework for building WebTransport applications. This class implements the asynchronous context manager protocol (`async with`) to manage server lifecycle events.
 
 ### Constructor
 
@@ -50,15 +48,13 @@ The core server class that manages the QUIC transport and connection lifecycle.
 ### Instance Methods
 
 - **`async def close(self) -> None`**: Gracefully shuts down the server.
-- **`async def diagnostics(self) -> ServerDiagnostics`**: Get a snapshot of the server's diagnostics and statistics.
+- **`async def diagnostics(self) -> ServerDiagnostics`**: Asynchronously retrieves a snapshot of the server's diagnostics and statistics.
 - **`async def listen(self, *, host: str | None = None, port: int | None = None) -> None`**: Starts the QUIC server and begins listening for connections.
 - **`async def serve_forever(self) -> None`**: Runs the server's event loop until it's closed.
 
 ## ServerCluster Class
 
-Manages the lifecycle of multiple `WebTransportServer` instances.
-
-**Note on Usage**: `ServerCluster` must be used as an asynchronous context manager (`async with ...`).
+Manages the lifecycle of multiple `WebTransportServer` instances. This class implements the asynchronous context manager protocol (`async with`) to start and stop all servers in the cluster.
 
 ### Constructor
 
@@ -119,11 +115,9 @@ Manages the execution chain of middleware for incoming sessions.
 - **`def create_logging_middleware() -> MiddlewareProtocol`**: Creates a simple middleware that logs information about each incoming session request.
 - **`def create_rate_limit_middleware(*, max_requests: int = 100, window_seconds: int = 60, cleanup_interval: int = 300) -> RateLimiter`**: Creates a stateful `RateLimiter` instance that rate-limits sessions.
 
-## Supporting Data Classes
+## ServerDiagnostics Class
 
-### ServerDiagnostics Class
-
-Provide a structured, immutable snapshot of a server's health.
+A structured, immutable snapshot of a server's health.
 
 ### Attributes
 
@@ -139,17 +133,22 @@ Provide a structured, immutable snapshot of a server's health.
 
 - `issues` (`list[str]`): Get a list of potential issues based on the current diagnostics.
 
-### ServerStats Class
+## ServerStats Class
 
 Represent statistics for the server.
 
 ### Attributes
 
-- `connections_accepted` (`int`): `Default: 0`.
-- `connections_rejected` (`int`): `Default: 0`.
-- `connection_errors` (`int`): `Default: 0`.
-- `protocol_errors` (`int`): `Default: 0`.
-- `uptime` (`float`): `Default: 0.0`.
+- `start_time` (`float | None`): Timestamp when the server started serving. `Default: None`.
+- `connections_accepted` (`int`): Total connections accepted. `Default: 0`.
+- `connections_rejected` (`int`): Total connections rejected. `Default: 0`.
+- `connection_errors` (`int`): Total connection initialization errors. `Default: 0`.
+- `protocol_errors` (`int`): Total protocol-level errors. `Default: 0`.
+
+### Properties
+
+- `success_rate` (`float`): The ratio of accepted connections to total attempts.
+- `total_connections_attempted` (`int`): Sum of accepted and rejected connections.
 
 ### Instance Methods
 

@@ -18,15 +18,13 @@ __all__: list[str] = [
     "DEFAULT_ALPN_PROTOCOLS",
     "DEFAULT_AUTO_RECONNECT",
     "DEFAULT_BIND_HOST",
-    "DEFAULT_BUFFER_SIZE",
     "DEFAULT_CERTFILE",
     "DEFAULT_CLIENT_MAX_CONNECTIONS",
+    "DEFAULT_CLIENT_MAX_SESSIONS",
     "DEFAULT_CLIENT_VERIFY_MODE",
     "DEFAULT_CLOSE_TIMEOUT",
-    "DEFAULT_CONNECT_TIMEOUT",
     "DEFAULT_CONGESTION_CONTROL_ALGORITHM",
-    "DEFAULT_CONNECTION_CLEANUP_INTERVAL",
-    "DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL",
+    "DEFAULT_CONNECT_TIMEOUT",
     "DEFAULT_CONNECTION_IDLE_TIMEOUT",
     "DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT",
     "DEFAULT_DEBUG",
@@ -40,32 +38,27 @@ __all__: list[str] = [
     "DEFAULT_KEYFILE",
     "DEFAULT_LOG_LEVEL",
     "DEFAULT_MAX_DATAGRAM_SIZE",
-    "DEFAULT_MAX_INCOMING_STREAMS",
     "DEFAULT_MAX_MESSAGE_SIZE",
     "DEFAULT_MAX_PENDING_EVENTS_PER_SESSION",
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_MAX_RETRY_DELAY",
-    "DEFAULT_MAX_SESSIONS",
-    "DEFAULT_MAX_STREAMS",
-    "DEFAULT_MAX_STREAMS_PER_CONNECTION",
+    "DEFAULT_MAX_STREAM_READ_BUFFER",
+    "DEFAULT_MAX_STREAM_WRITE_BUFFER",
     "DEFAULT_MAX_TOTAL_PENDING_EVENTS",
     "DEFAULT_PENDING_EVENT_TTL",
-    "DEFAULT_PROXY_CONNECT_TIMEOUT",
     "DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE",
     "DEFAULT_READ_TIMEOUT",
+    "DEFAULT_RESOURCE_CLEANUP_INTERVAL",
     "DEFAULT_RETRY_BACKOFF",
     "DEFAULT_RETRY_DELAY",
     "DEFAULT_RPC_CONCURRENCY_LIMIT",
     "DEFAULT_SECURE_PORT",
     "DEFAULT_SERVER_MAX_CONNECTIONS",
+    "DEFAULT_SERVER_MAX_SESSIONS",
     "DEFAULT_SERVER_VERIFY_MODE",
-    "DEFAULT_SESSION_CLEANUP_INTERVAL",
-    "DEFAULT_STREAM_CLEANUP_INTERVAL",
     "DEFAULT_STREAM_CREATION_TIMEOUT",
     "DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI",
     "DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI",
-    "DEFAULT_STREAM_LINE_LIMIT",
-    "DEFAULT_WEBTRANSPORT_PATH",
     "DEFAULT_WRITE_TIMEOUT",
     "DRAIN_WEBTRANSPORT_SESSION_TYPE",
     "ErrorCodes",
@@ -82,8 +75,9 @@ __all__: list[str] = [
     "H3_STREAM_TYPE_QPACK_DECODER",
     "H3_STREAM_TYPE_QPACK_ENCODER",
     "H3_STREAM_TYPE_WEBTRANSPORT",
-    "MAX_BUFFER_SIZE",
+    "MAX_CLOSE_REASON_BYTES",
     "MAX_DATAGRAM_SIZE",
+    "MAX_PROTOCOL_STREAMS_LIMIT",
     "MAX_STREAM_ID",
     "SETTINGS_ENABLE_CONNECT_PROTOCOL",
     "SETTINGS_H3_DATAGRAM",
@@ -92,7 +86,6 @@ __all__: list[str] = [
     "SETTINGS_WT_INITIAL_MAX_DATA",
     "SETTINGS_WT_INITIAL_MAX_STREAMS_BIDI",
     "SETTINGS_WT_INITIAL_MAX_STREAMS_UNI",
-    "SETTINGS_WT_MAX_SESSIONS",
     "SUPPORTED_CONGESTION_CONTROL_ALGORITHMS",
     "ServerConfigDefaults",
     "UNIDIRECTIONAL_STREAM",
@@ -100,8 +93,10 @@ __all__: list[str] = [
     "WEBTRANSPORT_SCHEME",
     "WT_DATA_BLOCKED_TYPE",
     "WT_MAX_DATA_TYPE",
+    "WT_MAX_STREAM_DATA_TYPE",
     "WT_MAX_STREAMS_BIDI_TYPE",
     "WT_MAX_STREAMS_UNI_TYPE",
+    "WT_STREAM_DATA_BLOCKED_TYPE",
     "WT_STREAMS_BLOCKED_BIDI_TYPE",
     "WT_STREAMS_BLOCKED_UNI_TYPE",
     "get_default_client_config",
@@ -119,8 +114,6 @@ class ClientConfigDefaults(TypedDict):
     close_timeout: float
     congestion_control_algorithm: str
     connect_timeout: float
-    connection_cleanup_interval: float
-    connection_idle_check_interval: float
     connection_idle_timeout: float
     connection_keepalive_timeout: float
     debug: bool
@@ -135,21 +128,21 @@ class ClientConfigDefaults(TypedDict):
     log_level: str
     max_connections: int
     max_datagram_size: int
-    max_incoming_streams: int
+    max_message_size: int
     max_pending_events_per_session: int
     max_retries: int
     max_retry_delay: float
-    max_stream_buffer_size: int
-    max_streams: int
+    max_sessions: int
+    max_stream_read_buffer: int
+    max_stream_write_buffer: int
     max_total_pending_events: int
     pending_event_ttl: float
-    proxy: Any
+    pubsub_subscription_queue_size: int
     read_timeout: float | None
+    resource_cleanup_interval: float
     retry_backoff: float
     retry_delay: float
     rpc_concurrency_limit: int
-    stream_buffer_size: int
-    stream_cleanup_interval: float
     stream_creation_timeout: float
     stream_flow_control_increment_bidi: int
     stream_flow_control_increment_uni: int
@@ -168,8 +161,6 @@ class ServerConfigDefaults(TypedDict):
     ca_certs: str | None
     certfile: str
     congestion_control_algorithm: str
-    connection_cleanup_interval: float
-    connection_idle_check_interval: float
     connection_idle_timeout: float
     connection_keepalive_timeout: float
     debug: bool
@@ -183,19 +174,19 @@ class ServerConfigDefaults(TypedDict):
     log_level: str
     max_connections: int
     max_datagram_size: int
-    max_incoming_streams: int
+    max_message_size: int
     max_pending_events_per_session: int
     max_sessions: int
-    max_stream_buffer_size: int
-    max_streams_per_connection: int
+    max_stream_read_buffer: int
+    max_stream_write_buffer: int
     max_total_pending_events: int
     middleware: list[Any]
     pending_event_ttl: float
+    pubsub_subscription_queue_size: int
     read_timeout: float | None
+    resource_cleanup_interval: float
     rpc_concurrency_limit: int
-    session_cleanup_interval: float
-    stream_buffer_size: int
-    stream_cleanup_interval: float
+    stream_creation_timeout: float
     stream_flow_control_increment_bidi: int
     stream_flow_control_increment_uni: int
     verify_mode: ssl.VerifyMode
@@ -222,7 +213,9 @@ H3_STREAM_TYPE_PUSH: int = 0x1
 H3_STREAM_TYPE_QPACK_ENCODER: int = 0x2
 H3_STREAM_TYPE_QPACK_DECODER: int = 0x3
 H3_STREAM_TYPE_WEBTRANSPORT: int = 0x54
+MAX_CLOSE_REASON_BYTES: int = 1024
 MAX_DATAGRAM_SIZE: int = 65535
+MAX_PROTOCOL_STREAMS_LIMIT: int = 2**60
 MAX_STREAM_ID: int = 2**62 - 1
 SETTINGS_ENABLE_CONNECT_PROTOCOL: int = 0x8
 SETTINGS_H3_DATAGRAM: int = 0x33
@@ -231,28 +224,27 @@ SETTINGS_QPACK_MAX_TABLE_CAPACITY: int = 0x1
 SETTINGS_WT_INITIAL_MAX_DATA: int = 0x2B61
 SETTINGS_WT_INITIAL_MAX_STREAMS_BIDI: int = 0x2B65
 SETTINGS_WT_INITIAL_MAX_STREAMS_UNI: int = 0x2B64
-SETTINGS_WT_MAX_SESSIONS: int = 0x14E9CD29
 UNIDIRECTIONAL_STREAM: int = 0x2
 WT_DATA_BLOCKED_TYPE: int = 0x190B4D41
 WT_MAX_DATA_TYPE: int = 0x190B4D3D
+WT_MAX_STREAM_DATA_TYPE: int = 0x190B4D3E
 WT_MAX_STREAMS_BIDI_TYPE: int = 0x190B4D3F
 WT_MAX_STREAMS_UNI_TYPE: int = 0x190B4D40
+WT_STREAM_DATA_BLOCKED_TYPE: int = 0x190B4D42
 WT_STREAMS_BLOCKED_BIDI_TYPE: int = 0x190B4D43
 WT_STREAMS_BLOCKED_UNI_TYPE: int = 0x190B4D44
 
 DEFAULT_ACCESS_LOG: bool = True
-DEFAULT_ALPN_PROTOCOLS: tuple[str] = (ALPN_H3,)
+DEFAULT_ALPN_PROTOCOLS: tuple[str, ...] = (ALPN_H3,)
 DEFAULT_AUTO_RECONNECT: bool = False
 DEFAULT_BIND_HOST: str = "localhost"
-DEFAULT_BUFFER_SIZE: int = 65536
 DEFAULT_CERTFILE: str = ""
 DEFAULT_CLIENT_MAX_CONNECTIONS: int = 100
+DEFAULT_CLIENT_MAX_SESSIONS: int = 100
 DEFAULT_CLIENT_VERIFY_MODE: ssl.VerifyMode = ssl.CERT_REQUIRED
 DEFAULT_CLOSE_TIMEOUT: float = 5.0
 DEFAULT_CONNECT_TIMEOUT: float = 30.0
 DEFAULT_CONGESTION_CONTROL_ALGORITHM: str = "cubic"
-DEFAULT_CONNECTION_CLEANUP_INTERVAL: float = 30.0
-DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL: float = 5.0
 DEFAULT_CONNECTION_IDLE_TIMEOUT: float = 60.0
 DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT: float = 30.0
 DEFAULT_DEBUG: bool = False
@@ -267,33 +259,27 @@ DEFAULT_KEYFILE: str = ""
 DEFAULT_LOG_LEVEL: str = "INFO"
 DEFAULT_MAX_DATAGRAM_SIZE: int = 65535
 DEFAULT_MAX_MESSAGE_SIZE: int = 1024 * 1024
-DEFAULT_MAX_INCOMING_STREAMS: int = 100
 DEFAULT_MAX_PENDING_EVENTS_PER_SESSION: int = 16
 DEFAULT_MAX_RETRIES: int = 3
 DEFAULT_MAX_RETRY_DELAY: float = 30.0
-DEFAULT_MAX_SESSIONS: int = 10000
-DEFAULT_MAX_STREAMS: int = 100
-DEFAULT_MAX_STREAMS_PER_CONNECTION: int = 100
+DEFAULT_MAX_STREAM_READ_BUFFER: int = 65536
+DEFAULT_MAX_STREAM_WRITE_BUFFER: int = 1024 * 1024
 DEFAULT_MAX_TOTAL_PENDING_EVENTS: int = 1000
 DEFAULT_PENDING_EVENT_TTL: float = 5.0
-DEFAULT_PROXY_CONNECT_TIMEOUT: float = 10.0
 DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE: int = 16
 DEFAULT_READ_TIMEOUT: float = 60.0
+DEFAULT_RESOURCE_CLEANUP_INTERVAL: float = 15.0
 DEFAULT_RETRY_BACKOFF: float = 2.0
 DEFAULT_RETRY_DELAY: float = 1.0
 DEFAULT_RPC_CONCURRENCY_LIMIT: int = 100
 DEFAULT_SECURE_PORT: int = 443
 DEFAULT_SERVER_MAX_CONNECTIONS: int = 3000
+DEFAULT_SERVER_MAX_SESSIONS: int = 10000
 DEFAULT_SERVER_VERIFY_MODE: ssl.VerifyMode = ssl.CERT_OPTIONAL
-DEFAULT_SESSION_CLEANUP_INTERVAL: float = 60.0
-DEFAULT_STREAM_CLEANUP_INTERVAL: float = 15.0
 DEFAULT_STREAM_CREATION_TIMEOUT: float = 10.0
 DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI: int = 10
 DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI: int = 10
-DEFAULT_STREAM_LINE_LIMIT: int = 65536
-DEFAULT_WEBTRANSPORT_PATH: str = "/webtransport"
 DEFAULT_WRITE_TIMEOUT: float = 30.0
-MAX_BUFFER_SIZE: int = 1024 * 1024
 SUPPORTED_CONGESTION_CONTROL_ALGORITHMS: tuple[str, str] = ("reno", "cubic")
 
 
@@ -305,8 +291,6 @@ _DEFAULT_CLIENT_CONFIG: ClientConfigDefaults = {
     "close_timeout": DEFAULT_CLOSE_TIMEOUT,
     "congestion_control_algorithm": DEFAULT_CONGESTION_CONTROL_ALGORITHM,
     "connect_timeout": DEFAULT_CONNECT_TIMEOUT,
-    "connection_cleanup_interval": DEFAULT_CONNECTION_CLEANUP_INTERVAL,
-    "connection_idle_check_interval": DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
     "connection_idle_timeout": DEFAULT_CONNECTION_IDLE_TIMEOUT,
     "connection_keepalive_timeout": DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
     "debug": DEFAULT_DEBUG,
@@ -321,21 +305,21 @@ _DEFAULT_CLIENT_CONFIG: ClientConfigDefaults = {
     "log_level": DEFAULT_LOG_LEVEL,
     "max_connections": DEFAULT_CLIENT_MAX_CONNECTIONS,
     "max_datagram_size": DEFAULT_MAX_DATAGRAM_SIZE,
-    "max_incoming_streams": DEFAULT_MAX_INCOMING_STREAMS,
+    "max_message_size": DEFAULT_MAX_MESSAGE_SIZE,
     "max_pending_events_per_session": DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
     "max_retries": DEFAULT_MAX_RETRIES,
     "max_retry_delay": DEFAULT_MAX_RETRY_DELAY,
-    "max_stream_buffer_size": MAX_BUFFER_SIZE,
-    "max_streams": DEFAULT_MAX_STREAMS,
+    "max_sessions": DEFAULT_CLIENT_MAX_SESSIONS,
+    "max_stream_read_buffer": DEFAULT_MAX_STREAM_READ_BUFFER,
+    "max_stream_write_buffer": DEFAULT_MAX_STREAM_WRITE_BUFFER,
     "max_total_pending_events": DEFAULT_MAX_TOTAL_PENDING_EVENTS,
     "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
-    "proxy": None,
+    "pubsub_subscription_queue_size": DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
     "read_timeout": DEFAULT_READ_TIMEOUT,
+    "resource_cleanup_interval": DEFAULT_RESOURCE_CLEANUP_INTERVAL,
     "retry_backoff": DEFAULT_RETRY_BACKOFF,
     "retry_delay": DEFAULT_RETRY_DELAY,
     "rpc_concurrency_limit": DEFAULT_RPC_CONCURRENCY_LIMIT,
-    "stream_buffer_size": DEFAULT_BUFFER_SIZE,
-    "stream_cleanup_interval": DEFAULT_STREAM_CLEANUP_INTERVAL,
     "stream_creation_timeout": DEFAULT_STREAM_CREATION_TIMEOUT,
     "stream_flow_control_increment_bidi": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
     "stream_flow_control_increment_uni": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
@@ -352,8 +336,6 @@ _DEFAULT_SERVER_CONFIG: ServerConfigDefaults = {
     "ca_certs": None,
     "certfile": DEFAULT_CERTFILE,
     "congestion_control_algorithm": DEFAULT_CONGESTION_CONTROL_ALGORITHM,
-    "connection_cleanup_interval": DEFAULT_CONNECTION_CLEANUP_INTERVAL,
-    "connection_idle_check_interval": DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
     "connection_idle_timeout": DEFAULT_CONNECTION_IDLE_TIMEOUT,
     "connection_keepalive_timeout": DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
     "debug": DEFAULT_DEBUG,
@@ -367,19 +349,19 @@ _DEFAULT_SERVER_CONFIG: ServerConfigDefaults = {
     "log_level": DEFAULT_LOG_LEVEL,
     "max_connections": DEFAULT_SERVER_MAX_CONNECTIONS,
     "max_datagram_size": DEFAULT_MAX_DATAGRAM_SIZE,
-    "max_incoming_streams": DEFAULT_MAX_INCOMING_STREAMS,
+    "max_message_size": DEFAULT_MAX_MESSAGE_SIZE,
     "max_pending_events_per_session": DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
-    "max_sessions": DEFAULT_MAX_SESSIONS,
-    "max_stream_buffer_size": MAX_BUFFER_SIZE,
-    "max_streams_per_connection": DEFAULT_MAX_STREAMS_PER_CONNECTION,
+    "max_sessions": DEFAULT_SERVER_MAX_SESSIONS,
+    "max_stream_read_buffer": DEFAULT_MAX_STREAM_READ_BUFFER,
+    "max_stream_write_buffer": DEFAULT_MAX_STREAM_WRITE_BUFFER,
     "max_total_pending_events": DEFAULT_MAX_TOTAL_PENDING_EVENTS,
     "middleware": [],
     "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
+    "pubsub_subscription_queue_size": DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
     "read_timeout": DEFAULT_READ_TIMEOUT,
+    "resource_cleanup_interval": DEFAULT_RESOURCE_CLEANUP_INTERVAL,
     "rpc_concurrency_limit": DEFAULT_RPC_CONCURRENCY_LIMIT,
-    "session_cleanup_interval": DEFAULT_SESSION_CLEANUP_INTERVAL,
-    "stream_buffer_size": DEFAULT_BUFFER_SIZE,
-    "stream_cleanup_interval": DEFAULT_STREAM_CLEANUP_INTERVAL,
+    "stream_creation_timeout": DEFAULT_STREAM_CREATION_TIMEOUT,
     "stream_flow_control_increment_bidi": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
     "stream_flow_control_increment_uni": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
     "verify_mode": DEFAULT_SERVER_VERIFY_MODE,
@@ -427,7 +409,9 @@ class ErrorCodes(IntEnum):
     H3_VERSION_FALLBACK = 0x110
     WT_SESSION_GONE = 0x170D7B68
     WT_BUFFERED_STREAM_REJECTED = 0x3994BD84
+    WT_FLOW_CONTROL_ERROR = 0x045D4487
     WT_APPLICATION_ERROR_FIRST = 0x52E4A40FA8DB
+    WT_APPLICATION_ERROR_LAST = 0x52E5AC983162
     QPACK_DECOMPRESSION_FAILED = 0x200
     QPACK_ENCODER_STREAM_ERROR = 0x201
     QPACK_DECODER_STREAM_ERROR = 0x202

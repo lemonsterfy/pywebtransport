@@ -18,8 +18,7 @@ def parse_webtransport_url(*, url: URL) -> URLParts:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != WEBTRANSPORT_SCHEME:
         raise ConfigurationError(
-            message=f"Unsupported scheme '{parsed.scheme}'. Must be '{WEBTRANSPORT_SCHEME}'",
-            config_key="url",
+            message=f"Unsupported scheme '{parsed.scheme}'. Must be '{WEBTRANSPORT_SCHEME}'", config_key="url"
         )
     if not parsed.hostname:
         raise ConfigurationError(message="Missing hostname in URL", config_key="url")

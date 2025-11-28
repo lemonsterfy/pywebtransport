@@ -6,7 +6,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any, Pattern
 
-from pywebtransport.session import WebTransportSession
+from pywebtransport.session.session import WebTransportSession
 from pywebtransport.utils import get_logger
 
 __all__: list[str] = ["RequestRouter", "SessionHandler"]
@@ -36,7 +36,6 @@ class RequestRouter:
             for pattern, pattern_handler in self._pattern_routes:
                 match = pattern.match(path)
                 if match:
-                    session.path_params = match.groups()
                     handler = pattern_handler
                     break
 
@@ -57,6 +56,17 @@ class RequestRouter:
         self._routes[path] = handler
         logger.debug("Added route: %s", path)
 
+    def remove_route(self, *, path: str) -> None:
+        """Remove a route for an exact path match."""
+        if path in self._routes:
+            del self._routes[path]
+            logger.debug("Removed route: %s", path)
+
+    def set_default_handler(self, *, handler: SessionHandler) -> None:
+        """Set a default handler for routes that are not matched."""
+        self._default_handler = handler
+        logger.debug("Set default handler")
+
     def get_all_routes(self) -> dict[str, SessionHandler]:
         """Get a copy of all registered exact-match routes."""
         return self._routes.copy()
@@ -72,14 +82,3 @@ class RequestRouter:
             "pattern_routes": len(self._pattern_routes),
             "has_default_handler": self._default_handler is not None,
         }
-
-    def remove_route(self, *, path: str) -> None:
-        """Remove a route for an exact path match."""
-        if path in self._routes:
-            del self._routes[path]
-            logger.debug("Removed route: %s", path)
-
-    def set_default_handler(self, *, handler: SessionHandler) -> None:
-        """Set a default handler for routes that are not matched."""
-        self._default_handler = handler
-        logger.debug("Set default handler")

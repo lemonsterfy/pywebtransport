@@ -88,6 +88,14 @@ class TestClientFleet:
         assert "Errors occurred while closing client fleet" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_connect_all_after_close(self, fleet: ClientFleet) -> None:
+        await fleet.close_all()
+
+        results = await fleet.connect_all(url="https://example.com")
+
+        assert results == []
+
+    @pytest.mark.asyncio
     async def test_connect_all_with_mixed_results(
         self, fleet: ClientFleet, mock_clients: list[Any], caplog: LogCaptureFixture
     ) -> None:

@@ -9,7 +9,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from pywebtransport import ConfigurationError, Serializer, StreamError, StructuredStream, WebTransportStream
-from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE
+from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE, ErrorCodes
 from pywebtransport.exceptions import SerializationError
 
 
@@ -32,7 +32,6 @@ def mock_stream(mocker: MockerFixture) -> AsyncMock:
     mock.readexactly = AsyncMock()
     mock.write = AsyncMock()
     mock.close = AsyncMock()
-    mock.abort = AsyncMock()
     return mock
 
 
@@ -43,37 +42,26 @@ def registry() -> dict[int, type[Any]]:
 
 @pytest.fixture
 def structured_stream(
-    mock_stream: AsyncMock,
-    mock_serializer: MagicMock,
-    registry: dict[int, type[Any]],
+    mock_stream: AsyncMock, mock_serializer: MagicMock, registry: dict[int, type[Any]]
 ) -> StructuredStream:
     return StructuredStream(
-        stream=mock_stream,
-        serializer=mock_serializer,
-        registry=registry,
+        stream=mock_stream, serializer=mock_serializer, registry=registry, max_message_size=DEFAULT_MAX_MESSAGE_SIZE
     )
 
 
 class TestStructuredStream:
+
     @pytest.mark.asyncio
     async def test_anext_stops_on_stream_error(
         self, structured_stream: StructuredStream, mocker: MockerFixture
     ) -> None:
-        mocker.patch.object(
-            structured_stream,
-            "receive_obj",
-            side_effect=StreamError(message="Done"),
-        )
+        mocker.patch.object(structured_stream, "receive_obj", side_effect=StreamError(message="Done"))
 
         with pytest.raises(StopAsyncIteration):
             await structured_stream.__anext__()
 
     @pytest.mark.asyncio
-    async def test_async_iteration(
-        self,
-        structured_stream: StructuredStream,
-        mocker: MockerFixture,
-    ) -> None:
+    async def test_async_iteration(self, structured_stream: StructuredStream, mocker: MockerFixture) -> None:
         obj1, obj2 = MockMsgA(), MockMsgB()
         receive_obj_mock = AsyncMock(side_effect=[obj1, obj2, StreamError(message="Stream closed")])
         mocker.patch.object(structured_stream, "receive_obj", new=receive_obj_mock)
@@ -110,18 +98,15 @@ class TestStructuredStream:
         self, mock_stream: AsyncMock, mock_serializer: MagicMock
     ) -> None:
         faulty_registry = {1: MockMsgA, 2: MockMsgA}
-        with pytest.raises(
-            ConfigurationError,
-            match="Types in the structured stream registry must be unique",
-        ):
-            StructuredStream(stream=mock_stream, serializer=mock_serializer, registry=faulty_registry)
+
+        with pytest.raises(ConfigurationError, match="Types in the structured stream registry must be unique"):
+            StructuredStream(
+                stream=mock_stream, serializer=mock_serializer, registry=faulty_registry, max_message_size=1024
+            )
 
     @pytest.mark.parametrize("closed_status", [True, False])
     def test_is_closed_property(
-        self,
-        structured_stream: StructuredStream,
-        mock_stream: AsyncMock,
-        closed_status: bool,
+        self, structured_stream: StructuredStream, mock_stream: AsyncMock, closed_status: bool
     ) -> None:
         type(mock_stream).is_closed = closed_status
 
@@ -129,16 +114,10 @@ class TestStructuredStream:
 
     @pytest.mark.asyncio
     async def test_receive_obj_exceeds_max_message_size_raises_error(
-        self,
-        mock_stream: AsyncMock,
-        mock_serializer: MagicMock,
-        registry: dict[int, type[Any]],
+        self, mock_stream: AsyncMock, mock_serializer: MagicMock, registry: dict[int, type[Any]]
     ) -> None:
         stream = StructuredStream(
-            stream=mock_stream,
-            serializer=mock_serializer,
-            registry=registry,
-            max_message_size=100,
+            stream=mock_stream, serializer=mock_serializer, registry=registry, max_message_size=100
         )
         type_id = 1
         large_payload_len = 101
@@ -148,7 +127,7 @@ class TestStructuredStream:
         with pytest.raises(SerializationError, match="exceeds the configured limit"):
             await stream.receive_obj()
 
-        mock_stream.abort.assert_awaited_once()
+        mock_stream.close.assert_awaited_once_with(error_code=ErrorCodes.APPLICATION_ERROR)
 
     @pytest.mark.asyncio
     async def test_receive_obj_incomplete_header_raises_stream_error(
@@ -166,23 +145,14 @@ class TestStructuredStream:
         type_id = 1
         payload_len = 100
         header = struct.pack("!HI", type_id, payload_len)
-        mock_stream.readexactly.side_effect = [
-            header,
-            asyncio.IncompleteReadError(b"partial", payload_len),
-        ]
+        mock_stream.readexactly.side_effect = [header, asyncio.IncompleteReadError(b"partial", payload_len)]
 
-        with pytest.raises(
-            StreamError,
-            match=f"Stream closed prematurely while reading payload of size {payload_len}",
-        ):
+        with pytest.raises(StreamError, match=f"Stream closed prematurely while reading payload of size {payload_len}"):
             await structured_stream.receive_obj()
 
     @pytest.mark.asyncio
     async def test_receive_obj_successful(
-        self,
-        structured_stream: StructuredStream,
-        mock_stream: AsyncMock,
-        mock_serializer: MagicMock,
+        self, structured_stream: StructuredStream, mock_stream: AsyncMock, mock_serializer: MagicMock
     ) -> None:
         type_id = 1
         message_class = MockMsgA
@@ -202,19 +172,13 @@ class TestStructuredStream:
 
     @pytest.mark.asyncio
     async def test_receive_obj_unknown_type_id_raises_error(
-        self,
-        structured_stream: StructuredStream,
-        mock_stream: AsyncMock,
-        mock_serializer: MagicMock,
+        self, structured_stream: StructuredStream, mock_stream: AsyncMock, mock_serializer: MagicMock
     ) -> None:
         unknown_type_id = 99
         header = struct.pack("!HI", unknown_type_id, 10)
         mock_stream.readexactly.return_value = header
 
-        with pytest.raises(
-            SerializationError,
-            match=f"Received unknown message type ID: {unknown_type_id}",
-        ):
+        with pytest.raises(SerializationError, match=f"Received unknown message type ID: {unknown_type_id}"):
             await structured_stream.receive_obj()
 
         mock_stream.readexactly.assert_awaited_once()
@@ -222,10 +186,7 @@ class TestStructuredStream:
 
     @pytest.mark.asyncio
     async def test_send_obj_successful(
-        self,
-        structured_stream: StructuredStream,
-        mock_stream: AsyncMock,
-        mock_serializer: MagicMock,
+        self, structured_stream: StructuredStream, mock_stream: AsyncMock, mock_serializer: MagicMock
     ) -> None:
         obj_to_send = MockMsgB()
         type_id = 2
@@ -240,10 +201,7 @@ class TestStructuredStream:
 
     @pytest.mark.asyncio
     async def test_send_obj_unregistered_raises_error(
-        self,
-        structured_stream: StructuredStream,
-        mock_stream: AsyncMock,
-        mock_serializer: MagicMock,
+        self, structured_stream: StructuredStream, mock_stream: AsyncMock, mock_serializer: MagicMock
     ) -> None:
         class UnregisteredMsg:
             pass

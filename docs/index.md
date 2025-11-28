@@ -17,7 +17,7 @@ performance, and reliability.
 - **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
 - **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, monitoring, pooling, and resource management.
 - **Event-Driven Architecture**: A powerful `EventEmitter` system for decoupled, asynchronous communication between components.
-- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E) to ensure reliability and maintainability.
+- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E, performance, benchmark) to ensure reliability and maintainability.
 
 ## Core Concepts
 
@@ -64,14 +64,7 @@ Datagrams offer low-latency, unreliable, and out-of-order messaging, ideal for r
 - **API Acceleration:** Reduce repetitive HTTP overhead with persistent connections.
 - **Edge Computing:** Establish efficient data channels between edge nodes and the cloud.
 
-## Documentation Structure
-
-### Getting Started
-
-- **[Installation](installation.md)** - Setup and installation guide.
-- **[Quick Start](quickstart.md)** - Learn how to install the library.
-
-### API Reference
+## API Reference
 
 - **[Complete API Reference](api-reference/index.md)** - All available APIs, including client, server, session, stream, datagrams, and configuration. The API is organized into layers (Application, Core, and Foundational) to help you find the right abstraction for your needs.
 

@@ -14,8 +14,8 @@ body:
     id: version
     attributes:
       label: "PyWebTransport Version"
-      description: "What version of `pywebtransport` are you using? (e.g., 0.6.0)"
-      placeholder: "e.g., 0.6.0"
+      description: "What version of `pywebtransport` are you using? (e.g., 0.9.0)"
+      placeholder: "e.g., 0.9.0"
     validations:
       required: true
 
@@ -23,8 +23,8 @@ body:
     id: python-version
     attributes:
       label: "Python Version"
-      description: "What version of Python are you using? (e.g., 3.11.4)"
-      placeholder: "e.g., 3.11.4"
+      description: "What version of Python are you using? (e.g., 3.12.12)"
+      placeholder: "e.g., 3.12.12"
     validations:
       required: true
 

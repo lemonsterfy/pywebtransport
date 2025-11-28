@@ -174,7 +174,7 @@ class TestResourceUsage:
             stream = await session.create_bidirectional_stream()
             while True:
                 await stream.write(data=payload)
-                await stream.read(size=2048)
+                await stream.read()
                 await asyncio.sleep(0.01)
         except (asyncio.CancelledError, ConnectionError, StreamError):
             pass

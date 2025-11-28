@@ -1,7 +1,8 @@
 """Unit tests for the pywebtransport.pool._base module."""
 
 import asyncio
-from typing import AsyncGenerator, cast
+from collections.abc import AsyncGenerator
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,31 +18,29 @@ class ConcretePool(_AsyncObjectPool[MagicMock]):
             await obj.close()
 
 
-@pytest.fixture
-def mock_factory(mocker: MockerFixture) -> MagicMock:
-    async def factory() -> MagicMock:
-        obj = MagicMock()
-        obj.close = AsyncMock()
-        return obj
-
-    return cast(MagicMock, mocker.AsyncMock(side_effect=factory))
-
-
-@pytest.fixture
-def pool(mock_factory: AsyncMock) -> ConcretePool:
-    return ConcretePool(max_size=2, factory=mock_factory)
-
-
-@pytest_asyncio.fixture
-async def running_pool(pool: ConcretePool) -> AsyncGenerator[ConcretePool, None]:
-    async with pool:
-        yield pool
-
-
 class TestAsyncObjectPool:
+    @pytest.fixture
+    def mock_factory(self, mocker: MockerFixture) -> MagicMock:
+        async def factory() -> MagicMock:
+            obj = MagicMock()
+            obj.close = AsyncMock()
+            return obj
+
+        return cast(MagicMock, mocker.AsyncMock(side_effect=factory))
+
+    @pytest.fixture
+    def pool(self, mock_factory: AsyncMock) -> ConcretePool:
+        return ConcretePool(max_size=2, factory=mock_factory)
+
+    @pytest_asyncio.fixture
+    async def running_pool(self, pool: ConcretePool) -> AsyncGenerator[ConcretePool, None]:
+        async with pool:
+            yield pool
+
     @pytest.mark.asyncio
     async def test_acquire_factory_exception(self, running_pool: ConcretePool, mock_factory: AsyncMock) -> None:
         mock_factory.side_effect = ValueError("Factory failed")
+        assert running_pool._semaphore is not None
         initial_semaphore_value = running_pool._semaphore._value
 
         with pytest.raises(ValueError, match="Factory failed"):
@@ -52,6 +51,7 @@ class TestAsyncObjectPool:
     @pytest.mark.asyncio
     async def test_acquire_from_closed_pool(self, running_pool: ConcretePool) -> None:
         await running_pool.close()
+
         with pytest.raises(RuntimeError, match="Cannot acquire from a closed pool"):
             await running_pool.acquire()
 
@@ -87,6 +87,24 @@ class TestAsyncObjectPool:
         await running_pool.release(acquired_obj)
 
     @pytest.mark.asyncio
+    async def test_acquire_without_context_manager(self, pool: ConcretePool) -> None:
+        with pytest.raises(RuntimeError, match="has not been activated"):
+            await pool.acquire()
+
+    @pytest.mark.asyncio
+    async def test_aenter_idempotency(self, pool: ConcretePool) -> None:
+        await pool.__aenter__()
+        lock_1 = pool._lock
+        sem_1 = pool._semaphore
+
+        await pool.__aenter__()
+
+        assert pool._lock is lock_1
+        assert pool._semaphore is sem_1
+
+        await pool.__aexit__(None, None, None)
+
+    @pytest.mark.asyncio
     async def test_close_disposes_pooled_objects(self, running_pool: ConcretePool) -> None:
         obj1 = await running_pool.acquire()
         obj2 = await running_pool.acquire()
@@ -94,6 +112,7 @@ class TestAsyncObjectPool:
         await running_pool.release(obj2)
 
         await running_pool.close()
+
         obj1.close.assert_awaited_once()
         obj2.close.assert_awaited_once()
         assert len(running_pool._pool) == 0
@@ -102,20 +121,48 @@ class TestAsyncObjectPool:
     async def test_close_idempotency(self, running_pool: ConcretePool) -> None:
         obj = await running_pool.acquire()
         await running_pool.release(obj)
+
         await running_pool.close()
         await running_pool.close()
+
         obj.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_uninitialized_pool(self, pool: ConcretePool) -> None:
+        assert pool._lock is None
+
+        await pool.close()
+
+        assert pool._closed
+
+    @pytest.mark.asyncio
+    async def test_close_with_dispose_exception(self, running_pool: ConcretePool, mocker: MockerFixture) -> None:
+        obj = await running_pool.acquire()
+        await running_pool.release(obj)
+
+        async def faulty_dispose(o: MagicMock) -> None:
+            raise ValueError("Dispose failed")
+
+        mocker.patch.object(running_pool, "_dispose", side_effect=faulty_dispose)
+
+        with pytest.raises(RuntimeError, match="Errors occurred during pool cleanup"):
+            await running_pool.close()
 
     @pytest.mark.asyncio
     async def test_context_manager_closes_pool(self, mock_factory: AsyncMock) -> None:
         pool_instance = ConcretePool(max_size=1, factory=mock_factory)
+
         async with pool_instance as pool:
             assert not pool._closed
+            assert pool._lock is not None
+            assert pool._semaphore is not None
+
         assert pool_instance._closed
 
     @pytest.mark.asyncio
     async def test_get_returns_pooled_object_manager(self, running_pool: ConcretePool) -> None:
         manager = running_pool.get()
+
         assert isinstance(manager, _PooledObject)
         assert manager._pool is running_pool
 
@@ -126,14 +173,49 @@ class TestAsyncObjectPool:
             ConcretePool(max_size=-1, factory=mock_factory)
 
     @pytest.mark.asyncio
+    async def test_release_on_uninitialized_closed_pool(self, pool: ConcretePool) -> None:
+        await pool.close()
+        obj = MagicMock()
+        obj.close = AsyncMock()
+
+        await pool.release(obj)
+
+        obj.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_release_to_closed_pool(self, running_pool: ConcretePool) -> None:
         obj = await running_pool.acquire()
         await running_pool.close()
+
         await running_pool.release(obj)
+
         obj.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_release_without_context_manager(self, pool: ConcretePool) -> None:
+        obj = MagicMock()
+
+        with pytest.raises(RuntimeError, match="has not been activated"):
+            await pool.release(obj)
 
 
 class TestPooledObject:
+    @pytest.fixture
+    def mock_factory(self, mocker: MockerFixture) -> MagicMock:
+        async def factory() -> MagicMock:
+            return MagicMock()
+
+        return cast(MagicMock, mocker.AsyncMock(side_effect=factory))
+
+    @pytest.fixture
+    def pool(self, mock_factory: AsyncMock) -> ConcretePool:
+        return ConcretePool(max_size=1, factory=mock_factory)
+
+    @pytest_asyncio.fixture
+    async def running_pool(self, pool: ConcretePool) -> AsyncGenerator[ConcretePool, None]:
+        async with pool:
+            yield pool
+
     @pytest.mark.asyncio
     async def test_context_manager_acquire_release(self, running_pool: ConcretePool, mocker: MockerFixture) -> None:
         acquire_spy = mocker.spy(running_pool, "acquire")
@@ -150,7 +232,8 @@ class TestPooledObject:
     async def test_context_manager_handles_no_object(self, running_pool: ConcretePool, mocker: MockerFixture) -> None:
         release_spy = mocker.spy(running_pool, "release")
         pooled_obj = _PooledObject(pool=running_pool)
-
         pooled_obj._obj = None
+
         await pooled_obj.__aexit__(None, None, None)
+
         release_spy.assert_not_awaited()

@@ -2,7 +2,7 @@
 
 from .client import WebTransportClient
 from .config import ClientConfig, ServerConfig
-from .datagram import StructuredDatagramTransport, WebTransportDatagramTransport
+from .datagram import StructuredDatagramTransport
 from .events import Event, EventEmitter
 from .exceptions import (
     ClientError,
@@ -44,7 +44,6 @@ __all__: list[str] = [
     "TimeoutError",
     "URL",
     "WebTransportClient",
-    "WebTransportDatagramTransport",
     "WebTransportError",
     "WebTransportReceiveStream",
     "WebTransportSendStream",

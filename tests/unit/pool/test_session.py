@@ -1,6 +1,6 @@
 """Unit tests for the pywebtransport.pool.session module."""
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest

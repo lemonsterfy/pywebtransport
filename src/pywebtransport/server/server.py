@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import weakref
+from asyncio import BaseTransport, DatagramTransport
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, cast
 
-from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.asyncio.server import QuicServer
-from aioquic.asyncio.server import serve as quic_serve
-from aioquic.quic.events import QuicEvent
 
 from pywebtransport.config import ServerConfig
 from pywebtransport.connection.connection import WebTransportConnection
@@ -21,17 +18,18 @@ from pywebtransport.events import Event, EventEmitter
 from pywebtransport.exceptions import ServerError
 from pywebtransport.manager.connection import ConnectionManager
 from pywebtransport.manager.session import SessionManager
+from pywebtransport.server._adapter import WebTransportServerProtocol, create_server
 from pywebtransport.types import Address, ConnectionState, EventType, SessionState
-from pywebtransport.utils import create_quic_configuration, get_logger, get_timestamp
+from pywebtransport.utils import get_logger, get_timestamp
 
-__all__: list[str] = ["ServerStats", "WebTransportServer", "WebTransportServerProtocol", "ServerDiagnostics"]
+__all__ = ["ServerDiagnostics", "ServerStats", "WebTransportServer"]
 
 logger = get_logger(name=__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
 class ServerDiagnostics:
-    """Provide a structured, immutable snapshot of a server's health."""
+    """A structured, immutable snapshot of a server's health."""
 
     stats: ServerStats
     connection_states: dict[ConnectionState, int]
@@ -45,26 +43,31 @@ class ServerDiagnostics:
     def issues(self) -> list[str]:
         """Get a list of potential issues based on the current diagnostics."""
         issues: list[str] = []
-        stats = self.stats
+        stats_dict = self.stats.to_dict()
 
         if not self.is_serving:
             issues.append("Server is not currently serving.")
 
-        total_conn_attempts = stats.connections_accepted + stats.connections_rejected
-        if total_conn_attempts > 20 and (stats.connections_rejected / total_conn_attempts) > 0.1:
-            issues.append(f"High connection rejection rate: {stats.connections_rejected}/{total_conn_attempts}")
+        total_attempts = stats_dict.get("total_connections_attempted", 0)
+        success_rate = stats_dict.get("success_rate", 1.0)
+        connections_rejected = stats_dict.get("connections_rejected", 0)
+
+        if total_attempts > 20 and success_rate < 0.9:
+            issues.append(f"High connection rejection rate: {connections_rejected}/{total_attempts}")
 
         active_connections = self.connection_states.get(ConnectionState.CONNECTED, 0)
-        if self.max_connections > 0 and (active_connections / self.max_connections) > 0.9:
+        if self.max_connections > 0 and (active_connections / max(1, self.max_connections)) > 0.9:
             issues.append(f"High connection usage: {active_connections / self.max_connections:.1%}")
 
         try:
-            if not Path(self.certfile_path).exists():
+            cert_exists = Path(self.certfile_path).exists() if self.certfile_path else False
+            key_exists = Path(self.keyfile_path).exists() if self.keyfile_path else False
+            if not cert_exists:
                 issues.append(f"Certificate file not found: {self.certfile_path}")
-            if not Path(self.keyfile_path).exists():
+            if not key_exists:
                 issues.append(f"Key file not found: {self.keyfile_path}")
-        except Exception:
-            issues.append("Certificate configuration appears invalid.")
+        except Exception as e:
+            issues.append(f"Certificate configuration check failed: {e}")
 
         return issues
 
@@ -73,15 +76,32 @@ class ServerDiagnostics:
 class ServerStats:
     """Represent statistics for the server."""
 
+    start_time: float | None = None
     connections_accepted: int = 0
     connections_rejected: int = 0
     connection_errors: int = 0
     protocol_errors: int = 0
-    uptime: float = 0.0
+
+    @property
+    def total_connections_attempted(self) -> int:
+        """Get the total number of connections attempted."""
+        return self.connections_accepted + self.connections_rejected
+
+    @property
+    def success_rate(self) -> float:
+        """Get the connection success rate."""
+        total = self.total_connections_attempted
+        if total == 0:
+            return 1.0
+        return self.connections_accepted / total
 
     def to_dict(self) -> dict[str, Any]:
         """Convert statistics to a dictionary."""
-        return asdict(obj=self)
+        data = asdict(obj=self)
+        data["total_connections_attempted"] = self.total_connections_attempted
+        data["success_rate"] = self.success_rate
+        data["uptime"] = (get_timestamp() - self.start_time) if self.start_time else 0.0
+        return data
 
 
 class WebTransportServer(EventEmitter):
@@ -94,20 +114,11 @@ class WebTransportServer(EventEmitter):
         self._config.validate()
         self._serving, self._closing = False, False
         self._server: QuicServer | None = None
-        self._start_time: float | None = None
-        self._connection_manager = ConnectionManager(
-            max_connections=self._config.max_connections,
-            connection_cleanup_interval=self._config.connection_cleanup_interval,
-            connection_idle_check_interval=self._config.connection_idle_check_interval,
-            connection_idle_timeout=self._config.connection_idle_timeout,
-        )
-        self._session_manager = SessionManager(
-            max_sessions=self._config.max_sessions,
-            session_cleanup_interval=self._config.session_cleanup_interval,
-        )
+        self._connection_manager = ConnectionManager(max_connections=self._config.max_connections)
+        self._session_manager = SessionManager(max_sessions=self._config.max_sessions)
         self._background_tasks: list[asyncio.Task[Any]] = []
-        self._active_protocols: set[WebTransportServerProtocol] = set()
         self._stats = ServerStats()
+        self._shutdown_event: asyncio.Event | None = None
         logger.info("WebTransport server initialized.")
 
     @property
@@ -129,7 +140,10 @@ class WebTransportServer(EventEmitter):
     def local_address(self) -> Address | None:
         """Get the local address the server is bound to."""
         if self._server and hasattr(self._server, "_transport") and self._server._transport:
-            return cast(Address | None, self._server._transport.get_extra_info("sockname"))
+            try:
+                return cast(Address | None, self._server._transport.get_extra_info("sockname"))
+            except OSError:
+                return None
         return None
 
     @property
@@ -144,39 +158,62 @@ class WebTransportServer(EventEmitter):
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and close the server."""
         await self.close()
 
     async def close(self) -> None:
         """Gracefully shut down the server and its resources."""
-        if not self._serving or self._closing:
+        if not self._serving:
             return
 
         logger.info("Closing WebTransport server...")
+        self._serving = False
         self._closing = True
+
+        if self._shutdown_event:
+            self._shutdown_event.set()
+
         for task in self._background_tasks:
             if not task.done():
                 task.cancel()
-        await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
 
         try:
             async with asyncio.TaskGroup() as tg:
-                tg.create_task(self._connection_manager.shutdown())
-                tg.create_task(self._session_manager.shutdown())
+                tg.create_task(coro=self._connection_manager.shutdown())
+                tg.create_task(coro=self._session_manager.shutdown())
         except* Exception as eg:
             logger.error("Errors occurred during manager shutdown: %s", eg.exceptions, exc_info=eg)
 
         if self._server:
             self._server.close()
-            if hasattr(self._server, "wait_closed"):
-                await self._server.wait_closed()
-        self._serving, self._closing = False, False
+
+        self._closing = False
         logger.info("WebTransport server closed.")
+
+    async def diagnostics(self) -> ServerDiagnostics:
+        """Get a snapshot of the server's diagnostics and statistics."""
+        async with asyncio.TaskGroup() as tg:
+            conn_task = tg.create_task(coro=self._connection_manager.get_all_resources())
+            sess_task = tg.create_task(coro=self._session_manager.get_all_resources())
+
+        connections = conn_task.result()
+        sessions = sess_task.result()
+        connection_states = Counter(conn.state for conn in connections)
+        session_states = Counter(sess.state for sess in sessions)
+
+        return ServerDiagnostics(
+            stats=self._stats,
+            connection_states=dict(connection_states),
+            session_states=dict(session_states),
+            is_serving=self.is_serving,
+            certfile_path=self.config.certfile or "",
+            keyfile_path=self.config.keyfile or "",
+            max_connections=self.config.max_connections,
+        )
 
     async def listen(self, *, host: str | None = None, port: int | None = None) -> None:
         """Start the server and begin listening for connections."""
@@ -185,25 +222,19 @@ class WebTransportServer(EventEmitter):
 
         bind_host, bind_port = host or self._config.bind_host, port or self._config.bind_port
         logger.info("Starting WebTransport server on %s:%s", bind_host, bind_port)
+
+        self._shutdown_event = asyncio.Event()
+
         try:
-            quic_config = create_quic_configuration(
-                is_client=False,
-                alpn_protocols=self._config.alpn_protocols,
-                congestion_control_algorithm=self._config.congestion_control_algorithm,
-                max_datagram_size=self._config.max_datagram_size,
+            self._server = await create_server(
+                host=bind_host, port=bind_port, config=self._config, connection_creator=self._create_connection_callback
             )
-            quic_config.load_cert_chain(certfile=Path(self._config.certfile), keyfile=Path(self._config.keyfile))
-            if self._config.ca_certs:
-                quic_config.load_verify_locations(cafile=self._config.ca_certs)
-            quic_config.verify_mode = self._config.verify_mode
-            self._server = await quic_serve(
-                host=bind_host,
-                port=bind_port,
-                configuration=quic_config,
-                create_protocol=lambda *a, **kw: WebTransportServerProtocol(self, *a, **kw),
-            )
-            self._serving, self._start_time = True, get_timestamp()
+            self._serving = True
+            self._stats.start_time = get_timestamp()
             logger.info("WebTransport server listening on %s", self.local_address)
+        except FileNotFoundError as e:
+            logger.critical("Certificate/Key file error: %s", e)
+            raise ServerError(message=f"Certificate/Key file error: {e}") from e
         except Exception as e:
             logger.critical("Failed to start server: %s", e, exc_info=True)
             raise ServerError(message=f"Failed to start server: {e}") from e
@@ -215,169 +246,73 @@ class WebTransportServer(EventEmitter):
 
         logger.info("Server is running. Press Ctrl+C to stop.")
         try:
-            if hasattr(self._server, "wait_closed"):
-                await self._server.wait_closed()
-            else:
-                while self._serving:
-                    await asyncio.sleep(3600)
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            logger.info("Server stop signal received.")
+            if self._shutdown_event:
+                await self._shutdown_event.wait()
+        except asyncio.CancelledError:
+            logger.info("serve_forever cancelled.")
+        except Exception as e:
+            logger.error("Error during serve_forever wait: %s", e)
         finally:
-            await self.close()
+            logger.info("serve_forever loop finished.")
 
-    async def diagnostics(self) -> ServerDiagnostics:
-        """Get a snapshot of the server's diagnostics and statistics."""
-        if self._start_time:
-            self._stats.uptime = get_timestamp() - self._start_time
+    def _create_connection_callback(
+        self, protocol: WebTransportServerProtocol, transport: BaseTransport
+    ) -> WebTransportConnection | None:
+        """Create a new WebTransportConnection from the protocol."""
+        logger.debug("Creating WebTransportConnection via callback.")
 
-        connections, sessions = await asyncio.gather(
-            self._connection_manager.get_all_resources(),
-            self._session_manager.get_all_resources(),
-        )
-        connection_states = Counter(conn.state for conn in connections)
-        session_states = Counter(sess.state for sess in sessions)
+        if not hasattr(transport, "sendto"):
+            logger.error("Received transport without 'sendto' method: %s", type(transport).__name__)
+            if hasattr(transport, "close"):
+                if not hasattr(transport, "is_closing") or not transport.is_closing():
+                    transport.close()
+            return None
 
-        return ServerDiagnostics(
-            stats=self._stats,
-            connection_states=dict(connection_states),
-            session_states=dict(session_states),
-            is_serving=self.is_serving,
-            certfile_path=self.config.certfile,
-            keyfile_path=self.config.keyfile,
-            max_connections=self.config.max_connections,
-        )
-
-    async def _handle_new_connection(
-        self, *, transport: asyncio.BaseTransport, protocol: WebTransportServerProtocol
-    ) -> None:
-        """Handle a new incoming connection and set up the event forwarding chain."""
-        connection: WebTransportConnection | None = None
         try:
-            connection = WebTransportConnection(config=self._config)
+            connection = WebTransportConnection(
+                config=self._config, protocol=protocol, transport=cast(DatagramTransport, transport), is_client=False
+            )
+            asyncio.create_task(coro=self._initialize_and_register_connection(connection=connection))
+            return connection
+        except Exception as e:
+            logger.error("Error creating WebTransportConnection in callback: %s", e, exc_info=True)
+            if not transport.is_closing():
+                transport.close()
+            return None
 
-            server_ref = weakref.ref(self)
-            conn_ref = weakref.ref(connection)
+    async def _initialize_and_register_connection(self, connection: WebTransportConnection) -> None:
+        """Initialize connection engine and register with manager."""
+        try:
 
             async def forward_session_request(event: Event) -> None:
-                server = server_ref()
-                conn = conn_ref()
-                if server and conn and isinstance(event.data, dict):
-                    event_data = event.data.copy()
-                    if "connection" not in event_data:
-                        event_data["connection"] = conn
-                    logger.debug(
-                        "Forwarding session request for path '%s' from connection %s to server.",
-                        event_data.get("path"),
-                        conn.connection_id,
-                    )
-                    await server.emit(event_type=EventType.SESSION_REQUEST, data=event_data)
+                event_data = event.data.copy() if isinstance(event.data, dict) else {}
+                event_data["connection"] = connection
+                await self.emit(event_type=EventType.SESSION_REQUEST, data=event_data)
 
-            connection.on(event_type=EventType.SESSION_REQUEST, handler=forward_session_request)
-            dgram_transport = cast(asyncio.DatagramTransport, transport)
-            await connection.accept(transport=dgram_transport, protocol=protocol)
+            connection.events.on(event_type=EventType.SESSION_REQUEST, handler=forward_session_request)
+
+            await connection.initialize()
+
             await self._connection_manager.add_connection(connection=connection)
             self._stats.connections_accepted += 1
-            logger.info("New connection accepted: %s", connection.connection_id)
+            logger.info("New connection registered: %s", connection.connection_id)
         except Exception as e:
             self._stats.connections_rejected += 1
             self._stats.connection_errors += 1
-            logger.error("Failed to handle new connection: %s", e, exc_info=True)
-            if connection and not connection.is_closed:
+            logger.error("Failed to initialize/register new connection: %s", e, exc_info=True)
+            if not connection.is_closed:
                 await connection.close()
-            try:
-                transport.close()
-            except Exception:
-                pass
 
     def __str__(self) -> str:
         """Format a concise summary of server information for logging."""
         status = "serving" if self.is_serving else "stopped"
-        address = self.local_address or ("unknown", 0)
+        address_info = self.local_address
+        address_str = f"{address_info[0]}:{address_info[1]}" if address_info else "unknown"
         conn_count = len(self._connection_manager)
         sess_count = len(self._session_manager)
         return (
             f"WebTransportServer(status={status}, "
-            f"address={address[0]}:{address[1]}, "
+            f"address={address_str}, "
             f"connections={conn_count}, "
             f"sessions={sess_count})"
         )
-
-
-class WebTransportServerProtocol(QuicConnectionProtocol):
-    """Implement the aioquic protocol for the WebTransport server."""
-
-    _server_ref: weakref.ReferenceType[WebTransportServer]
-    _connection_ref: weakref.ReferenceType[WebTransportConnection] | None
-    _event_queue: asyncio.Queue[QuicEvent]
-    _event_processor_task: asyncio.Task[None] | None
-
-    def __init__(self, server: WebTransportServer, *args: Any, **kwargs: Any) -> None:
-        """Initialize the server protocol."""
-        super().__init__(*args, **kwargs)
-        self._server_ref = weakref.ref(server)
-        self._connection_ref = None
-        self._event_queue = asyncio.Queue()
-        self._event_processor_task = None
-
-    def connection_lost(self, exc: Exception | None) -> None:
-        """Handle a connection being lost."""
-        super().connection_lost(exc)
-        if self._event_processor_task and not self._event_processor_task.done():
-            self._event_processor_task.cancel()
-        if self._connection_ref and (connection := self._connection_ref()):
-            connection._on_connection_lost(exc=exc)
-        if server := self._server_ref():
-            server._active_protocols.discard(self)
-
-    def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        """Handle a new connection being made."""
-        super().connection_made(transport)
-        self._event_processor_task = asyncio.create_task(self._process_events_loop())
-        if server := self._server_ref():
-            server._active_protocols.add(self)
-            asyncio.create_task(server._handle_new_connection(transport=transport, protocol=self))
-
-    def quic_event_received(self, event: QuicEvent) -> None:
-        """Handle a QUIC event from the underlying transport."""
-        self._event_queue.put_nowait(event)
-
-    def set_connection(self, *, connection: WebTransportConnection) -> None:
-        """Set a weak reference to the managing WebTransportConnection."""
-        self._connection_ref = weakref.ref(connection)
-
-    def transmit(self) -> None:
-        """Transmit any pending data."""
-        if self._transport is not None and not self._transport.is_closing():
-            super().transmit()
-
-    async def _process_events_loop(self) -> None:
-        """Continuously process events from the QUIC connection."""
-        try:
-            conn: WebTransportConnection | None = None
-            while True:
-                event = await self._event_queue.get()
-
-                if conn is None:
-                    if self._connection_ref and (conn := self._connection_ref()):
-                        pass
-                    else:
-                        await self._event_queue.put(event)
-                        await asyncio.sleep(0.01)
-                        continue
-
-                if conn.protocol_handler:
-                    try:
-                        await conn.protocol_handler.handle_quic_event(event=event)
-                    except Exception as e:
-                        logger.error("Error handling QUIC event for %s: %s", conn.connection_id, e, exc_info=True)
-                else:
-                    logger.warning(
-                        "No handler available to process event for %s: %r",
-                        conn.connection_id,
-                        event,
-                    )
-
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.critical("Fatal error in server event processing loop: %s", e, exc_info=True)

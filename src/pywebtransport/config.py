@@ -13,15 +13,13 @@ from pywebtransport.constants import (
     DEFAULT_ALPN_PROTOCOLS,
     DEFAULT_AUTO_RECONNECT,
     DEFAULT_BIND_HOST,
-    DEFAULT_BUFFER_SIZE,
     DEFAULT_CERTFILE,
     DEFAULT_CLIENT_MAX_CONNECTIONS,
+    DEFAULT_CLIENT_MAX_SESSIONS,
     DEFAULT_CLIENT_VERIFY_MODE,
     DEFAULT_CLOSE_TIMEOUT,
     DEFAULT_CONGESTION_CONTROL_ALGORITHM,
     DEFAULT_CONNECT_TIMEOUT,
-    DEFAULT_CONNECTION_CLEANUP_INTERVAL,
-    DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL,
     DEFAULT_CONNECTION_IDLE_TIMEOUT,
     DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
     DEFAULT_DEBUG,
@@ -35,29 +33,27 @@ from pywebtransport.constants import (
     DEFAULT_KEYFILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_DATAGRAM_SIZE,
-    DEFAULT_MAX_INCOMING_STREAMS,
+    DEFAULT_MAX_MESSAGE_SIZE,
     DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
     DEFAULT_MAX_RETRIES,
     DEFAULT_MAX_RETRY_DELAY,
-    DEFAULT_MAX_SESSIONS,
-    DEFAULT_MAX_STREAMS,
-    DEFAULT_MAX_STREAMS_PER_CONNECTION,
+    DEFAULT_MAX_STREAM_READ_BUFFER,
+    DEFAULT_MAX_STREAM_WRITE_BUFFER,
     DEFAULT_MAX_TOTAL_PENDING_EVENTS,
     DEFAULT_PENDING_EVENT_TTL,
-    DEFAULT_PROXY_CONNECT_TIMEOUT,
+    DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
     DEFAULT_READ_TIMEOUT,
+    DEFAULT_RESOURCE_CLEANUP_INTERVAL,
     DEFAULT_RETRY_BACKOFF,
     DEFAULT_RETRY_DELAY,
     DEFAULT_RPC_CONCURRENCY_LIMIT,
     DEFAULT_SERVER_MAX_CONNECTIONS,
+    DEFAULT_SERVER_MAX_SESSIONS,
     DEFAULT_SERVER_VERIFY_MODE,
-    DEFAULT_SESSION_CLEANUP_INTERVAL,
-    DEFAULT_STREAM_CLEANUP_INTERVAL,
     DEFAULT_STREAM_CREATION_TIMEOUT,
     DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
     DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
     DEFAULT_WRITE_TIMEOUT,
-    MAX_BUFFER_SIZE,
     SUPPORTED_CONGESTION_CONTROL_ALGORITHMS,
     get_default_client_config,
     get_default_server_config,
@@ -66,7 +62,7 @@ from pywebtransport.exceptions import certificate_not_found, invalid_config
 from pywebtransport.types import Headers, MiddlewareProtocol
 from pywebtransport.version import __version__
 
-__all__: list[str] = ["ClientConfig", "ProxyConfig", "ServerConfig"]
+__all__: list[str] = ["ClientConfig", "ServerConfig"]
 
 
 @dataclass(kw_only=True)
@@ -80,8 +76,6 @@ class ClientConfig:
     close_timeout: float = DEFAULT_CLOSE_TIMEOUT
     congestion_control_algorithm: str = DEFAULT_CONGESTION_CONTROL_ALGORITHM
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT
-    connection_cleanup_interval: float = DEFAULT_CONNECTION_CLEANUP_INTERVAL
-    connection_idle_check_interval: float = DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
     connection_idle_timeout: float = DEFAULT_CONNECTION_IDLE_TIMEOUT
     connection_keepalive_timeout: float = DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
     debug: bool = DEFAULT_DEBUG
@@ -96,21 +90,21 @@ class ClientConfig:
     log_level: str = DEFAULT_LOG_LEVEL
     max_connections: int = DEFAULT_CLIENT_MAX_CONNECTIONS
     max_datagram_size: int = DEFAULT_MAX_DATAGRAM_SIZE
-    max_incoming_streams: int = DEFAULT_MAX_INCOMING_STREAMS
+    max_message_size: int = DEFAULT_MAX_MESSAGE_SIZE
     max_pending_events_per_session: int = DEFAULT_MAX_PENDING_EVENTS_PER_SESSION
     max_retries: int = DEFAULT_MAX_RETRIES
     max_retry_delay: float = DEFAULT_MAX_RETRY_DELAY
-    max_stream_buffer_size: int = MAX_BUFFER_SIZE
-    max_streams: int = DEFAULT_MAX_STREAMS
+    max_sessions: int = DEFAULT_CLIENT_MAX_SESSIONS
+    max_stream_read_buffer: int = DEFAULT_MAX_STREAM_READ_BUFFER
+    max_stream_write_buffer: int = DEFAULT_MAX_STREAM_WRITE_BUFFER
     max_total_pending_events: int = DEFAULT_MAX_TOTAL_PENDING_EVENTS
     pending_event_ttl: float = DEFAULT_PENDING_EVENT_TTL
-    proxy: ProxyConfig | None = None
+    pubsub_subscription_queue_size: int = DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
     read_timeout: float | None = DEFAULT_READ_TIMEOUT
+    resource_cleanup_interval: float = DEFAULT_RESOURCE_CLEANUP_INTERVAL
     retry_backoff: float = DEFAULT_RETRY_BACKOFF
     retry_delay: float = DEFAULT_RETRY_DELAY
     rpc_concurrency_limit: int = DEFAULT_RPC_CONCURRENCY_LIMIT
-    stream_buffer_size: int = DEFAULT_BUFFER_SIZE
-    stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
     stream_creation_timeout: float = DEFAULT_STREAM_CREATION_TIMEOUT
     stream_flow_control_increment_bidi: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
     stream_flow_control_increment_uni: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
@@ -139,11 +133,7 @@ class ClientConfig:
 
     @classmethod
     def create_for_production(
-        cls,
-        *,
-        ca_certs: str | None = None,
-        certfile: str | None = None,
-        keyfile: str | None = None,
+        cls, *, ca_certs: str | None = None, certfile: str | None = None, keyfile: str | None = None
     ) -> Self:
         """Factory method to create a client configuration suitable for production."""
         config_dict = {
@@ -195,14 +185,6 @@ class ClientConfig:
         """Validate the integrity and correctness of the configuration values."""
         _validate_common_config(self)
 
-        if self.proxy:
-            try:
-                _validate_timeout(timeout=self.proxy.connect_timeout)
-            except ValueError as e:
-                raise invalid_config(
-                    key="proxy.connect_timeout", value=getattr(self.proxy, "connect_timeout", None), reason=str(e)
-                ) from e
-
         if self.max_retries < 0:
             raise invalid_config(key="max_retries", value=self.max_retries, reason="must be non-negative")
 
@@ -214,18 +196,6 @@ class ClientConfig:
 
         if self.retry_delay <= 0:
             raise invalid_config(key="retry_delay", value=self.retry_delay, reason="must be positive")
-
-        if self.max_streams <= 0:
-            raise invalid_config(key="max_streams", value=self.max_streams, reason="must be positive")
-
-
-@dataclass(kw_only=True)
-class ProxyConfig:
-    """Configuration for connecting through an HTTP proxy."""
-
-    url: str
-    headers: Headers = field(default_factory=dict)
-    connect_timeout: float = DEFAULT_PROXY_CONNECT_TIMEOUT
 
 
 @dataclass(kw_only=True)
@@ -239,8 +209,6 @@ class ServerConfig:
     ca_certs: str | None = None
     certfile: str = DEFAULT_CERTFILE
     congestion_control_algorithm: str = DEFAULT_CONGESTION_CONTROL_ALGORITHM
-    connection_cleanup_interval: float = DEFAULT_CONNECTION_CLEANUP_INTERVAL
-    connection_idle_check_interval: float = DEFAULT_CONNECTION_IDLE_CHECK_INTERVAL
     connection_idle_timeout: float = DEFAULT_CONNECTION_IDLE_TIMEOUT
     connection_keepalive_timeout: float = DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
     debug: bool = DEFAULT_DEBUG
@@ -254,19 +222,19 @@ class ServerConfig:
     log_level: str = DEFAULT_LOG_LEVEL
     max_connections: int = DEFAULT_SERVER_MAX_CONNECTIONS
     max_datagram_size: int = DEFAULT_MAX_DATAGRAM_SIZE
-    max_incoming_streams: int = DEFAULT_MAX_INCOMING_STREAMS
+    max_message_size: int = DEFAULT_MAX_MESSAGE_SIZE
     max_pending_events_per_session: int = DEFAULT_MAX_PENDING_EVENTS_PER_SESSION
-    max_sessions: int = DEFAULT_MAX_SESSIONS
-    max_stream_buffer_size: int = MAX_BUFFER_SIZE
-    max_streams_per_connection: int = DEFAULT_MAX_STREAMS_PER_CONNECTION
+    max_sessions: int = DEFAULT_SERVER_MAX_SESSIONS
+    max_stream_read_buffer: int = DEFAULT_MAX_STREAM_READ_BUFFER
+    max_stream_write_buffer: int = DEFAULT_MAX_STREAM_WRITE_BUFFER
     max_total_pending_events: int = DEFAULT_MAX_TOTAL_PENDING_EVENTS
     middleware: list[MiddlewareProtocol] = field(default_factory=list)
     pending_event_ttl: float = DEFAULT_PENDING_EVENT_TTL
+    pubsub_subscription_queue_size: int = DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
     read_timeout: float | None = DEFAULT_READ_TIMEOUT
+    resource_cleanup_interval: float = DEFAULT_RESOURCE_CLEANUP_INTERVAL
     rpc_concurrency_limit: int = DEFAULT_RPC_CONCURRENCY_LIMIT
-    session_cleanup_interval: float = DEFAULT_SESSION_CLEANUP_INTERVAL
-    stream_buffer_size: int = DEFAULT_BUFFER_SIZE
-    stream_cleanup_interval: float = DEFAULT_STREAM_CLEANUP_INTERVAL
+    stream_creation_timeout: float = DEFAULT_STREAM_CREATION_TIMEOUT
     stream_flow_control_increment_bidi: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
     stream_flow_control_increment_uni: int = DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
     verify_mode: ssl.VerifyMode = DEFAULT_SERVER_VERIFY_MODE
@@ -278,12 +246,7 @@ class ServerConfig:
 
     @classmethod
     def create_for_development(
-        cls,
-        *,
-        host: str = "localhost",
-        port: int = 4433,
-        certfile: str | None = None,
-        keyfile: str | None = None,
+        cls, *, host: str = "localhost", port: int = 4433, certfile: str | None = None, keyfile: str | None = None
     ) -> Self:
         """Factory method to create a server configuration suitable for development."""
         config_dict = {
@@ -304,13 +267,7 @@ class ServerConfig:
 
     @classmethod
     def create_for_production(
-        cls,
-        *,
-        host: str,
-        port: int,
-        certfile: str,
-        keyfile: str,
-        ca_certs: str | None = None,
+        cls, *, host: str, port: int, ca_certs: str | None = None, certfile: str, keyfile: str
     ) -> Self:
         """Factory method to create a server configuration suitable for production."""
         config_dict = {
@@ -375,11 +332,6 @@ class ServerConfig:
         if self.max_sessions <= 0:
             raise invalid_config(key="max_sessions", value=self.max_sessions, reason="must be positive")
 
-        if self.max_streams_per_connection <= 0:
-            raise invalid_config(
-                key="max_streams_per_connection", value=self.max_streams_per_connection, reason="must be positive"
-            )
-
 
 def _normalize_headers(*, headers: dict[str, Any]) -> dict[str, str]:
     """Normalize header keys to lowercase and values to strings."""
@@ -399,20 +351,16 @@ def _validate_common_config(config: ClientConfig | ServerConfig) -> None:
         )
 
     timeouts_to_check = [
-        "connection_cleanup_interval",
-        "connection_idle_check_interval",
         "connection_idle_timeout",
         "connection_keepalive_timeout",
         "pending_event_ttl",
         "read_timeout",
-        "stream_cleanup_interval",
+        "resource_cleanup_interval",
+        "stream_creation_timeout",
         "write_timeout",
     ]
     if isinstance(config, ClientConfig):
-        timeouts_to_check.extend(["close_timeout", "connect_timeout", "stream_creation_timeout"])
-    if isinstance(config, ServerConfig):
-        timeouts_to_check.append("session_cleanup_interval")
-
+        timeouts_to_check.extend(["close_timeout", "connect_timeout"])
     for timeout_name in timeouts_to_check:
         try:
             _validate_timeout(timeout=getattr(config, timeout_name))
@@ -421,54 +369,45 @@ def _validate_common_config(config: ClientConfig | ServerConfig) -> None:
 
     if config.flow_control_window_size <= 0:
         raise invalid_config(
-            key="flow_control_window_size",
-            value=config.flow_control_window_size,
-            reason="must be positive",
+            key="flow_control_window_size", value=config.flow_control_window_size, reason="must be positive"
         )
 
     if config.max_connections <= 0:
         raise invalid_config(key="max_connections", value=config.max_connections, reason="must be positive")
 
-    if config.max_datagram_size <= 0 or config.max_datagram_size > 65535:
-        raise invalid_config(
-            key="max_datagram_size",
-            value=config.max_datagram_size,
-            reason="must be 1-65535",
-        )
+    if isinstance(config, ClientConfig):
+        if config.max_sessions <= 0:
+            raise invalid_config(key="max_sessions", value=config.max_sessions, reason="must be positive")
 
-    if config.max_incoming_streams <= 0:
-        raise invalid_config(
-            key="max_incoming_streams",
-            value=config.max_incoming_streams,
-            reason="must be positive",
-        )
+    if config.max_datagram_size <= 0 or config.max_datagram_size > 65535:
+        raise invalid_config(key="max_datagram_size", value=config.max_datagram_size, reason="must be 1-65535")
+
+    if config.max_message_size <= 0:
+        raise invalid_config(key="max_message_size", value=config.max_message_size, reason="must be positive")
 
     if config.max_pending_events_per_session <= 0:
         raise invalid_config(
-            key="max_pending_events_per_session",
-            value=config.max_pending_events_per_session,
-            reason="must be positive",
+            key="max_pending_events_per_session", value=config.max_pending_events_per_session, reason="must be positive"
         )
 
     if config.max_total_pending_events <= 0:
         raise invalid_config(
-            key="max_total_pending_events",
-            value=config.max_total_pending_events,
-            reason="must be positive",
+            key="max_total_pending_events", value=config.max_total_pending_events, reason="must be positive"
         )
 
-    if config.stream_buffer_size <= 0:
+    if config.max_stream_read_buffer <= 0:
         raise invalid_config(
-            key="stream_buffer_size",
-            value=config.stream_buffer_size,
-            reason="must be positive",
+            key="max_stream_read_buffer", value=config.max_stream_read_buffer, reason="must be positive"
         )
 
-    if config.max_stream_buffer_size < config.stream_buffer_size:
+    if config.max_stream_write_buffer <= 0:
         raise invalid_config(
-            key="max_stream_buffer_size",
-            value=config.max_stream_buffer_size,
-            reason="must be >= stream_buffer_size",
+            key="max_stream_write_buffer", value=config.max_stream_write_buffer, reason="must be positive"
+        )
+
+    if config.pubsub_subscription_queue_size <= 0:
+        raise invalid_config(
+            key="pubsub_subscription_queue_size", value=config.pubsub_subscription_queue_size, reason="must be positive"
         )
 
     if config.stream_flow_control_increment_bidi <= 0:

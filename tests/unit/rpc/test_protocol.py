@@ -26,11 +26,7 @@ class TestRpcErrorResponse:
 
 class TestRpcRequest:
     @pytest.mark.parametrize(
-        ("req_id", "params"),
-        [
-            ("request-string-id", [1, "arg2", True]),
-            (12345, {"kwarg1": "value1", "kwarg2": 100}),
-        ],
+        ("req_id", "params"), [("request-string-id", [1, "arg2", True]), (12345, {"kwarg1": "value1", "kwarg2": 100})]
     )
     def test_instantiation(self, req_id: str | int, params: list[Any] | dict[str, Any]) -> None:
         method_name = "test.method"
@@ -48,10 +44,7 @@ class TestRpcRequest:
 
 class TestRpcSuccessResponse:
     @pytest.mark.parametrize("resp_id", ["response-uuid", 987])
-    @pytest.mark.parametrize(
-        "result",
-        [None, True, "a string result", 42, [1, 2], {"key": "value"}],
-    )
+    @pytest.mark.parametrize("result", [None, True, "a string result", 42, [1, 2], {"key": "value"}])
     def test_instantiation(self, resp_id: str | int, result: Any) -> None:
         response = RpcSuccessResponse(id=resp_id, result=result)
 

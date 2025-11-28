@@ -18,9 +18,7 @@ class TestRequestRouter:
 
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> Any:
-        session = mocker.create_autospec(WebTransportSession, instance=True)
-        session.path_params = ()
-        return session
+        return mocker.create_autospec(WebTransportSession, instance=True)
 
     @pytest.fixture
     def router(self) -> RequestRouter:
@@ -77,12 +75,7 @@ class TestRequestRouter:
 
         assert found_handler is None
 
-    def test_route_request_precedence(
-        self,
-        router: RequestRouter,
-        mock_session: Any,
-        mocker: MockerFixture,
-    ) -> None:
+    def test_route_request_precedence(self, router: RequestRouter, mock_session: Any, mocker: MockerFixture) -> None:
         exact_handler = mocker.AsyncMock()
         pattern_handler = mocker.AsyncMock()
         router.add_route(path="/users/profile", handler=exact_handler)
@@ -94,22 +87,16 @@ class TestRequestRouter:
         assert found_handler is exact_handler
 
     @pytest.mark.parametrize(
-        "path, should_find, expected_params",
+        "path, should_find",
         [
-            ("/exact", "exact_handler", None),
-            ("/users/123", "pattern_handler", ("123",)),
-            ("/items/abc/456", "multi_capture_handler", ("abc", "456")),
-            ("/not-found", "default_handler", None),
+            ("/exact", "exact_handler"),
+            ("/users/123", "pattern_handler"),
+            ("/items/abc/456", "multi_capture_handler"),
+            ("/not-found", "default_handler"),
         ],
     )
     def test_route_request_scenarios(
-        self,
-        router: RequestRouter,
-        mock_session: Any,
-        path: str,
-        should_find: str,
-        expected_params: tuple[str, ...] | None,
-        mocker: MockerFixture,
+        self, router: RequestRouter, mock_session: Any, path: str, should_find: str, mocker: MockerFixture
     ) -> None:
         handlers = {
             "exact_handler": mocker.AsyncMock(name="exact"),
@@ -126,10 +113,6 @@ class TestRequestRouter:
         found_handler = router.route_request(session=mock_session)
 
         assert found_handler is handlers[should_find]
-        if expected_params:
-            assert mock_session.path_params == expected_params
-        else:
-            assert mock_session.path_params == ()
 
     def test_set_default_handler(self, router: RequestRouter, mock_handler: Any) -> None:
         router.set_default_handler(handler=mock_handler)

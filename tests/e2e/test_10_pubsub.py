@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Final
 
 from pywebtransport import ClientConfig, ConnectionError, TimeoutError, WebTransportClient
+from pywebtransport.constants import DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
 from pywebtransport.pubsub import PubSubManager, Subscription
 
 SERVER_HOST: Final[str] = "127.0.0.1"
@@ -50,17 +51,28 @@ async def test_pubsub_basic_echo() -> bool:
             session = await client.connect(url=SERVER_URL)
             async with session:
                 pubsub_stream = await session.create_bidirectional_stream()
-                async with PubSubManager(stream=pubsub_stream) as pubsub:
+                async with PubSubManager(
+                    stream=pubsub_stream, max_queue_size=DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
+                ) as pubsub:
                     subscription = await pubsub.subscribe(topic=topic)
                     async with subscription:
                         logger.info("Subscribed to topic '%s'.", topic)
-                        receiver_task: asyncio.Task[bytes | None] = asyncio.create_task(_receive_message(subscription))
-                        await asyncio.sleep(0.1)
+                        receiver_task: asyncio.Task[bytes | None] = asyncio.create_task(
+                            coro=_receive_message(subscription)
+                        )
+                        await asyncio.sleep(delay=0.1)
 
                         logger.info("Publishing message to '%s': %r", topic, message)
                         await pubsub.publish(topic=topic, data=message)
 
-                        received_message = await asyncio.wait_for(receiver_task, timeout=2.0)
+                        try:
+                            async with asyncio.timeout(delay=2.0):
+                                received_message = await receiver_task
+                        except asyncio.TimeoutError:
+                            receiver_task.cancel()
+                            logger.error("FAILURE: Timed out waiting for message.")
+                            return False
+
                         logger.info("Received message: %r", received_message)
 
                         if received_message == message:
@@ -96,15 +108,18 @@ async def test_pubsub_multiple_subscribers() -> bool:
             async with session1, session2:
                 stream1 = await session1.create_bidirectional_stream()
                 stream2 = await session2.create_bidirectional_stream()
-                async with PubSubManager(stream=stream1) as pubsub1, PubSubManager(stream=stream2) as pubsub2:
+                async with (
+                    PubSubManager(stream=stream1, max_queue_size=DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE) as pubsub1,
+                    PubSubManager(stream=stream2, max_queue_size=DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE) as pubsub2,
+                ):
                     sub1 = await pubsub1.subscribe(topic=topic)
                     sub2 = await pubsub2.subscribe(topic=topic)
 
                     async with sub1, sub2:
                         logger.info("Both sessions subscribed to '%s'.", topic)
-                        receiver1_task: asyncio.Task[bytes | None] = asyncio.create_task(_receive_message(sub1))
-                        receiver2_task: asyncio.Task[bytes | None] = asyncio.create_task(_receive_message(sub2))
-                        await asyncio.sleep(0.1)
+                        receiver1_task: asyncio.Task[bytes | None] = asyncio.create_task(coro=_receive_message(sub1))
+                        receiver2_task: asyncio.Task[bytes | None] = asyncio.create_task(coro=_receive_message(sub2))
+                        await asyncio.sleep(delay=0.1)
 
                         logger.info("Session 1 publishing message: %r", message)
                         await pubsub1.publish(topic=topic, data=message)
@@ -145,26 +160,38 @@ async def test_pubsub_unsubscribe() -> bool:
             async with session1, session2:
                 stream1 = await session1.create_bidirectional_stream()
                 stream2 = await session2.create_bidirectional_stream()
-                async with PubSubManager(stream=stream1) as pubsub1, PubSubManager(stream=stream2) as pubsub2:
+                async with (
+                    PubSubManager(stream=stream1, max_queue_size=DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE) as pubsub1,
+                    PubSubManager(stream=stream2, max_queue_size=DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE) as pubsub2,
+                ):
                     sub1 = await pubsub1.subscribe(topic=topic)
                     sub2 = await pubsub2.subscribe(topic=topic)
 
                     async with sub1, sub2:
                         logger.info("Client 2 unsubscribing from '%s'...", topic)
                         await sub2.unsubscribe()
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(delay=0.1)
 
-                        receiver1_task: asyncio.Task[bytes | None] = asyncio.create_task(_receive_message(sub1))
+                        receiver1_task: asyncio.Task[bytes | None] = asyncio.create_task(coro=_receive_message(sub1))
                         logger.info("Client 1 publishing message: %r", message)
                         await pubsub1.publish(topic=topic, data=message)
-                        received1 = await asyncio.wait_for(receiver1_task, timeout=2.0)
+
+                        try:
+                            async with asyncio.timeout(delay=2.0):
+                                received1 = await receiver1_task
+                        except asyncio.TimeoutError:
+                            receiver1_task.cancel()
+                            logger.error("FAILURE: Client 1 timed out receiving message")
+                            return False
+
                         assert received1 == message
                         logger.info("SUCCESS: Client 1 (still subscribed) received the message.")
 
                         logger.info("Verifying Client 2 (unsubscribed) does not receive the message...")
-                        receiver2_task = asyncio.create_task(_receive_message(sub2))
+                        receiver2_task = asyncio.create_task(coro=_receive_message(sub2))
                         try:
-                            received2 = await asyncio.wait_for(receiver2_task, timeout=1.0)
+                            async with asyncio.timeout(delay=1.0):
+                                received2 = await receiver2_task
                             if received2 is None:
                                 logger.info("SUCCESS: Client 2's subscription iterator ended gracefully.")
                                 return True
@@ -172,6 +199,7 @@ async def test_pubsub_unsubscribe() -> bool:
                                 logger.error("FAILURE: Client 2 received a message after unsubscribing: %r", received2)
                                 return False
                         except asyncio.TimeoutError:
+                            receiver2_task.cancel()
                             logger.info("SUCCESS: Client 2 correctly timed out waiting for a message.")
                             return True
     except Exception as e:
@@ -194,19 +222,28 @@ async def test_pubsub_multiple_topics() -> bool:
             session = await client.connect(url=SERVER_URL)
             async with session:
                 pubsub_stream = await session.create_bidirectional_stream()
-                async with PubSubManager(stream=pubsub_stream) as pubsub:
+                async with PubSubManager(
+                    stream=pubsub_stream, max_queue_size=DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
+                ) as pubsub:
                     sub_a = await pubsub.subscribe(topic="topic-a")
                     sub_b = await pubsub.subscribe(topic="topic-b")
 
                     async with sub_a, sub_b:
-                        receiver_a_task: asyncio.Task[bytes | None] = asyncio.create_task(_receive_message(sub_a))
-                        receiver_b_task: asyncio.Task[bytes | None] = asyncio.create_task(_receive_message(sub_b))
+                        receiver_a_task: asyncio.Task[bytes | None] = asyncio.create_task(coro=_receive_message(sub_a))
+                        receiver_b_task: asyncio.Task[bytes | None] = asyncio.create_task(coro=_receive_message(sub_b))
 
                         message_a = b"Message for A"
                         logger.info("Publishing to 'topic-a': %r", message_a)
                         await pubsub.publish(topic="topic-a", data=message_a)
 
-                        received_a = await asyncio.wait_for(receiver_a_task, timeout=2.0)
+                        try:
+                            async with asyncio.timeout(delay=2.0):
+                                received_a = await receiver_a_task
+                        except asyncio.TimeoutError:
+                            receiver_a_task.cancel()
+                            logger.error("FAILURE: Subscription A timed out")
+                            return False
+
                         assert received_a == message_a
                         logger.info("SUCCESS: Subscription for 'topic-a' received the correct message.")
 
@@ -248,7 +285,7 @@ async def main() -> int:
             logger.error("%s: FAILED - %s", test_name, e)
         except Exception as e:
             logger.error("%s: CRASHED - %s", test_name, e, exc_info=True)
-        await asyncio.sleep(1)
+        await asyncio.sleep(delay=1)
 
     logger.info("")
     logger.info("=" * 60)

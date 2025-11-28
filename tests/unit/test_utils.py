@@ -3,7 +3,6 @@
 import logging
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from aioquic.quic.configuration import QuicConfiguration
@@ -22,6 +21,7 @@ from pywebtransport.utils import (
 
 
 class TestCertUtils:
+
     def test_generate_self_signed_cert(self, mocker: MockerFixture, tmp_path: Path) -> None:
         mocker.patch("pywebtransport.utils.rsa.generate_private_key")
         mocker.patch("pywebtransport.utils.x509.CertificateBuilder")
@@ -41,37 +41,34 @@ class TestCertUtils:
 
 
 class TestConfigurationUtils:
-    @pytest.fixture
-    def mock_quic_config(self, mocker: MockerFixture) -> MagicMock:
-        return mocker.patch("pywebtransport.utils.QuicConfiguration", spec=QuicConfiguration)
 
     @pytest.mark.parametrize("is_client", [True, False])
-    def test_create_quic_configuration(self, mock_quic_config: MagicMock, is_client: bool) -> None:
+    def test_create_quic_configuration(self, mocker: MockerFixture, is_client: bool) -> None:
+        mock_quic_config = mocker.patch("pywebtransport.utils.QuicConfiguration", spec=QuicConfiguration)
+
         config = create_quic_configuration(
-            is_client=is_client,
             alpn_protocols=["h3"],
             congestion_control_algorithm="reno",
+            idle_timeout=60.0,
+            is_client=is_client,
             max_datagram_size=1200,
         )
 
         assert config == mock_quic_config.return_value
         mock_quic_config.assert_called_once_with(
-            is_client=is_client,
             alpn_protocols=["h3"],
             congestion_control_algorithm="reno",
+            idle_timeout=60.0,
+            is_client=is_client,
             max_datagram_frame_size=1200,
         )
 
 
 class TestDataConversionAndFormatting:
+
     @pytest.mark.parametrize(
         "data, expected",
-        [
-            ("hello", b"hello"),
-            (b"world", b"world"),
-            (bytearray(b"array"), b"array"),
-            (memoryview(b"view"), b"view"),
-        ],
+        [("hello", b"hello"), (b"world", b"world"), (bytearray(b"array"), b"array"), (memoryview(b"view"), b"view")],
     )
     def test_ensure_bytes(self, data: Any, expected: bytes) -> None:
         result = ensure_bytes(data=data)
@@ -83,8 +80,7 @@ class TestDataConversionAndFormatting:
             ensure_bytes(data=123)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
-        "seconds, expected",
-        [(0.1234, "123.4ms"), (5.67, "5.7s"), (90.5, "1m30.5s"), (3723.1, "1h2m3.1s")],
+        "seconds, expected", [(0.1234, "123.4ms"), (5.67, "5.7s"), (90.5, "1m30.5s"), (3723.1, "1h2m3.1s")]
     )
     def test_format_duration(self, seconds: float, expected: str) -> None:
         result = format_duration(seconds=seconds)
@@ -93,7 +89,8 @@ class TestDataConversionAndFormatting:
 
 
 class TestIdGenerators:
-    def test_id_generators(self, mocker: MockerFixture) -> None:
+
+    def test_generate_session_id(self, mocker: MockerFixture) -> None:
         mock_token = mocker.patch("pywebtransport.utils.secrets.token_urlsafe")
         mock_token.return_value = "test-id"
 
@@ -104,6 +101,7 @@ class TestIdGenerators:
 
 
 class TestLoggingUtils:
+
     def test_get_logger(self) -> None:
         logger = get_logger(name="test")
 
@@ -112,6 +110,7 @@ class TestLoggingUtils:
 
 
 class TestTimer:
+
     def test_timer_context_manager(self, mocker: MockerFixture) -> None:
         mocker.patch("time.time", side_effect=[2000.0, 2002.3, 2002.3])
         mocker.patch("pywebtransport.utils.format_duration", return_value="2.3s")
@@ -148,6 +147,7 @@ class TestTimer:
 
 
 class TestTimestamp:
+
     def test_get_timestamp(self, mocker: MockerFixture) -> None:
         mocker.patch("pywebtransport.utils.time.time", return_value=12345.678)
 

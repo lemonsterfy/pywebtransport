@@ -5,12 +5,14 @@ import asyncio
 import pytest
 
 from pywebtransport import (
+    Event,
     ServerApp,
     WebTransportClient,
     WebTransportReceiveStream,
     WebTransportSession,
     WebTransportStream,
 )
+from pywebtransport.types import EventType
 
 pytestmark = pytest.mark.asyncio
 
@@ -23,12 +25,22 @@ async def test_bidirectional_stream_echo(
 
     @server_app.route(path="/echo")
     async def echo_handler(session: WebTransportSession) -> None:
+        stream_queue: asyncio.Queue[WebTransportStream] = asyncio.Queue()
+
+        async def on_stream(event: Event) -> None:
+            if isinstance(event.data, dict):
+                s = event.data.get("stream")
+                if isinstance(s, WebTransportStream):
+                    stream_queue.put_nowait(s)
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
+
         try:
-            async for stream in session.incoming_streams():
-                if isinstance(stream, WebTransportStream):
-                    data = await stream.read_all()
-                    await stream.write_all(data=data)
-        except asyncio.CancelledError:
+            stream = await stream_queue.get()
+            data = await stream.read()
+            await stream.write(data=data)
+            await stream.close()
+        except Exception:
             pass
         finally:
             server_handler_finished.set()
@@ -37,11 +49,14 @@ async def test_bidirectional_stream_echo(
     async with session:
         stream = await session.create_bidirectional_stream()
         test_message = b"Hello, bidirectional world!"
-        await stream.write_all(data=test_message)
-        response = await stream.read_all()
-        assert response == test_message
+        await stream.write(data=test_message)
 
-    await asyncio.wait_for(server_handler_finished.wait(), timeout=1.0)
+        response = await stream.read()
+        assert response == test_message
+        await stream.close()
+
+    async with asyncio.timeout(2.0):
+        await server_handler_finished.wait()
 
 
 async def test_concurrent_streams_and_datagrams(
@@ -52,58 +67,70 @@ async def test_concurrent_streams_and_datagrams(
 
     @server_app.route(path="/concurrent")
     async def concurrent_handler(session: WebTransportSession) -> None:
-        async def _handle_streams() -> None:
-            try:
-                async for stream in session.incoming_streams():
-                    if isinstance(stream, WebTransportStream):
-                        data = await stream.read_all()
-                        await stream.write_all(data=data)
-            except asyncio.CancelledError:
-                pass
+        async def on_stream(event: Event) -> None:
+            if isinstance(event.data, dict):
+                s = event.data.get("stream")
+                if isinstance(s, WebTransportStream):
+                    data = await s.read()
+                    await s.write(data=data)
+                    await s.close()
 
-        async def _handle_datagrams() -> None:
-            datagram_transport = await session.create_datagram_transport()
-            while not session.is_closed:
-                try:
-                    data = await datagram_transport.receive(timeout=0.1)
-                    await datagram_transport.send(data=data)
-                except asyncio.TimeoutError:
-                    continue
-                except asyncio.CancelledError:
-                    break
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
 
-        stream_task = asyncio.create_task(_handle_streams())
-        datagram_task = asyncio.create_task(_handle_datagrams())
+        async def on_datagram(event: Event) -> None:
+            if isinstance(event.data, dict):
+                d = event.data.get("data")
+                if d:
+                    await session.send_datagram(data=d)
+
+        session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=on_datagram)
+
         try:
-            await session.wait_closed()
-        finally:
-            stream_task.cancel()
-            datagram_task.cancel()
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
+            pass
 
     async def _stream_worker(*, session: WebTransportSession, i: int) -> bool:
         stream = await session.create_bidirectional_stream()
         msg = f"Stream worker {i}".encode()
-        await stream.write_all(data=msg)
-        response = await stream.read_all()
+        await stream.write(data=msg)
+        response = await stream.read()
+        await stream.close()
         return response == msg
 
     async def _datagram_worker(*, session: WebTransportSession, i: int) -> bool:
-        datagram_transport = await session.create_datagram_transport()
         msg = f"Datagram worker {i}".encode()
-        await datagram_transport.send(data=msg)
-        response = await datagram_transport.receive(timeout=5.0)
-        return response == msg
+        fut: asyncio.Future[bool] = asyncio.Future()
+
+        def listener(event: Event) -> None:
+            if isinstance(event.data, dict) and event.data.get("data") == msg:
+                if not fut.done():
+                    fut.set_result(True)
+
+        session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=listener)
+        for _ in range(3):
+            if fut.done():
+                break
+            await session.send_datagram(data=msg)
+            await asyncio.sleep(0.1)
+
+        try:
+            async with asyncio.timeout(2.0):
+                await fut
+            return True
+        except TimeoutError:
+            return False
+        finally:
+            session.events.off(event_type=EventType.DATAGRAM_RECEIVED, handler=listener)
 
     session = await client.connect(url=f"https://{host}:{port}/concurrent")
     async with session:
         stream_tasks = [_stream_worker(session=session, i=i) for i in range(num_concurrent_ops)]
         datagram_tasks = [_datagram_worker(session=session, i=i) for i in range(num_concurrent_ops)]
-        all_tasks = stream_tasks + datagram_tasks
-        results = await asyncio.gather(*all_tasks, return_exceptions=True)
+        results = await asyncio.gather(*(stream_tasks + datagram_tasks), return_exceptions=True)
 
     for result in results:
-        assert not isinstance(result, Exception), f"A worker failed with an exception: {result}"
-        assert result is True, "A worker returned a failure result."
+        assert result is True
 
 
 async def test_datagram_echo(server: tuple[str, int], client: WebTransportClient, server_app: ServerApp) -> None:
@@ -112,24 +139,44 @@ async def test_datagram_echo(server: tuple[str, int], client: WebTransportClient
 
     @server_app.route(path="/datagram")
     async def datagram_echo_handler(session: WebTransportSession) -> None:
-        datagram_transport = await session.create_datagram_transport()
+        async def on_datagram(event: Event) -> None:
+            if isinstance(event.data, dict):
+                data = event.data.get("data")
+                if data:
+                    await session.send_datagram(data=data)
+                    server_handler_finished.set()
+
+        session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=on_datagram)
         try:
-            data = await datagram_transport.receive(timeout=5.0)
-            await datagram_transport.send(data=data)
-        except asyncio.CancelledError:
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
             pass
-        finally:
-            server_handler_finished.set()
 
     session = await client.connect(url=f"https://{host}:{port}/datagram")
     async with session:
-        datagram_transport = await session.create_datagram_transport()
         test_message = b"Hello, datagram world!"
-        await datagram_transport.send(data=test_message)
-        response = await datagram_transport.receive(timeout=5.0)
-        assert response == test_message
+        fut: asyncio.Future[bool] = asyncio.Future()
 
-    await asyncio.wait_for(server_handler_finished.wait(), timeout=1.0)
+        def listener(event: Event) -> None:
+            if isinstance(event.data, dict) and event.data.get("data") == test_message:
+                if not fut.done():
+                    fut.set_result(True)
+
+        session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=listener)
+
+        for _ in range(5):
+            await session.send_datagram(data=test_message)
+            try:
+                async with asyncio.timeout(0.5):
+                    await asyncio.shield(fut)
+                break
+            except TimeoutError:
+                continue
+        else:
+            pytest.fail("Datagram echo timed out")
+
+    async with asyncio.timeout(2.0):
+        await server_handler_finished.wait()
 
 
 async def test_unidirectional_stream_to_server(
@@ -140,19 +187,27 @@ async def test_unidirectional_stream_to_server(
 
     @server_app.route(path="/uni")
     async def uni_handler(session: WebTransportSession) -> None:
+        async def on_stream(event: Event) -> None:
+            if isinstance(event.data, dict):
+                s = event.data.get("stream")
+                if isinstance(s, WebTransportReceiveStream):
+                    data = await s.read()
+                    await data_queue.put(data)
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
         try:
-            stream = await anext(session.incoming_streams())
-            if isinstance(stream, WebTransportReceiveStream):
-                data = await stream.read_all()
-                await data_queue.put(data)
-        except (asyncio.CancelledError, StopAsyncIteration):
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
             pass
 
     session = await client.connect(url=f"https://{host}:{port}/uni")
     async with session:
         stream = await session.create_unidirectional_stream()
         test_message = b"Hello, unidirectional world!"
-        await stream.write_all(data=test_message)
+        await stream.write(data=test_message)
+        await stream.close()
 
-    received_data = await asyncio.wait_for(data_queue.get(), timeout=2.0)
+    async with asyncio.timeout(2.0):
+        received_data = await data_queue.get()
+
     assert received_data == test_message

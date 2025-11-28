@@ -10,25 +10,23 @@ from pywebtransport import (
     ConnectionError,
     ServerApp,
     StreamError,
+    TimeoutError,
     WebTransportClient,
     WebTransportSession,
 )
+from pywebtransport.types import EventType, SessionState
 
 pytestmark = pytest.mark.asyncio
 
 
 async def idle_handler(session: WebTransportSession) -> None:
     try:
-        await session.wait_closed()
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     except asyncio.CancelledError:
         pass
 
 
-@pytest.mark.parametrize(
-    "server_app",
-    [{"max_connections": 1}],
-    indirect=True,
-)
+@pytest.mark.parametrize("server_app", [{"max_connections": 1}], indirect=True)
 async def test_max_connections_limit_rejection(
     server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig
 ) -> None:
@@ -37,31 +35,44 @@ async def test_max_connections_limit_rejection(
     url = f"https://{host}:{port}/"
 
     async with WebTransportClient(config=client_config) as client1:
-        async with await client1.connect(url=url) as session1:
-            assert session1.is_ready, "First client should connect successfully."
-
+        session1 = await client1.connect(url=url)
+        try:
             async with WebTransportClient(config=client_config) as client2:
-                with pytest.raises((ClientError, ConnectionError, asyncio.TimeoutError)):
+                with pytest.raises((ClientError, ConnectionError, TimeoutError, asyncio.TimeoutError)):
                     await client2.connect(url=url)
+        finally:
+            if not session1.is_closed:
+                await session1.close()
 
 
-@pytest.mark.parametrize("server_app", [{"max_streams_per_connection": 2}], indirect=True)
+@pytest.mark.parametrize(
+    "server_app", [{"initial_max_streams_bidi": 2, "flow_control_window_auto_scale": False}], indirect=True
+)
 async def test_max_streams_limit(server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig) -> None:
     server_app.route(path="/")(idle_handler)
     host, port = server
     url = f"https://{host}:{port}/"
 
-    client_with_limit_config = client_config.update(max_streams=2)
-    async with WebTransportClient(config=client_with_limit_config) as client:
+    async with WebTransportClient(config=client_config) as client:
         async with await client.connect(url=url) as session:
-            _ = await session.create_bidirectional_stream()
-            _ = await session.create_bidirectional_stream()
+            await asyncio.sleep(delay=0.2)
 
-            with pytest.raises(StreamError, match="stream limit"):
-                await session.create_bidirectional_stream()
+            s1 = await session.create_bidirectional_stream()
+            s2 = await session.create_bidirectional_stream()
+
+            await s1.write(data=b"1")
+            await s2.write(data=b"2")
+
+            with pytest.raises((StreamError, TimeoutError, asyncio.TimeoutError)):
+                async with asyncio.timeout(delay=1.0):
+                    await session.create_bidirectional_stream()
 
 
-@pytest.mark.parametrize("server_app", [{"connection_cleanup_interval": 0.1}], indirect=True)
+@pytest.mark.parametrize(
+    "server_app",
+    [{"connection_idle_timeout": 0.2, "resource_cleanup_interval": 0.1}],
+    indirect=True,
+)
 async def test_server_cleans_up_closed_connection(
     server_app: ServerApp, server: tuple[str, int], client_config: ClientConfig
 ) -> None:
@@ -73,20 +84,21 @@ async def test_server_cleans_up_closed_connection(
     assert len(await connection_manager.get_all_resources()) == 0
 
     async with WebTransportClient(config=client_config) as client:
-        async with await client.connect(url=url) as session:
-            assert session.is_ready
+        session = await client.connect(url=url)
+        try:
+            assert session.state == SessionState.CONNECTED
 
-            timeout_at = asyncio.get_running_loop().time() + 1.0
-            while len(await connection_manager.get_all_resources()) < 1:
-                if asyncio.get_running_loop().time() > timeout_at:
-                    pytest.fail("Connection was not added to manager in time.")
-                await asyncio.sleep(0.05)
+            async with asyncio.timeout(delay=2.0):
+                while len(await connection_manager.get_all_resources()) < 1:
+                    await asyncio.sleep(delay=0.05)
+
             assert len(await connection_manager.get_all_resources()) == 1
+        finally:
+            await session.close()
+            await client.close()
 
-    timeout_at = asyncio.get_running_loop().time() + 2.0
-    while len(await connection_manager.get_all_resources()) > 0:
-        if asyncio.get_running_loop().time() > timeout_at:
-            pytest.fail("Server did not clean up closed connection in time.")
-        await asyncio.sleep(0.05)
+    async with asyncio.timeout(delay=5.0):
+        while len(await connection_manager.get_all_resources()) > 0:
+            await asyncio.sleep(delay=0.1)
 
     assert len(await connection_manager.get_all_resources()) == 0
