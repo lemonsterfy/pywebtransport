@@ -33,12 +33,14 @@ Enumeration of system event types.
 - `PROTOCOL_ERROR` (`str`): "protocol_error"
 - `SETTINGS_RECEIVED` (`str`): "settings_received"
 - `SESSION_CLOSED` (`str`): "session_closed"
+- `SESSION_DATA_BLOCKED` (`str`): "session_data_blocked"
 - `SESSION_DRAINING` (`str`): "session_draining"
 - `SESSION_MAX_DATA_UPDATED` (`str`): "session_max_data_updated"
 - `SESSION_MAX_STREAMS_BIDI_UPDATED` (`str`): "session_max_streams_bidi_updated"
 - `SESSION_MAX_STREAMS_UNI_UPDATED` (`str`): "session_max_streams_uni_updated"
 - `SESSION_READY` (`str`): "session_ready"
 - `SESSION_REQUEST` (`str`): "session_request"
+- `SESSION_STREAMS_BLOCKED` (`str`): "session_streams_blocked"
 - `STREAM_CLOSED` (`str`): "stream_closed"
 - `STREAM_DATA_RECEIVED` (`str`): "stream_data_received"
 - `STREAM_ERROR` (`str`): "stream_error"
@@ -82,10 +84,11 @@ Enumeration of WebTransport stream states.
 - `AsyncIterator` (`AsyncIterator`): A re-export of `collections.abc.AsyncIterator`.
 - `Buffer` (`bytes | bytearray | memoryview`): A low-level buffer type.
 - `ConnectionId` (`str`): A unique identifier for a connection.
-- `Data` (`bytes | str`): Data that can be sent over a stream.
+- `Data` (`bytes | bytearray | memoryview | str`): Data that can be sent over a stream.
 - `ErrorCode` (`int`): A numeric code for QUIC-level errors.
 - `EventData` (`Any`): The payload of a generic event.
 - `EventType` (`EventType`): An enumeration of event types.
+- `Future` (`asyncio.Future`): An alias for `asyncio.Future`.
 - `Headers` (`dict[str, str]`): HTTP headers.
 - `Priority` (`int`): A priority level for resources.
 - `SSLContext` (`ssl.SSLContext`): An SSL context for secure connections.

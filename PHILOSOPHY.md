@@ -4,14 +4,18 @@ This document outlines the core principles that guide the design and development
 
 ---
 
-PyWebTransport is engineered to be a **standards-compliant and robust** implementation of the WebTransport protocol for the Python ecosystem. Our philosophy prioritizes standards compliance, a clean architecture, and long-term maintainability.
+PyWebTransport is engineered to be a **standards-compliant and robust** implementation of the WebTransport protocol for the Python ecosystem. Our philosophy prioritizes standards compliance, clean architecture, and long-term maintainability.
+
+## Core Tenets
+
+- **The Standard is the Sole Authority**: We treat IETF Drafts and formal RFCs as the only technical basis for implementation decisions.
+- **Rejection of Compatibility Patches**: The core implementation does not include compatibility patches or workarounds for non-standard, flawed, or outdated clients. Strict adherence to the standard is the foundation of a healthy, interoperable ecosystem.
 
 ### 1. Strict Adherence to Standards
 
-The primary responsibility of this library is correctness. The core protocol layer—encompassing connection, stream, and datagram management—is implemented in strict accordance with the official IETF WebTransport specifications, currently targeting **[draft-ietf-webtrans-http3-13](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.txt)**.
+The primary responsibility of this library is correctness. The core protocol layer—encompassing connection, stream, and datagram management—is implemented in strict accordance with the official IETF WebTransport specifications, currently targeting **[draft-ietf-webtrans-http3-14](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.txt)**.
 
-- **Standard as the Sole Authority**: We treat the official IETF drafts and RFCs as the single source of truth.
-- **No Compatibility Patches**: The core implementation does not include patches or workarounds for buggy, non-standard, or outdated clients. We believe that adhering strictly to the standard is the best way to foster a healthy and interoperable ecosystem.
+**Note on Active Draft Implementations**: When our target specification remains in an active IETF draft stage, this library will prioritize tracking and implementing the IETF Working Group's (WG) latest live consensus, even if that consensus is not yet reflected in the published draft text. This approach ensures forward-compatibility and avoids implementing features already deprecated by WG resolution.
 
 ### 2. Layered and Composable Design
 

@@ -8,8 +8,6 @@ This module provides the core components for the library's event-driven architec
 
 A versatile base class for all system events.
 
-**Note on Usage**: The constructor for `Event` requires all parameters to be passed as keyword arguments.
-
 ### Constructor
 
 - **`def __init__(self, *, type: EventType | str, timestamp: float = <factory>, data: EventData | None = None, source: Any | None = None, event_id: str = <factory>) -> None`**: Initializes a new event object.
@@ -55,6 +53,7 @@ An emitter for handling and dispatching events asynchronously.
 - **`async def close(self) -> None`**: Cancels running tasks and clears all listeners.
 - **`def clear_history(self) -> None`**: Clears the event history.
 - **`async def emit(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None`**: Asynchronously creates and dispatches an event.
+- **`def emit_nowait(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None`**: Schedules an event emission synchronously without blocking (fire-and-forget).
 - **`def get_event_history(self, *, event_type: EventType | str | None = None, limit: int = 100) -> list[Event]`**: Retrieves the history of recorded events.
 - **`def get_stats(self) -> dict[str, Any]`**: Returns a dictionary of statistics about the emitter.
 - **`def listener_count(self, *, event_type: EventType | str) -> int`**: Returns the number of listeners for a given event type.

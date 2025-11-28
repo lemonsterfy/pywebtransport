@@ -11,11 +11,7 @@ class TestRpcError:
         message = "Invalid request format."
         details = {"field": "missing_id"}
 
-        error = RpcError(
-            message=message,
-            error_code=RpcErrorCode.INVALID_REQUEST,
-            details=details,
-        )
+        error = RpcError(message=message, error_code=RpcErrorCode.INVALID_REQUEST, details=details)
 
         assert error.message == message
         assert error.error_code == RpcErrorCode.INVALID_REQUEST
@@ -72,11 +68,7 @@ class TestRpcErrorCode:
     ],
 )
 class TestSpecializedRpcErrors:
-    def test_specialized_error_init(
-        self,
-        exception_class: type[RpcError],
-        expected_code: RpcErrorCode,
-    ) -> None:
+    def test_specialized_error_init(self, exception_class: type[RpcError], expected_code: RpcErrorCode) -> None:
         message = f"This is a test for {exception_class.__name__}"
 
         error = exception_class(message=message)
@@ -87,9 +79,7 @@ class TestSpecializedRpcErrors:
         assert error.session_id is None
 
     def test_specialized_error_init_with_session_id(
-        self,
-        exception_class: type[RpcError],
-        expected_code: RpcErrorCode,
+        self, exception_class: type[RpcError], expected_code: RpcErrorCode
     ) -> None:
         message = f"Another test for {exception_class.__name__}"
         session_id: SessionId = "session-special-456"

@@ -53,8 +53,7 @@ class ProtobufSerializer(Serializer):
             return instance
         except (DecodeError, Exception) as e:
             raise SerializationError(
-                message=f"Failed to deserialize data into '{self._message_class.__name__}'.",
-                original_exception=e,
+                message=f"Failed to deserialize data into '{self._message_class.__name__}'.", original_exception=e
             ) from e
 
     def serialize(self, *, obj: Any) -> bytes:
@@ -70,7 +69,4 @@ class ProtobufSerializer(Serializer):
         try:
             return cast(bytes, obj.SerializeToString())
         except Exception as e:
-            raise SerializationError(
-                message=f"Failed to serialize Protobuf message: {e}",
-                original_exception=e,
-            ) from e
+            raise SerializationError(message=f"Failed to serialize Protobuf message: {e}", original_exception=e) from e

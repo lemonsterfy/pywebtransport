@@ -35,24 +35,22 @@ class TestBaseDataclassSerializer:
     def serializer(self) -> _BaseDataclassSerializer:
         return _BaseDataclassSerializer()
 
-    def test_convert_to_simple_dataclass(self, serializer: _BaseDataclassSerializer) -> None:
-        data = {"value_int": 10, "value_str": "hello"}
+    def test_convert_ignores_extra_fields(self, serializer: _BaseDataclassSerializer) -> None:
+        data = {"value_int": 1, "value_str": "text", "extra_field": "ignore"}
+
         result = serializer._convert_to_type(data=data, target_type=SimpleDataclass)
 
         assert isinstance(result, SimpleDataclass)
-        assert result.value_int == 10
-        assert result.value_str == "hello"
+        assert not hasattr(result, "extra_field")
 
     def test_convert_to_complex_dataclass(self, serializer: _BaseDataclassSerializer) -> None:
         data = {
             "simple": {"value_int": 1, "value_str": "nested"},
             "items": ["2", "3", "4"],
-            "mapping": {
-                "first": {"value_int": 100, "value_str": "a"},
-                "second": {"value_int": 200, "value_str": "b"},
-            },
+            "mapping": {"first": {"value_int": 100, "value_str": "a"}, "second": {"value_int": 200, "value_str": "b"}},
             "optional_value": "provided",
         }
+
         result = serializer._convert_to_type(data=data, target_type=ComplexDataclass)
 
         assert isinstance(result, ComplexDataclass)
@@ -64,20 +62,14 @@ class TestBaseDataclassSerializer:
         assert result.optional_value == "provided"
         assert result.defaults == "default"
 
-    def test_convert_ignores_extra_fields(self, serializer: _BaseDataclassSerializer) -> None:
-        data = {"value_int": 1, "value_str": "text", "extra_field": "ignore"}
+    def test_convert_to_simple_dataclass(self, serializer: _BaseDataclassSerializer) -> None:
+        data = {"value_int": 10, "value_str": "hello"}
+
         result = serializer._convert_to_type(data=data, target_type=SimpleDataclass)
 
         assert isinstance(result, SimpleDataclass)
-        assert not hasattr(result, "extra_field")
-
-    def test_from_dict_to_dataclass_raises_serialization_error(self, serializer: _BaseDataclassSerializer) -> None:
-        data = {"optional_with_default": 456}
-        with pytest.raises(SerializationError) as exc_info:
-            serializer._from_dict_to_dataclass(data=data, cls=DataclassWithMissingField)
-
-        assert "Failed to unpack dictionary" in str(exc_info.value)
-        assert isinstance(exc_info.value.__cause__, TypeError)
+        assert result.value_int == 10
+        assert result.value_str == "hello"
 
     @pytest.mark.parametrize(
         "data, target_type, expected",
@@ -110,4 +102,14 @@ class TestBaseDataclassSerializer:
         self, serializer: _BaseDataclassSerializer, data: Any, target_type: Any, expected: Any
     ) -> None:
         result = serializer._convert_to_type(data=data, target_type=target_type)
+
         assert result == expected
+
+    def test_from_dict_to_dataclass_raises_serialization_error(self, serializer: _BaseDataclassSerializer) -> None:
+        data = {"optional_with_default": 456}
+
+        with pytest.raises(SerializationError) as exc_info:
+            serializer._from_dict_to_dataclass(data=data, cls=DataclassWithMissingField)
+
+        assert "Failed to unpack dictionary" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, TypeError)

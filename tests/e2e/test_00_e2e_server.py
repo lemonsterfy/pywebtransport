@@ -8,25 +8,29 @@ import sys
 import time
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
 
 from pywebtransport import (
     ConnectionError,
+    Event,
     ServerApp,
     ServerConfig,
+    SessionError,
     StreamError,
     StructuredDatagramTransport,
     StructuredStream,
+    TimeoutError,
     WebTransportReceiveStream,
     WebTransportSession,
     WebTransportStream,
 )
+from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE
 from pywebtransport.rpc import InvalidParamsError, MethodNotFoundError, RpcError
 from pywebtransport.serializer import JSONSerializer, MsgPackSerializer
-from pywebtransport.types import EventType
-from pywebtransport.utils import generate_self_signed_cert
+from pywebtransport.types import ConnectionState, EventType, SessionState
+from pywebtransport.utils import generate_self_signed_cert, get_timestamp
 
 CERT_PATH: Final[Path] = Path("localhost.crt")
 KEY_PATH: Final[Path] = Path("localhost.key")
@@ -70,66 +74,6 @@ class UserData:
     email: str
 
 
-class ServerStatistics:
-    """Collects and manages server statistics."""
-
-    def __init__(self) -> None:
-        """Initialize the statistics collector."""
-        self.start_time = time.time()
-        self.connections_total = 0
-        self.sessions_total = 0
-        self.streams_total = 0
-        self.datagrams_total = 0
-        self.bytes_transferred = 0
-        self.active_sessions: set[str] = set()
-        self.active_streams: set[int] = set()
-
-    def get_stats(self) -> dict[str, Any]:
-        """Return a dictionary of all current server statistics."""
-        uptime = time.time() - self.start_time
-        return {
-            "uptime": uptime,
-            "connections_total": self.connections_total,
-            "sessions_total": self.sessions_total,
-            "sessions_active": len(self.active_sessions),
-            "streams_total": self.streams_total,
-            "streams_active": len(self.active_streams),
-            "datagrams_total": self.datagrams_total,
-            "bytes_transferred": self.bytes_transferred,
-            "start_time": self.start_time,
-        }
-
-    def record_bytes(self, *, byte_count: int) -> None:
-        """Add to the total bytes transferred."""
-        self.bytes_transferred += byte_count
-
-    def record_connection(self) -> None:
-        """Increment the total connections counter."""
-        self.connections_total += 1
-
-    def record_datagram(self) -> None:
-        """Increment the total datagrams counter."""
-        self.datagrams_total += 1
-
-    def record_session_end(self, *, session_id: str) -> None:
-        """Record the end of an active session."""
-        self.active_sessions.discard(session_id)
-
-    def record_session_start(self, *, session_id: str) -> None:
-        """Record the start of a new session."""
-        self.sessions_total += 1
-        self.active_sessions.add(session_id)
-
-    def record_stream_end(self, *, stream_id: int) -> None:
-        """Record the end of an active stream."""
-        self.active_streams.discard(stream_id)
-
-    def record_stream_start(self, *, stream_id: int) -> None:
-        """Record the start of a new stream."""
-        self.streams_total += 1
-        self.active_streams.add(stream_id)
-
-
 class E2EServerApp(ServerApp):
     """E2E test server application with full test support."""
 
@@ -141,10 +85,60 @@ class E2EServerApp(ServerApp):
         self._register_handlers()
         logger.info("E2E Server initialized with full test support")
 
+    async def _diagnostics_handler(self, session: WebTransportSession) -> None:
+        """Handle requests for server statistics on the /diagnostics path."""
+        logger.info("Diagnostics request from session %s", session.session_id)
+        stream: WebTransportStream | None = None
+        try:
+            stream_event = await session.events.wait_for(event_type=EventType.STREAM_OPENED, timeout=5.0)
+            if not isinstance(stream_event.data, dict):
+                logger.warning("Diagnostics handler: Received invalid stream event data.")
+                return
+
+            stream = stream_event.data.get("stream")
+            if not isinstance(stream, WebTransportStream):
+                logger.warning("Diagnostics handler: Client opened a non-bidirectional stream.")
+                return
+
+            diagnostics = await self.server.diagnostics()
+            stats_json = json.dumps(asdict(diagnostics), indent=2).encode("utf-8")
+            await stream.write(data=stats_json, end_stream=True)
+            logger.info("Sent diagnostics: %s bytes", len(stats_json))
+        except asyncio.TimeoutError:
+            logger.error("Diagnostics handler: Client connected but never opened a stream.")
+        except Exception as e:
+            logger.error("Diagnostics handler error: %s", e)
+        finally:
+            if not session.is_closed:
+                await session.close()
+
+    async def _health_handler(self, session: WebTransportSession) -> None:
+        """Handle health check requests on the /health path."""
+        logger.info("Health check from session %s", session.session_id)
+        try:
+            diagnostics = await self.server.diagnostics()
+            stats = diagnostics.stats
+            active_sessions = diagnostics.session_states.get(SessionState.CONNECTED, 0)
+            active_connections = sum(v for k, v in diagnostics.connection_states.items() if k != ConnectionState.CLOSED)
+
+            health_data = {
+                "status": "healthy",
+                "timestamp": time.time(),
+                "uptime": (get_timestamp() - stats.start_time) if stats.start_time else 0.0,
+                "active_sessions": active_sessions,
+                "active_connections": active_connections,
+            }
+            await session.send_datagram(data=json.dumps(health_data).encode("utf-8"))
+            logger.info("Sent health status: %s", health_data["status"])
+        except Exception as e:
+            logger.error("Health handler error: %s", e)
+        finally:
+            if not session.is_closed:
+                await session.close()
+
     async def _on_connection_established(self, event: Any) -> None:
         """Handle connection established events."""
-        server_stats.record_connection()
-        logger.info("New connection established (total: %s)", server_stats.connections_total)
+        logger.info("New connection established")
 
     async def _on_session_request(self, event: Any) -> None:
         """Handle session request events."""
@@ -157,37 +151,34 @@ class E2EServerApp(ServerApp):
         """Centralize registration for all server routes."""
         self.route(path="/")(echo_handler)
         self.route(path="/echo")(echo_handler)
-        self.route(path="/health")(health_handler)
+        self.route(path="/health")(self._health_handler)
         self.route(path="/pubsub")(pubsub_handler)
         self.route(path="/rpc")(rpc_handler)
-        self.route(path="/stats")(stats_handler)
+        self.route(path="/diagnostics")(self._diagnostics_handler)
         self.route(path="/structured-echo/json")(structured_echo_json_handler)
         self.route(path="/structured-echo/msgpack")(structured_echo_msgpack_handler)
 
 
 MESSAGE_REGISTRY: dict[int, type[Any]] = {1: UserData, 2: StatusUpdate}
 GLOBAL_TOPICS: defaultdict[str, set[asyncio.Queue[tuple[str, bytes]]]] = defaultdict(set)
-server_stats = ServerStatistics()
 
 
 async def _structured_echo_base_handler(*, session: WebTransportSession, serializer: Any, serializer_name: str) -> None:
     """Provide the base handler logic for structured echo."""
     session_id = session.session_id
     logger.info("Structured handler started for session %s (%s)", session_id, serializer_name)
-    server_stats.record_session_start(session_id=session_id)
 
     try:
         s_stream_manager_task = asyncio.create_task(
-            handle_all_structured_streams(session=session, serializer=serializer)
+            coro=handle_all_structured_streams(session=session, serializer=serializer)
         )
-        s_datagram_task = asyncio.create_task(handle_structured_datagram(session=session, serializer=serializer))
+        s_datagram_task = asyncio.create_task(coro=handle_structured_datagram(session=session, serializer=serializer))
         await asyncio.gather(s_stream_manager_task, s_datagram_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
     except Exception as e:
         logger.error("Structured handler error for session %s: %s", session_id, e, exc_info=True)
     finally:
-        server_stats.record_session_end(session_id=session_id)
         logger.info("Structured handler finished for session %s", session_id)
 
 
@@ -195,50 +186,52 @@ async def echo_handler(session: WebTransportSession) -> None:
     """Handle echoing streams and datagrams."""
     session_id = session.session_id
     logger.info("Handler started for session %s on path %s", session_id, session.path)
-    server_stats.record_session_start(session_id=session_id)
 
     try:
-        datagram_task = asyncio.create_task(handle_datagrams(session=session))
-        stream_task = asyncio.create_task(handle_incoming_streams(session=session))
+        datagram_task = asyncio.create_task(coro=handle_datagrams(session=session))
+        stream_task = asyncio.create_task(coro=handle_incoming_streams(session=session))
         await asyncio.gather(datagram_task, stream_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
     except Exception as e:
         logger.error("Handler error for session %s: %s", session_id, e, exc_info=True)
     finally:
-        server_stats.record_session_end(session_id=session_id)
         logger.info("Handler finished for session %s", session_id)
 
 
 async def handle_all_structured_streams(*, session: WebTransportSession, serializer: Any) -> None:
     """Listen for and handle all incoming streams for a structured session."""
+    session_id = session.session_id
+
+    async def stream_opened_handler(event: Event) -> None:
+        if not isinstance(event.data, dict):
+            return
+        stream = event.data.get("stream")
+        if isinstance(stream, WebTransportStream):
+            asyncio.create_task(coro=handle_structured_stream(stream=stream, serializer=serializer))
+
+    session.events.on(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
     try:
-        async for stream in session.incoming_streams():
-            if isinstance(stream, WebTransportStream):
-                server_stats.record_stream_start(stream_id=stream.stream_id)
-                asyncio.create_task(handle_structured_stream(stream=stream, serializer=serializer))
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     except (asyncio.CancelledError, ConnectionError):
         pass
     except Exception as e:
-        logger.error("Structured stream manager for session %s error: %s", session.session_id, e, exc_info=True)
+        logger.error("Structured stream manager for session %s error: %s", session_id, e, exc_info=True)
+    finally:
+        session.events.off(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
 
 
 async def handle_bidirectional_stream(*, stream: WebTransportStream) -> None:
     """Handle echo logic for a bidirectional stream."""
     try:
         request_data = await stream.read_all()
-        server_stats.record_bytes(byte_count=len(request_data))
         echo_data = b"ECHO: " + request_data
         await stream.write_all(data=echo_data)
-        server_stats.record_bytes(byte_count=len(echo_data))
-    except (asyncio.CancelledError, ConnectionError):
+    except (asyncio.CancelledError, ConnectionError, StreamError):
         pass
     except Exception as e:
         logger.error("Bidirectional stream %s error: %s", stream.stream_id, e, exc_info=True)
-        await stream.abort(code=1)
-    finally:
-        if not stream.is_closed:
-            await stream.close()
+        await stream.close(error_code=1)
 
 
 async def handle_datagrams(*, session: WebTransportSession) -> None:
@@ -246,22 +239,28 @@ async def handle_datagrams(*, session: WebTransportSession) -> None:
     session_id = session.session_id
     logger.debug("Starting datagram handler for session %s", session_id)
 
+    async def datagram_handler(event: Event) -> None:
+        if not isinstance(event.data, dict):
+            return
+        data = event.data.get("data")
+        if not isinstance(data, bytes):
+            return
+
+        try:
+            echo_data = b"ECHO: " + data
+            await session.send_datagram(data=echo_data)
+        except (asyncio.CancelledError, ConnectionError, SessionError) as e:
+            logger.warning("Datagram handler error for session %s: %s", session_id, e)
+
+    session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=datagram_handler)
     try:
-        datagram_transport = await session.create_datagram_transport()
-        while not session.is_closed:
-            try:
-                data = await asyncio.wait_for(datagram_transport.receive(), timeout=1.0)
-                server_stats.record_datagram()
-                server_stats.record_bytes(byte_count=len(data))
-                echo_data = b"ECHO: " + data
-                await datagram_transport.send(data=echo_data)
-                server_stats.record_bytes(byte_count=len(echo_data))
-            except asyncio.TimeoutError:
-                continue
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     except (asyncio.CancelledError, ConnectionError):
         pass
     except Exception as e:
         logger.error("Datagram handler error for session %s: %s", session_id, e, exc_info=True)
+    finally:
+        session.events.off(event_type=EventType.DATAGRAM_RECEIVED, handler=datagram_handler)
 
 
 async def handle_incoming_streams(*, session: WebTransportSession) -> None:
@@ -269,22 +268,29 @@ async def handle_incoming_streams(*, session: WebTransportSession) -> None:
     session_id = session.session_id
     logger.debug("Starting stream handler for session %s", session_id)
 
+    async def stream_opened_handler(event: Event) -> None:
+        if not isinstance(event.data, dict):
+            return
+        stream = event.data.get("stream")
+        if stream:
+            asyncio.create_task(coro=handle_single_stream(stream=stream, session_id=session_id))
+
+    session.events.on(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
     try:
-        async for stream in session.incoming_streams():
-            server_stats.record_stream_start(stream_id=stream.stream_id)
-            asyncio.create_task(handle_single_stream(stream=stream, session_id=session_id))
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     except (asyncio.CancelledError, ConnectionError):
         pass
     except Exception as e:
         logger.error("Stream handler error for session %s: %s", session_id, e, exc_info=True)
+    finally:
+        session.events.off(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
 
 
 async def handle_receive_stream(*, stream: WebTransportReceiveStream) -> None:
     """Handle data from a receive-only stream."""
     try:
-        all_data = await stream.read_all()
-        server_stats.record_bytes(byte_count=len(all_data))
-    except (asyncio.CancelledError, ConnectionError):
+        await stream.read_all()
+    except (asyncio.CancelledError, ConnectionError, StreamError):
         pass
     except Exception as e:
         logger.error("Receive stream %s error: %s", stream.stream_id, e, exc_info=True)
@@ -304,7 +310,7 @@ async def handle_single_stream(*, stream: Any, session_id: str) -> None:
     except Exception as e:
         logger.error("Error processing stream %s: %s", stream_id, e, exc_info=True)
     finally:
-        server_stats.record_stream_end(stream_id=stream_id)
+        pass
 
 
 async def handle_structured_datagram(*, session: WebTransportSession, serializer: Any) -> None:
@@ -313,21 +319,21 @@ async def handle_structured_datagram(*, session: WebTransportSession, serializer
     logger.debug("Starting structured datagram handler for session %s", session_id)
 
     try:
-        raw_datagram_transport = await session.create_datagram_transport()
         structured_datagram_transport = StructuredDatagramTransport(
-            datagram_transport=raw_datagram_transport, serializer=serializer, registry=MESSAGE_REGISTRY
+            session=session, serializer=serializer, registry=MESSAGE_REGISTRY
         )
+        await structured_datagram_transport.initialize()
+
         while not session.is_closed:
-            try:
-                obj = await asyncio.wait_for(structured_datagram_transport.receive_obj(), timeout=1.0)
-                server_stats.record_datagram()
-                await structured_datagram_transport.send_obj(obj=obj)
-            except asyncio.TimeoutError:
-                continue
-    except (asyncio.CancelledError, ConnectionError):
-        pass
+            obj = await structured_datagram_transport.receive_obj()
+            await structured_datagram_transport.send_obj(obj=obj)
+
+    except (asyncio.CancelledError, ConnectionError, SessionError, TimeoutError):
+        logger.debug("Structured datagram handler for session %s closing.", session_id)
     except Exception as e:
         logger.error("Structured datagram handler error for session %s: %s", session_id, e, exc_info=True)
+    finally:
+        logger.debug("Structured datagram handler for session %s finished.", session_id)
 
 
 async def handle_structured_stream(*, stream: WebTransportStream, serializer: Any) -> None:
@@ -337,57 +343,52 @@ async def handle_structured_stream(*, stream: WebTransportStream, serializer: An
     logger.debug("Handling structured stream %s", stream_id)
 
     try:
-        structured_stream = StructuredStream(stream=raw_stream, serializer=serializer, registry=MESSAGE_REGISTRY)
+        structured_stream = StructuredStream(
+            stream=raw_stream,
+            serializer=serializer,
+            registry=MESSAGE_REGISTRY,
+            max_message_size=DEFAULT_MAX_MESSAGE_SIZE,
+        )
         async for obj in structured_stream:
             logger.debug("Echoing object on stream %s: %s", stream_id, obj)
             await structured_stream.send_obj(obj=obj)
-    except (asyncio.CancelledError, ConnectionError):
+    except (asyncio.CancelledError, ConnectionError, StreamError):
         pass
     except Exception as e:
         logger.error("Structured stream %s error: %s", stream_id, e, exc_info=True)
     finally:
         if not raw_stream.is_closed:
             await raw_stream.close()
-        server_stats.record_stream_end(stream_id=stream_id)
-
-
-async def health_handler(session: WebTransportSession) -> None:
-    """Handle health check requests on the /health path."""
-    logger.info("Health check from session %s", session.session_id)
-    try:
-        health_data = {
-            "status": "healthy",
-            "timestamp": time.time(),
-            "uptime": time.time() - server_stats.start_time,
-            "active_sessions": len(server_stats.active_sessions),
-            "active_streams": len(server_stats.active_streams),
-        }
-        datagram_transport = await session.create_datagram_transport()
-        await datagram_transport.send_json(data=health_data)
-        logger.info("Sent health status: %s", health_data["status"])
-    except Exception as e:
-        logger.error("Health handler error: %s", e)
-    finally:
-        if not session.is_closed:
-            await session.close()
 
 
 async def pubsub_handler(session: WebTransportSession) -> None:
     """Handle the Pub/Sub test logic."""
     session_id = session.session_id
     logger.info("Pub/Sub handler started for session %s", session_id)
-    server_stats.record_session_start(session_id=session_id)
 
     my_queue: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
     subscribed_topics: set[str] = set()
 
     try:
-        stream = await session.incoming_streams().__anext__()
-        if not isinstance(stream, WebTransportStream):
-            logger.warning("Pub/Sub handler expected a bidirectional stream, but got another type.")
-            return
+        stream_fut: asyncio.Future[WebTransportStream] = asyncio.Future()
 
-        server_stats.record_stream_start(stream_id=stream.stream_id)
+        async def first_stream_handler(event: Event) -> None:
+            if not stream_fut.done() and isinstance(event.data, dict):
+                stream = event.data.get("stream")
+                if isinstance(stream, WebTransportStream):
+                    stream_fut.set_result(stream)
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
+
+        try:
+            async with asyncio.timeout(delay=10.0):
+                stream = await stream_fut
+        except asyncio.TimeoutError:
+            stream_fut.cancel()
+            logger.warning("Pub/Sub session %s timed out waiting for stream.", session_id)
+            return
+        finally:
+            session.events.off(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
 
         async def reader() -> None:
             try:
@@ -425,17 +426,13 @@ async def pubsub_handler(session: WebTransportSession) -> None:
                 pass
 
         await asyncio.gather(reader(), writer())
-    except StopAsyncIteration:
-        logger.info("Pub/Sub session %s ended without creating a stream.", session_id)
-    except (asyncio.CancelledError, ConnectionError):
+    except (StopAsyncIteration, asyncio.CancelledError, ConnectionError):
         pass
     except Exception as e:
         logger.error("Pub/Sub handler error for session %s: %s", session_id, e, exc_info=True)
     finally:
         for topic in subscribed_topics:
             GLOBAL_TOPICS[topic].discard(my_queue)
-
-        server_stats.record_session_end(session_id=session_id)
         logger.info("Pub/Sub handler finished for session %s", session_id)
 
 
@@ -443,7 +440,6 @@ async def rpc_handler(session: WebTransportSession) -> None:
     """Handle the RPC test logic."""
     session_id = session.session_id
     logger.info("RPC handler started for session %s", session_id)
-    server_stats.record_session_start(session_id=session_id)
 
     handlers: dict[str, Callable[..., Any]] = {}
 
@@ -460,7 +456,7 @@ async def rpc_handler(session: WebTransportSession) -> None:
         return a / b
 
     async def slow_operation(delay: float) -> str:
-        await asyncio.sleep(delay)
+        await asyncio.sleep(delay=delay)
         return f"Completed after {delay} seconds."
 
     handlers["add"] = add
@@ -475,7 +471,7 @@ async def rpc_handler(session: WebTransportSession) -> None:
             header = struct.pack("!I", len(payload))
             await stream.write(data=header + payload)
         except Exception:
-            await stream.abort()
+            await stream.close(error_code=1)
 
     async def process_request(stream: WebTransportStream, request: dict[str, Any]) -> None:
         request_id = request.get("id")
@@ -504,41 +500,38 @@ async def rpc_handler(session: WebTransportSession) -> None:
             await send_message(stream, response)
 
     try:
-        stream = await session.incoming_streams().__anext__()
-        if not isinstance(stream, WebTransportStream):
-            return
+        stream_fut: asyncio.Future[WebTransportStream] = asyncio.Future()
 
-        server_stats.record_stream_start(stream_id=stream.stream_id)
+        async def first_stream_handler(event: Event) -> None:
+            if not stream_fut.done() and isinstance(event.data, dict):
+                stream = event.data.get("stream")
+                if isinstance(stream, WebTransportStream):
+                    stream_fut.set_result(stream)
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
+
+        try:
+            async with asyncio.timeout(delay=10.0):
+                stream = await stream_fut
+        except asyncio.TimeoutError:
+            stream_fut.cancel()
+            logger.warning("RPC session %s timed out waiting for stream.", session_id)
+            return
+        finally:
+            session.events.off(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
 
         while not stream.is_closed:
             header = await stream.readexactly(n=4)
             length = struct.unpack("!I", header)[0]
             payload = await stream.readexactly(n=length)
             message = json.loads(payload.decode("utf-8"))
-            asyncio.create_task(process_request(stream, message))
+            asyncio.create_task(coro=process_request(stream, message))
     except (StopAsyncIteration, asyncio.CancelledError, ConnectionError, StreamError, asyncio.IncompleteReadError):
         pass
     except Exception as e:
         logger.error("RPC handler error for session %s: %s", session_id, e, exc_info=True)
     finally:
-        server_stats.record_session_end(session_id=session_id)
         logger.info("RPC handler finished for session %s", session_id)
-
-
-async def stats_handler(session: WebTransportSession) -> None:
-    """Handle requests for server statistics on the /stats path."""
-    logger.info("Stats request from session %s", session.session_id)
-    try:
-        stats = server_stats.get_stats()
-        stats_json = json.dumps(stats, indent=2).encode("utf-8")
-        stream = await session.create_bidirectional_stream()
-        await stream.write_all(data=stats_json)
-        logger.info("Sent stats: %s bytes", len(stats_json))
-    except Exception as e:
-        logger.error("Stats handler error: %s", e)
-    finally:
-        if not session.is_closed:
-            await session.close()
 
 
 async def structured_echo_json_handler(session: WebTransportSession) -> None:
@@ -569,8 +562,8 @@ async def main() -> None:
         initial_max_data=16 * 1024,
         initial_max_streams_bidi=5,
         initial_max_streams_uni=5,
+        flow_control_window_auto_scale=True,
         flow_control_window_size=65536,
-        flow_control_window_auto_scale=False,
         stream_flow_control_increment_bidi=5,
         stream_flow_control_increment_uni=5,
     )

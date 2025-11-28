@@ -9,10 +9,10 @@ from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Self
 
-from pywebtransport.constants import DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
+from pywebtransport.constants import ErrorCodes
 from pywebtransport.exceptions import ConnectionError, StreamError
 from pywebtransport.pubsub.exceptions import NotSubscribedError, PubSubError, SubscriptionFailedError
-from pywebtransport.stream import WebTransportStream
+from pywebtransport.stream.stream import WebTransportStream
 from pywebtransport.types import Data
 from pywebtransport.utils import ensure_bytes, get_logger, get_timestamp
 
@@ -59,10 +59,7 @@ class Subscription:
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and unsubscribe."""
         await self.unsubscribe()
@@ -71,8 +68,12 @@ class Subscription:
         """Unsubscribe from the topic."""
         await self._manager.unsubscribe(topic=self._topic)
 
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        """Iterate over messages from the topic."""
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        """Return self as the asynchronous iterator."""
+        return self
+
+    async def __anext__(self) -> bytes:
+        """Get the next message in the async iteration."""
         if self._queue is None:
             raise PubSubError(
                 message=(
@@ -81,22 +82,22 @@ class Subscription:
                 )
             )
 
-        while True:
-            try:
-                message = await self._queue.get()
-                if message is None:
-                    break
-                yield message
-            except asyncio.CancelledError:
-                break
+        try:
+            message = await self._queue.get()
+            if message is None:
+                raise StopAsyncIteration
+            return message
+        except asyncio.CancelledError:
+            raise StopAsyncIteration
 
 
 class PubSubManager:
     """Manages the Pub/Sub lifecycle over a single WebTransport session."""
 
-    def __init__(self, *, stream: WebTransportStream) -> None:
+    def __init__(self, *, stream: WebTransportStream, max_queue_size: int) -> None:
         """Initialize the PubSubManager."""
         self._stream: WebTransportStream = stream
+        self._default_max_queue_size = max_queue_size
         self._ingress_task: asyncio.Task[None] | None = None
         self._lock: asyncio.Lock | None = None
         self._subscriptions: dict[str, set[Subscription]] = defaultdict(set)
@@ -114,15 +115,12 @@ class PubSubManager:
         if self._lock is None:
             self._lock = asyncio.Lock()
         if self._ingress_task is None:
-            self._ingress_task = asyncio.create_task(self._ingress_loop())
+            self._ingress_task = asyncio.create_task(coro=self._ingress_loop())
             self._ingress_task.add_done_callback(self._on_ingress_done)
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context, closing the manager."""
         await self.close()
@@ -137,7 +135,7 @@ class PubSubManager:
         if self._ingress_task and not self._ingress_task.done():
             self._ingress_task.cancel()
         if self._stream and not self._stream.is_closed:
-            await self._stream.abort()
+            await self._stream.close(error_code=ErrorCodes.APPLICATION_ERROR)
 
         for future, _ in self._pending_subscriptions.values():
             if not future.done():
@@ -145,7 +143,7 @@ class PubSubManager:
         for subs in self._subscriptions.values():
             for sub in subs:
                 if sub._queue and not sub._queue.full():
-                    sub._queue.put_nowait(None)
+                    sub._queue.put_nowait(item=None)
 
         self._pending_subscriptions.clear()
         self._subscriptions.clear()
@@ -170,9 +168,7 @@ class PubSubManager:
             await self._stream.write(data=command + data_bytes)
             self._stats.messages_published += 1
 
-    async def subscribe(
-        self, *, topic: str, max_queue_size: int = DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE, timeout: float = 10.0
-    ) -> Subscription:
+    async def subscribe(self, *, topic: str, timeout: float = 10.0, max_queue_size: int | None = None) -> Subscription:
         """Subscribe to a topic and return a subscription object."""
         if self._lock is None:
             raise PubSubError(
@@ -181,7 +177,9 @@ class PubSubManager:
                     "asynchronous context manager (`async with ...`)."
                 )
             )
-        if max_queue_size <= 0:
+
+        actual_queue_size = max_queue_size if max_queue_size is not None else self._default_max_queue_size
+        if actual_queue_size <= 0:
             raise ValueError("max_queue_size must be positive.")
 
         async with self._lock:
@@ -189,7 +187,7 @@ class PubSubManager:
                 raise PubSubError(message=f"Subscription to topic '{topic}' is already pending.")
 
             future: asyncio.Future[Subscription] = asyncio.get_running_loop().create_future()
-            subscription = Subscription(topic=topic, manager=self, max_queue_size=max_queue_size)
+            subscription = Subscription(topic=topic, manager=self, max_queue_size=actual_queue_size)
             self._pending_subscriptions[topic] = (future, subscription)
 
         if self._stream.is_closed:
@@ -197,17 +195,22 @@ class PubSubManager:
         await self._stream.write(data=b"SUB %b\n" % topic.encode())
 
         try:
-            confirmed_subscription = await asyncio.wait_for(future, timeout=timeout)
-            self._subscriptions[topic].add(confirmed_subscription)
-            self._stats.topics_subscribed = len(self._subscriptions)
+            async with asyncio.timeout(delay=timeout):
+                confirmed_subscription = await future
+            async with self._lock:
+                self._subscriptions[topic].add(confirmed_subscription)
+                self._stats.topics_subscribed = len(self._subscriptions)
             return confirmed_subscription
         except asyncio.TimeoutError:
             self._stats.subscription_errors += 1
-            self._pending_subscriptions.pop(topic, None)
+            async with self._lock:
+                self._pending_subscriptions.pop(topic, None)
+            future.cancel()
             raise SubscriptionFailedError(message=f"Subscription to topic '{topic}' timed out.") from None
         except Exception:
             self._stats.subscription_errors += 1
-            self._pending_subscriptions.pop(topic, None)
+            async with self._lock:
+                self._pending_subscriptions.pop(topic, None)
             raise
 
     async def unsubscribe(self, *, topic: str) -> None:
@@ -231,7 +234,7 @@ class PubSubManager:
 
             for sub in self._subscriptions.get(topic, set()):
                 if sub._queue and not sub._queue.full():
-                    sub._queue.put_nowait(None)
+                    sub._queue.put_nowait(item=None)
 
             self._subscriptions.pop(topic, None)
             self._stats.topics_subscribed = len(self._subscriptions)
@@ -251,33 +254,43 @@ class PubSubManager:
                     topic, length_str = parts[1].decode(), parts[2]
                     length = int(length_str)
                     payload = await self._stream.readexactly(n=length)
-                    if subs := self._subscriptions.get(topic):
-                        self._stats.messages_received += 1
-                        for sub in subs.copy():
-                            if sub._queue:
-                                try:
-                                    sub._queue.put_nowait(payload)
-                                except asyncio.QueueFull:
-                                    logger.warning(
-                                        "Subscription queue for topic '%s' is full. Dropping message.", topic
-                                    )
+                    if self._lock:
+                        async with self._lock:
+                            subs = self._subscriptions.get(topic)
+                        if subs:
+                            self._stats.messages_received += 1
+                            for sub in subs.copy():
+                                if sub._queue:
+                                    try:
+                                        sub._queue.put_nowait(item=payload)
+                                    except asyncio.QueueFull:
+                                        logger.warning(
+                                            "Subscription queue for topic '%s' is full. Dropping message.", topic
+                                        )
                 elif command == b"SUB-OK" and len(parts) == 2:
                     topic = parts[1].decode()
-                    if pending := self._pending_subscriptions.pop(topic, None):
-                        future, subscription = pending
-                        if not future.done():
-                            future.set_result(subscription)
+                    if self._lock:
+                        async with self._lock:
+                            pending = self._pending_subscriptions.pop(topic, None)
+                        if pending:
+                            future, subscription = pending
+                            if not future.done():
+                                future.set_result(subscription)
                 elif command == b"SUB-FAIL" and len(parts) == 3:
                     topic, reason = parts[1].decode(), parts[2].decode()
-                    if pending := self._pending_subscriptions.pop(topic, None):
-                        future, _ = pending
-                        if not future.done():
-                            future.set_exception(SubscriptionFailedError(reason))
+                    if self._lock:
+                        async with self._lock:
+                            pending = self._pending_subscriptions.pop(topic, None)
+                        if pending:
+                            future, _ = pending
+                            if not future.done():
+                                future.set_exception(SubscriptionFailedError(message=reason))
         except (ConnectionError, StreamError, asyncio.IncompleteReadError) as e:
             logger.info("Pub/Sub stream closed: %s", e)
         except Exception as e:
-            logger.error("Error in Pub/Sub ingress loop: %s", e, exc_info=True)
-            raise
+            if not self._is_closing:
+                logger.error("Error in Pub/Sub ingress loop: %s", e, exc_info=True)
+                raise
 
     def _on_ingress_done(self, task: asyncio.Task[None]) -> None:
         """Callback to trigger cleanup when the ingress task finishes."""
@@ -289,4 +302,4 @@ class PubSubManager:
                 logger.error("Pub/Sub ingress task finished unexpectedly with an exception: %s.", exc, exc_info=exc)
 
         if not self._is_closing:
-            asyncio.create_task(self.close())
+            asyncio.create_task(coro=self.close())

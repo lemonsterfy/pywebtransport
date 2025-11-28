@@ -36,6 +36,7 @@ from pywebtransport.types import SessionState, StreamState
 
 
 class TestExceptionClasses:
+
     def test_stream_error_custom_str(self) -> None:
         exc_no_id = StreamError(message="No ID")
         exc_with_id = StreamError(message="With ID", stream_id=5)
@@ -218,6 +219,7 @@ class TestExceptionClasses:
 
 
 class TestExceptionFactories:
+
     def test_certificate_not_found(self) -> None:
         exc = certificate_not_found(path="/path/to/cert.pem")
 
@@ -260,6 +262,7 @@ class TestExceptionFactories:
 
 
 class TestHelperFunctions:
+
     @pytest.mark.parametrize(
         "exception_instance, expected_category",
         [

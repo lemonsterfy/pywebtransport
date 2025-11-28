@@ -7,13 +7,16 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Any, Self, TypeVar
 
+from pywebtransport._protocol.events import UserAcceptSession, UserCloseSession, UserRejectSession
 from pywebtransport.config import ServerConfig
-from pywebtransport.connection import WebTransportConnection
+from pywebtransport.connection.connection import WebTransportConnection
+from pywebtransport.constants import ErrorCodes
 from pywebtransport.events import Event
+from pywebtransport.exceptions import ConnectionError
 from pywebtransport.server.middleware import MiddlewareManager
 from pywebtransport.server.router import RequestRouter, SessionHandler
 from pywebtransport.server.server import WebTransportServer
-from pywebtransport.session import WebTransportSession
+from pywebtransport.session.session import WebTransportSession
 from pywebtransport.types import EventType, MiddlewareProtocol
 from pywebtransport.utils import get_logger
 
@@ -51,10 +54,7 @@ class ServerApp:
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context and run shutdown procedures."""
         await self.shutdown()
@@ -71,7 +71,7 @@ class ServerApp:
                 await self.serve(host=final_host, port=final_port, **kwargs)
 
         try:
-            asyncio.run(main())
+            asyncio.run(main=main())
         except KeyboardInterrupt:
             logger.info("Server stopped by user.")
 
@@ -83,7 +83,7 @@ class ServerApp:
         await self._server.serve_forever()
 
     async def shutdown(self) -> None:
-        """Run all registered shutdown handlers and exit stateful middleware."""
+        """Run shutdown handlers and exit stateful middleware."""
         for handler in self._shutdown_handlers:
             if asyncio.iscoroutinefunction(handler):
                 await handler()
@@ -92,7 +92,7 @@ class ServerApp:
 
         for middleware in reversed(self._stateful_middleware):
             if hasattr(middleware, "__aexit__"):
-                await middleware.__aexit__(exc_type=None, exc_val=None, exc_tb=None)
+                await middleware.__aexit__(None, None, None)
 
         if self._active_handler_tasks:
             logger.info("Cancelling %d active handler tasks...", len(self._active_handler_tasks))
@@ -103,7 +103,7 @@ class ServerApp:
             logger.info("All active handler tasks processed.")
 
     async def startup(self) -> None:
-        """Run all registered startup handlers and enter stateful middleware."""
+        """Run startup handlers and enter stateful middleware."""
         for middleware in self._stateful_middleware:
             if hasattr(middleware, "__aenter__"):
                 await middleware.__aenter__()
@@ -153,82 +153,42 @@ class ServerApp:
 
         return decorator
 
-    async def _create_session_from_event(self, event: Event) -> WebTransportSession | None:
-        """Validate event data and create a fully initialized WebTransportSession."""
-        if not isinstance(event.data, dict):
-            logger.warning("Session request event data is not a dictionary")
-            return None
-
-        connection = event.data.get("connection")
-        if not isinstance(connection, WebTransportConnection) or not connection.protocol_handler:
-            logger.warning("Invalid connection object in session request")
-            return None
-
-        session_id = event.data.get("session_id")
-        stream_id = event.data.get("control_stream_id")
-        if not session_id or stream_id is None:
-            logger.warning("Missing session_id or control_stream_id in session request")
-            return None
-
-        if not connection.is_connected:
-            logger.warning("Connection %s is not in connected state", connection.connection_id)
-            return None
-
-        session_info = connection.get_session_info(session_id=session_id)
-        if not session_info:
-            logger.error("Session info not found for session %s", session_id)
-            return None
-
-        config = connection.config
-        if not isinstance(config, ServerConfig):
-            logger.error("Connection %s has a non-server config, which is unexpected.", connection.connection_id)
-            connection.protocol_handler.close_webtransport_session(
-                session_id=session_id, code=1, reason="Internal server configuration error"
-            )
-            return None
-
-        logger.info("Processing session request: session_id=%s, path='%s'", session_id, session_info.path)
-        session = WebTransportSession(
-            connection=connection,
-            session_id=session_id,
-            max_streams=config.max_streams_per_connection,
-            max_incoming_streams=config.max_incoming_streams,
-            stream_cleanup_interval=config.stream_cleanup_interval,
-            path=session_info.path,
-            headers=session_info.headers,
-            control_stream_id=stream_id,
-        )
-        await session.initialize()
-
-        if self.server.session_manager:
-            await self.server.session_manager.add_session(session=session)
-
-        return session
-
-    def _dispatch_to_handler(self, session: WebTransportSession) -> None:
+    async def _dispatch_to_handler(self, *, session: WebTransportSession) -> None:
         """Find the route handler and create a background task to run it."""
         handler = self._router.route_request(session=session)
-        connection = session.connection
 
-        if not (connection and connection.protocol_handler):
-            logger.error("Cannot dispatch handler, connection or protocol handler is missing.")
+        connection = session._connection
+        if not (connection and hasattr(connection, "_engine") and connection._engine):
+            logger.error("Cannot dispatch handler, connection or engine is missing.")
             return
 
         if session._control_stream_id is None:
             logger.error("Cannot process session %s, control_stream_id is missing.", session.session_id)
             return
 
+        loop = asyncio.get_running_loop()
+
         if not handler:
-            logger.warning("No route found for path: %s", session.path)
-            connection.protocol_handler.reject_session_request(stream_id=session._control_stream_id, status_code=404)
+            logger.warning(
+                "No route found for session %s (path: %s). Rejecting with 404.", session.session_id, session.path
+            )
+            fut = loop.create_future()
+            event = UserRejectSession(session_id=session.session_id, status_code=404, future=fut)
+            asyncio.create_task(coro=connection._send_event_to_engine(event=event))
             return
 
         logger.info("Routing session request for path '%s' to handler '%s'", session.path, handler.__name__)
-        connection.protocol_handler.accept_webtransport_session(
-            stream_id=session._control_stream_id, session_id=session.session_id
-        )
 
-        handler_task = asyncio.create_task(self._run_handler_safely(handler=handler, session=session))
+        try:
+            accept_fut = loop.create_future()
+            accept_event = UserAcceptSession(session_id=session.session_id, future=accept_fut)
+            await connection._send_event_to_engine(event=accept_event)
+            await accept_fut
+        except Exception as e:
+            logger.error("Failed to accept session %s: %s", session.session_id, e, exc_info=True)
+            return
+
+        handler_task = asyncio.create_task(coro=self._run_handler_safely(handler=handler, session=session))
         self._active_handler_tasks.add(handler_task)
 
         def _task_done_callback(task: asyncio.Task[Any]) -> None:
@@ -239,39 +199,84 @@ class ServerApp:
         handler_task.add_done_callback(_task_done_callback)
         logger.info("Handler task created and tracked for session %s", session.session_id)
 
+    async def _get_session_from_event(self, *, event: Event) -> WebTransportSession | None:
+        """Validate event data and retrieve the existing WebTransportSession handle."""
+        if not isinstance(event.data, dict):
+            logger.warning("Session request event data is not a dictionary")
+            return None
+
+        session = event.data.get("session")
+        if not isinstance(session, WebTransportSession):
+            logger.warning("Invalid or missing 'session' handle in session request event data. Got: %s", type(session))
+            return None
+
+        connection = event.data.get("connection")
+        if not isinstance(connection, WebTransportConnection):
+            logger.warning("Invalid 'connection' object in session request")
+            return None
+
+        if session._connection is not connection:
+            logger.error(
+                "Session handle %s does not belong to connection %s", session.session_id, connection.connection_id
+            )
+            return None
+
+        if not connection.is_connected:
+            logger.warning("Connection %s is not in connected state", connection.connection_id)
+            return None
+
+        logger.info("Processing session request: session_id=%s, path='%s'", session.session_id, session.path)
+
+        if self.server.session_manager:
+            try:
+                await self.server.session_manager.add_session(session=session)
+            except Exception as e:
+                logger.error(
+                    "Failed to register session %s with SessionManager: %s", session.session_id, e, exc_info=True
+                )
+
+        return session
+
     async def _handle_session_request(self, event: Event) -> None:
         """Orchestrate the handling of an incoming session request."""
         session: WebTransportSession | None = None
         event_data = event.data if isinstance(event.data, dict) else {}
+
         connection: WebTransportConnection | None = event_data.get("connection")
-        session_id: str | None = event_data.get("session_id")
+        session_id_from_data: str | None = event_data.get("session_id")
+        loop = asyncio.get_running_loop()
 
         try:
-            session = await self._create_session_from_event(event)
+            session = await self._get_session_from_event(event=event)
+
             if not session:
                 return
 
             if not await self._middleware_manager.process_request(session=session):
                 logger.warning("Session request for path '%s' rejected by middleware.", session.path)
-                if connection and connection.protocol_handler and session._control_stream_id is not None:
-                    connection.protocol_handler.reject_session_request(
-                        stream_id=session._control_stream_id, status_code=403
-                    )
+                if connection and session._control_stream_id is not None:
+                    fut = loop.create_future()
+                    reject_event = UserRejectSession(session_id=session.session_id, status_code=403, future=fut)
+                    await connection._send_event_to_engine(event=reject_event)
                 if session and not session.is_closed:
                     await session.close(close_connection=False)
                 return
 
-            self._dispatch_to_handler(session=session)
+            await self._dispatch_to_handler(session=session)
 
         except Exception as e:
-            logger.error("Error handling session request for session %s: %s", session_id, e, exc_info=True)
+            sid = session.session_id if session else session_id_from_data
+            logger.error("Error handling session request for session %s: %s", sid, e, exc_info=True)
             try:
-                if connection and connection.protocol_handler and session_id:
-                    connection.protocol_handler.close_webtransport_session(
-                        session_id=session_id,
-                        code=1,
+                if connection and sid:
+                    fut = loop.create_future()
+                    close_event = UserCloseSession(
+                        session_id=sid,
+                        error_code=ErrorCodes.INTERNAL_ERROR,
                         reason="Internal server error handling request",
+                        future=fut,
                     )
+                    await connection._send_event_to_engine(event=close_event)
                 if session and not session.is_closed:
                     await session.close(close_connection=False)
             except Exception as cleanup_error:
@@ -290,5 +295,13 @@ class ServerApp:
                 try:
                     logger.debug("Closing session %s after handler completion/error.", session.session_id)
                     await session.close()
+                except ConnectionError as e:
+                    logger.debug(
+                        "Session %s cleanup: Connection closed implicitly or Engine stopped (%s).",
+                        session.session_id,
+                        e,
+                    )
                 except Exception as close_error:
-                    logger.error("Error closing session %s: %s", session.session_id, close_error, exc_info=close_error)
+                    logger.error(
+                        "Unexpected error closing session %s: %s", session.session_id, close_error, exc_info=True
+                    )

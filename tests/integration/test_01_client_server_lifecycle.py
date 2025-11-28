@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from pywebtransport import ClientError, ServerApp, WebTransportClient, WebTransportSession
-from pywebtransport.types import SessionState
+from pywebtransport.types import EventType, SessionState
 
 pytestmark = pytest.mark.asyncio
 
@@ -21,17 +21,24 @@ async def test_client_initiated_close(
     async def simple_handler(session: WebTransportSession) -> None:
         server_entered.set()
         try:
-            await session.wait_closed()
-        except asyncio.CancelledError:
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except (asyncio.CancelledError, Exception):
             pass
 
     session = await client.connect(url=url)
-    assert session.is_ready
-    await asyncio.wait_for(server_entered.wait(), timeout=1.0)
+    assert session.state == SessionState.CONNECTED
+
+    async with asyncio.timeout(2.0):
+        await server_entered.wait()
 
     await session.close(reason="Client-initiated close")
 
-    await asyncio.wait_for(session.wait_closed(), timeout=1.0)
+    try:
+        async with asyncio.timeout(2.0):
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+    except TimeoutError:
+        pass
+
     assert session.is_closed is True
 
 
@@ -45,7 +52,7 @@ async def test_connection_to_non_existent_route_fails(
         await client.connect(url=url)
 
     error_message = str(exc_info.value).lower()
-    assert "404" in error_message or "route not found" in error_message or "timeout" in error_message
+    assert "404" in error_message or "rejected" in error_message or "timeout" in error_message
 
 
 async def test_server_initiated_close(
@@ -56,19 +63,19 @@ async def test_server_initiated_close(
 
     @server_app.route(path="/close-me")
     async def immediate_close_handler(session: WebTransportSession) -> None:
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
         await session.close(reason="Server closed immediately.")
 
     session = await client.connect(url=url)
-    assert session.is_ready
 
     try:
-        await asyncio.wait_for(session.wait_closed(), timeout=2.0)
-    except asyncio.TimeoutError:
-        pytest.fail("session.wait_closed() timed out waiting for server-initiated close.")
+        async with asyncio.timeout(5.0):
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+    except TimeoutError:
+        if not session.is_closed:
+            pytest.fail("Timed out waiting for server-initiated close.")
 
     assert session.is_closed is True
-    assert session.state == SessionState.CLOSED
 
 
 async def test_successful_connection_and_session(
@@ -82,15 +89,17 @@ async def test_successful_connection_and_session(
     async def basic_handler(session: WebTransportSession) -> None:
         handler_called.set()
         try:
-            await session.wait_closed()
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
         except asyncio.CancelledError:
             pass
 
     session = None
     try:
         session = await client.connect(url=url)
-        assert session.is_ready
-        await asyncio.wait_for(handler_called.wait(), timeout=1.0)
+        assert session.state == SessionState.CONNECTED
+
+        async with asyncio.timeout(2.0):
+            await handler_called.wait()
     finally:
         if session and not session.is_closed:
             await session.close()

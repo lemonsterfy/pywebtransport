@@ -1,6 +1,6 @@
 """Abstractions for the underlying QUIC connection."""
 
-from .connection import ConnectionDiagnostics, ConnectionInfo, WebTransportConnection
+from .connection import ConnectionDiagnostics, WebTransportConnection
 from .load_balancer import ConnectionLoadBalancer
 
-__all__: list[str] = ["ConnectionDiagnostics", "ConnectionInfo", "ConnectionLoadBalancer", "WebTransportConnection"]
+__all__: list[str] = ["ConnectionDiagnostics", "ConnectionLoadBalancer", "WebTransportConnection"]

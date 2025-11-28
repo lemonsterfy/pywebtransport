@@ -37,13 +37,7 @@ __all__: list[str] = [
 class WebTransportError(Exception):
     """The base exception for all WebTransport errors."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        error_code: int | None = None,
-        details: dict[str, Any] | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, error_code: int | None = None, details: dict[str, Any] | None = None) -> None:
         """Initialize the WebTransport error."""
         super().__init__(message)
         self.message = message
@@ -81,9 +75,7 @@ class AuthenticationError(WebTransportError):
     ) -> None:
         """Initialize the authentication error."""
         super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.APP_AUTHENTICATION_FAILED,
-            details=details,
+            message=message, error_code=error_code or ErrorCodes.APP_AUTHENTICATION_FAILED, details=details
         )
         self.auth_method = auth_method
 
@@ -116,9 +108,7 @@ class CertificateError(WebTransportError):
     ) -> None:
         """Initialize the certificate error."""
         super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.APP_AUTHENTICATION_FAILED,
-            details=details,
+            message=message, error_code=error_code or ErrorCodes.APP_AUTHENTICATION_FAILED, details=details
         )
         self.certificate_path = certificate_path
         self.certificate_error = certificate_error
@@ -152,11 +142,7 @@ class ClientError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the client error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.APP_INVALID_REQUEST,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.APP_INVALID_REQUEST, details=details)
         self.target_url = target_url
 
     def to_dict(self) -> dict[str, Any]:
@@ -187,11 +173,7 @@ class ConfigurationError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the configuration error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.APP_INVALID_REQUEST,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.APP_INVALID_REQUEST, details=details)
         self.config_key = config_key
         self.config_value = config_value
 
@@ -224,11 +206,7 @@ class ConnectionError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the connection error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.CONNECTION_REFUSED,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.CONNECTION_REFUSED, details=details)
         self.remote_address = remote_address
 
     def to_dict(self) -> dict[str, Any]:
@@ -259,11 +237,7 @@ class DatagramError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the datagram error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.INTERNAL_ERROR,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.INTERNAL_ERROR, details=details)
         self.datagram_size = datagram_size
         self.max_size = max_size
 
@@ -298,11 +272,7 @@ class FlowControlError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the flow control error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.FLOW_CONTROL_ERROR,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.FLOW_CONTROL_ERROR, details=details)
         self.stream_id = stream_id
         self.limit_exceeded = limit_exceeded
         self.current_value = current_value
@@ -337,11 +307,7 @@ class HandshakeError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the handshake error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.INTERNAL_ERROR,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.INTERNAL_ERROR, details=details)
         self.handshake_stage = handshake_stage
 
     def to_dict(self) -> dict[str, Any]:
@@ -371,11 +337,7 @@ class ProtocolError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the protocol error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.PROTOCOL_VIOLATION,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.PROTOCOL_VIOLATION, details=details)
         self.frame_type = frame_type
 
     def to_dict(self) -> dict[str, Any]:
@@ -405,11 +367,7 @@ class SerializationError(WebTransportError):
         original_exception: Exception | None = None,
     ) -> None:
         """Initialize the serialization error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.INTERNAL_ERROR,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.INTERNAL_ERROR, details=details)
         self.original_exception = original_exception
 
     def to_dict(self) -> dict[str, Any]:
@@ -439,11 +397,7 @@ class ServerError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the server error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.APP_SERVICE_UNAVAILABLE,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.APP_SERVICE_UNAVAILABLE, details=details)
         self.bind_address = bind_address
 
     def to_dict(self) -> dict[str, Any]:
@@ -474,11 +428,7 @@ class SessionError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the session error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.INTERNAL_ERROR,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.INTERNAL_ERROR, details=details)
         self.session_id = session_id
         self.session_state = session_state
 
@@ -512,11 +462,7 @@ class StreamError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the stream error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.STREAM_STATE_ERROR,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.STREAM_STATE_ERROR, details=details)
         self.stream_id = stream_id
         self.stream_state = stream_state
 
@@ -557,11 +503,7 @@ class TimeoutError(WebTransportError):
         details: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the timeout error."""
-        super().__init__(
-            message=message,
-            error_code=error_code or ErrorCodes.APP_CONNECTION_TIMEOUT,
-            details=details,
-        )
+        super().__init__(message=message, error_code=error_code or ErrorCodes.APP_CONNECTION_TIMEOUT, details=details)
         self.timeout_duration = timeout_duration
         self.operation = operation
 
@@ -603,18 +545,14 @@ _ERROR_CATEGORY_MAP: dict[type[Exception], str] = {
 def certificate_not_found(*, path: str) -> CertificateError:
     """Create a certificate not found error."""
     return CertificateError(
-        message=f"Certificate file not found: {path}",
-        certificate_path=path,
-        certificate_error="file_not_found",
+        message=f"Certificate file not found: {path}", certificate_path=path, certificate_error="file_not_found"
     )
 
 
 def datagram_too_large(*, size: int, max_size: int) -> DatagramError:
     """Create a datagram too large error."""
     return DatagramError(
-        message=f"Datagram size {size} exceeds maximum {max_size}",
-        datagram_size=size,
-        max_size=max_size,
+        message=f"Datagram size {size} exceeds maximum {max_size}", datagram_size=size, max_size=max_size
     )
 
 
@@ -629,9 +567,7 @@ def get_error_category(*, exception: Exception) -> str:
 def invalid_config(*, key: str, value: Any, reason: str) -> ConfigurationError:
     """Create an invalid configuration error."""
     return ConfigurationError(
-        message=f"Invalid configuration for '{key}': {reason}",
-        config_key=key,
-        config_value=value,
+        message=f"Invalid configuration for '{key}': {reason}", config_key=key, config_value=value
     )
 
 
@@ -679,7 +615,5 @@ def session_not_ready(*, session_id: str, current_state: SessionState) -> Sessio
 def stream_closed(*, stream_id: int, reason: str = "Stream was closed") -> StreamError:
     """Create a stream closed error."""
     return StreamError(
-        message=f"Stream {stream_id} closed: {reason}",
-        stream_id=stream_id,
-        error_code=ErrorCodes.STREAM_STATE_ERROR,
+        message=f"Stream {stream_id} closed: {reason}", stream_id=stream_id, error_code=ErrorCodes.STREAM_STATE_ERROR
     )

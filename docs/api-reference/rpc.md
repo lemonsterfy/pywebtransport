@@ -6,19 +6,18 @@ This document provides a reference for the `pywebtransport.rpc` subpackage, whic
 
 ## RpcManager Class
 
-Manages the RPC lifecycle over a single `WebTransportStream`. It provides methods to register server-side functions and to call remote functions.
-
-**Note on Usage**: `RpcManager` must be used as an asynchronous context manager (`async with ...`).
+Manages the RPC lifecycle over a single `WebTransportStream`. It provides methods to register server-side functions and to call remote functions. This class implements the asynchronous context manager protocol (`async with`) to manage the background ingress loop.
 
 ### Constructor
 
-- **`def __init__(self, *, stream: WebTransportStream, session_id: SessionId, concurrency_limit: int | None = None) -> None`**: Initializes the RPC manager over a specific stream. The `concurrency_limit` parameter controls the maximum number of concurrent RPC requests that can be processed.
+- **`def __init__(self, *, stream: WebTransportStream, session_id: SessionId, rpc_concurrency_limit: int | None = None) -> None`**: Initializes the RPC manager.
+  - `stream`: The bidirectional stream used for RPC communication.
+  - `session_id`: The ID of the session this RPC manager belongs to.
+  - `rpc_concurrency_limit`: The maximum number of concurrent RPC requests to process. `Default: None` (unlimited).
 
 ### Instance Methods
 
-- **`async def __aenter__(self) -> Self`**: Enters the async context and starts the background task for processing incoming messages.
-- **`async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> None`**: Exits the async context, closing the manager and its underlying stream.
-- **`async def call(self, method: str, *params: Any, timeout: float = 30.0) -> Any`**: Calls a remote method and waits for its result. Parameters should be passed as positional arguments after `method`.
+- **`async def call(self, *, method: str, params: list[Any], timeout: float = 30.0) -> Any`**: Calls a remote method and waits for its result.
 - **`async def close(self) -> None`**: Closes the manager, stops processing new requests, and cleans up all resources.
 - **`def register(self, *, func: Callable[..., Any], name: str | None = None) -> None`**: Registers a Python function or coroutine to be callable by the remote peer.
 
@@ -52,22 +51,20 @@ Represents a failed RPC response.
 
 These exceptions are available in the `pywebtransport.rpc` module.
 
-- `RpcError`: The base exception for all RPC related errors. It contains structured error data and can be serialized to a JSON-RPC 2.0 error object.
-- `InvalidParamsError`: Raised when the parameters for an RPC call are invalid. Corresponds to error code -32602.
-- `MethodNotFoundError`: Raised when the requested remote method does not exist. Corresponds to error code -32601.
+- `RpcError`: The base exception for all RPC related errors.
+- `InvalidParamsError`: Raised when the parameters for an RPC call are invalid.
+- `MethodNotFoundError`: Raised when the requested remote method does not exist.
 - `RpcTimeoutError`: Raised when a client-side `call` operation times out waiting for a response.
 
 ## RpcErrorCode Enum
 
 An `IntEnum` that defines the standard JSON-RPC 2.0 error codes.
 
-### Attributes
-
-- `PARSE_ERROR` (`int`): Represents a JSON parsing error on the server. `Default: -32700`.
-- `INVALID_REQUEST` (`int`): The JSON sent is not a valid Request object. `Default: -32600`.
-- `METHOD_NOT_FOUND` (`int`): The method does not exist / is not available. `Default: -32601`.
-- `INVALID_PARAMS` (`int`): Invalid method parameter(s). `Default: -32602`.
-- `INTERNAL_ERROR` (`int`): Internal JSON-RPC error. `Default: -32603`.
+- `PARSE_ERROR` (`-32700`): Parse error.
+- `INVALID_REQUEST` (`-32600`): Invalid Request.
+- `METHOD_NOT_FOUND` (`-32601`): Method not found.
+- `INVALID_PARAMS` (`-32602`): Invalid params.
+- `INTERNAL_ERROR` (`-32603`): Internal error.
 
 ## See Also
 

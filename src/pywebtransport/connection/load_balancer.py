@@ -56,10 +56,7 @@ class ConnectionLoadBalancer:
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit async context, shutting down the load balancer."""
         await self.shutdown()
@@ -86,29 +83,13 @@ class ConnectionLoadBalancer:
         try:
             async with asyncio.TaskGroup() as tg:
                 for connection in connections_to_close:
-                    tg.create_task(connection.close())
+                    tg.create_task(coro=connection.close())
         except* Exception as eg:
             logger.error("Errors occurred while closing connections: %s", eg.exceptions, exc_info=eg)
         logger.info("All connections closed")
 
-    async def shutdown(self) -> None:
-        """Shut down the load balancer and close all connections."""
-        logger.info("Shutting down load balancer")
-        if self._health_check_task:
-            self._health_check_task.cancel()
-            try:
-                await self._health_check_task
-            except asyncio.CancelledError:
-                pass
-        await self.close_all_connections()
-        logger.info("Load balancer shutdown complete")
-
     async def get_connection(
-        self,
-        *,
-        config: ClientConfig,
-        path: str = "/",
-        strategy: str = "round_robin",
+        self, *, config: ClientConfig, path: str = "/", strategy: str = "round_robin"
     ) -> WebTransportConnection:
         """Get a connection using the specified load balancing strategy."""
         if self._lock is None:
@@ -165,6 +146,18 @@ class ConnectionLoadBalancer:
                 async with self._lock:
                     self._pending_creations.pop(target_key, None)
                     event.set()
+
+    async def shutdown(self) -> None:
+        """Shut down the load balancer and close all connections."""
+        logger.info("Shutting down load balancer")
+        if self._health_check_task:
+            self._health_check_task.cancel()
+            try:
+                await self._health_check_task
+            except asyncio.CancelledError:
+                pass
+        await self.close_all_connections()
+        logger.info("Load balancer shutdown complete")
 
     async def get_load_balancer_stats(self) -> dict[str, Any]:
         """Get high-level statistics about the load balancer."""
@@ -273,7 +266,7 @@ class ConnectionLoadBalancer:
 
         while True:
             try:
-                await asyncio.sleep(self._health_check_interval)
+                await asyncio.sleep(delay=self._health_check_interval)
                 async with lock:
                     failed_targets_copy = list(self._failed_targets)
 
@@ -284,11 +277,7 @@ class ConnectionLoadBalancer:
                     try:
                         host, port_str = target_key.split(":", 1)
                         port = int(port_str)
-                        if await self._health_checker(
-                            host=host,
-                            port=port,
-                            timeout=self._health_check_timeout,
-                        ):
+                        if await self._health_checker(host=host, port=port, timeout=self._health_check_timeout):
                             logger.info("Target %s is back online", target_key)
                             async with lock:
                                 self._failed_targets.discard(target_key)
@@ -299,7 +288,7 @@ class ConnectionLoadBalancer:
                 try:
                     async with asyncio.TaskGroup() as tg:
                         for target_key in failed_targets_copy:
-                            tg.create_task(check_target(target_key=target_key))
+                            tg.create_task(coro=check_target(target_key=target_key))
                 except* Exception:
                     pass
 
@@ -308,13 +297,13 @@ class ConnectionLoadBalancer:
                 break
             except Exception as e:
                 logger.error("Health check loop critical error: %s", e, exc_info=e)
-                await asyncio.sleep(self._health_check_interval)
+                await asyncio.sleep(delay=self._health_check_interval)
 
     def _start_health_check_task(self) -> None:
         """Start the periodic health check task if not already running."""
         if self._health_check_task is None or self._health_check_task.done():
             try:
-                self._health_check_task = asyncio.create_task(self._health_check_loop())
+                self._health_check_task = asyncio.create_task(coro=self._health_check_loop())
             except RuntimeError:
                 self._health_check_task = None
                 logger.warning("Could not start health check task: no running event loop.")

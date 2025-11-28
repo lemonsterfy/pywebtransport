@@ -44,26 +44,20 @@ class MiddlewareManager:
         """Add a middleware to the chain."""
         self._middleware.append(middleware)
 
-    def get_middleware_count(self) -> int:
-        """Get the number of registered middleware."""
-        return len(self._middleware)
-
     def remove_middleware(self, *, middleware: MiddlewareProtocol) -> None:
         """Remove a middleware from the chain."""
         if middleware in self._middleware:
             self._middleware.remove(middleware)
 
+    def get_middleware_count(self) -> int:
+        """Get the number of registered middleware."""
+        return len(self._middleware)
+
 
 class RateLimiter:
     """A stateful, concurrent-safe rate-limiting middleware."""
 
-    def __init__(
-        self,
-        *,
-        max_requests: int = 100,
-        window_seconds: int = 60,
-        cleanup_interval: int = 300,
-    ) -> None:
+    def __init__(self, *, max_requests: int = 100, window_seconds: int = 60, cleanup_interval: int = 300) -> None:
         """Initialize the rate limiter."""
         self._max_requests = max_requests
         self._window_seconds = window_seconds
@@ -71,50 +65,25 @@ class RateLimiter:
         self._requests: dict[str, list[float]] = {}
         self._lock: asyncio.Lock | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
+        self._is_closing: bool = False
 
     async def __aenter__(self) -> Self:
         """Initialize resources and start the cleanup task."""
         self._lock = asyncio.Lock()
+        self._is_closing = False
         self._start_cleanup_task()
         return self
 
     async def __aexit__(self, *args: Any) -> None:
         """Stop the background cleanup task and release resources."""
+        self._is_closing = True
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
-
-    async def __call__(self, *, session: WebTransportSession) -> bool:
-        """Apply rate limiting to an incoming session."""
-        if self._lock is None:
-            raise ServerError(
-                message=(
-                    "RateLimiter has not been activated. It must be used as an "
-                    "asynchronous context manager (`async with ...`)."
-                )
-            )
-
-        if not session.connection or not session.connection.remote_address:
-            return True
-
-        client_ip = session.connection.remote_address[0]
-        current_time = get_timestamp()
-
-        async with self._lock:
-            cutoff_time = current_time - self._window_seconds
-            client_requests = self._requests.get(client_ip, [])
-            valid_requests = [t for t in client_requests if t > cutoff_time]
-
-            if len(valid_requests) >= self._max_requests:
-                logger.warning("Rate limit exceeded for %s", client_ip)
-                return False
-
-            valid_requests.append(current_time)
-            self._requests[client_ip] = valid_requests
-        return True
+        self._cleanup_task = None
 
     async def _periodic_cleanup(self) -> None:
         """Periodically remove stale IP entries from the tracker."""
@@ -123,7 +92,9 @@ class RateLimiter:
             return
 
         while True:
-            await asyncio.sleep(self._cleanup_interval)
+            await asyncio.sleep(delay=self._cleanup_interval)
+            if self._is_closing:
+                break
 
             async with self._lock:
                 current_time = get_timestamp()
@@ -140,13 +111,41 @@ class RateLimiter:
     def _start_cleanup_task(self) -> None:
         """Create and start the periodic cleanup task if not already running."""
         if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+            self._cleanup_task = asyncio.create_task(coro=self._periodic_cleanup())
+
+    async def __call__(self, *, session: WebTransportSession) -> bool:
+        """Apply rate limiting to an incoming session."""
+        if self._lock is None:
+            raise ServerError(
+                message=(
+                    "RateLimiter has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
+            )
+
+        connection = session._connection
+        if not connection or not connection.remote_address:
+            logger.warning("Could not determine client IP for rate limiting session %s.", session.session_id)
+            return True
+
+        client_ip = connection.remote_address[0]
+        current_time = get_timestamp()
+
+        async with self._lock:
+            cutoff_time = current_time - self._window_seconds
+            client_requests = self._requests.get(client_ip, [])
+            valid_requests = [t for t in client_requests if t > cutoff_time]
+
+            if len(valid_requests) >= self._max_requests:
+                logger.warning("Rate limit exceeded for IP %s (Session: %s)", client_ip, session.session_id)
+                return False
+
+            valid_requests.append(current_time)
+            self._requests[client_ip] = valid_requests
+        return True
 
 
-def create_auth_middleware(
-    *,
-    auth_handler: AuthHandlerProtocol,
-) -> MiddlewareProtocol:
+def create_auth_middleware(*, auth_handler: AuthHandlerProtocol) -> MiddlewareProtocol:
     """Create an authentication middleware with a custom handler."""
 
     async def middleware(*, session: WebTransportSession) -> bool:
@@ -159,10 +158,7 @@ def create_auth_middleware(
     return middleware
 
 
-def create_cors_middleware(
-    *,
-    allowed_origins: list[str],
-) -> MiddlewareProtocol:
+def create_cors_middleware(*, allowed_origins: list[str]) -> MiddlewareProtocol:
     """Create a CORS middleware to validate the Origin header."""
     allowed_set = set(allowed_origins)
 
@@ -186,8 +182,10 @@ def create_logging_middleware() -> MiddlewareProtocol:
 
     async def middleware(*, session: WebTransportSession) -> bool:
         remote_address_str = "unknown"
-        if session.connection and session.connection.remote_address:
-            remote_address_str = f"{session.connection.remote_address[0]}:{session.connection.remote_address[1]}"
+        connection = session._connection
+        if connection and connection.remote_address:
+            addr = connection.remote_address
+            remote_address_str = f"{addr[0]}:{addr[1]}"
         logger.info("Session request: path='%s' from=%s", session.path, remote_address_str)
         return True
 
@@ -195,14 +193,7 @@ def create_logging_middleware() -> MiddlewareProtocol:
 
 
 def create_rate_limit_middleware(
-    *,
-    max_requests: int = 100,
-    window_seconds: int = 60,
-    cleanup_interval: int = 300,
+    *, max_requests: int = 100, window_seconds: int = 60, cleanup_interval: int = 300
 ) -> RateLimiter:
     """Create a stateful rate-limiting middleware instance."""
-    return RateLimiter(
-        max_requests=max_requests,
-        window_seconds=window_seconds,
-        cleanup_interval=cleanup_interval,
-    )
+    return RateLimiter(max_requests=max_requests, window_seconds=window_seconds, cleanup_interval=cleanup_interval)

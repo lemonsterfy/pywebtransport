@@ -13,10 +13,12 @@ from pywebtransport.types import (
     SessionState,
     StreamDirection,
     StreamState,
+    WebTransportProtocol,
 )
 
 
 class TestEnumerations:
+
     @pytest.mark.parametrize(
         "member, expected_value",
         [
@@ -46,18 +48,14 @@ class TestEnumerations:
             (EventType.PROTOCOL_ERROR, "protocol_error"),
             (EventType.SETTINGS_RECEIVED, "settings_received"),
             (EventType.SESSION_CLOSED, "session_closed"),
+            (EventType.SESSION_DATA_BLOCKED, "session_data_blocked"),
             (EventType.SESSION_DRAINING, "session_draining"),
             (EventType.SESSION_MAX_DATA_UPDATED, "session_max_data_updated"),
-            (
-                EventType.SESSION_MAX_STREAMS_BIDI_UPDATED,
-                "session_max_streams_bidi_updated",
-            ),
-            (
-                EventType.SESSION_MAX_STREAMS_UNI_UPDATED,
-                "session_max_streams_uni_updated",
-            ),
+            (EventType.SESSION_MAX_STREAMS_BIDI_UPDATED, "session_max_streams_bidi_updated"),
+            (EventType.SESSION_MAX_STREAMS_UNI_UPDATED, "session_max_streams_uni_updated"),
             (EventType.SESSION_READY, "session_ready"),
             (EventType.SESSION_REQUEST, "session_request"),
+            (EventType.SESSION_STREAMS_BLOCKED, "session_streams_blocked"),
             (EventType.STREAM_CLOSED, "stream_closed"),
             (EventType.STREAM_DATA_RECEIVED, "stream_data_received"),
             (EventType.STREAM_ERROR, "stream_error"),
@@ -108,47 +106,71 @@ class TestEnumerations:
 
 
 class TestRuntimeCheckableProtocols:
-    class GoodAuthHandler:
-        async def __call__(self, *, headers: Headers) -> bool:
-            return True
-
-    class BadAuthHandler:
-        async def handle(self, *, headers: Headers) -> bool:
-            return True
-
-    class GoodMiddleware:
-        async def __call__(self, *, session: Any) -> bool:
-            return True
-
-    class BadMiddleware:
-        async def process_session(self, *, session: Any) -> Any:
-            return session
-
-    class GoodSerializer:
-        def serialize(self, *, obj: Any) -> bytes:
-            return b"serialized"
-
-        def deserialize(self, *, data: bytes, obj_type: type[Any] | None = None) -> Any:
-            return "deserialized"
-
-    class BadSerializer:
-        def serialize(self, *, obj: Any) -> bytes:
-            return b"serialized"
 
     def test_auth_handler_protocol_conformance(self) -> None:
-        assert isinstance(self.GoodAuthHandler(), AuthHandlerProtocol)
+        class GoodAuthHandler:
+            async def __call__(self, *, headers: Headers) -> bool:
+                return True
+
+        assert isinstance(GoodAuthHandler(), AuthHandlerProtocol)
 
     def test_auth_handler_protocol_non_conformance(self) -> None:
-        assert not isinstance(self.BadAuthHandler(), AuthHandlerProtocol)
+        class BadAuthHandler:
+            async def handle(self, *, headers: Headers) -> bool:
+                return True
+
+        assert not isinstance(BadAuthHandler(), AuthHandlerProtocol)
 
     def test_middleware_protocol_conformance(self) -> None:
-        assert isinstance(self.GoodMiddleware(), MiddlewareProtocol)
+        class GoodMiddleware:
+            async def __call__(self, *, session: Any) -> bool:
+                return True
+
+        assert isinstance(GoodMiddleware(), MiddlewareProtocol)
 
     def test_middleware_protocol_non_conformance(self) -> None:
-        assert not isinstance(self.BadMiddleware(), MiddlewareProtocol)
+        class BadMiddleware:
+            async def process_session(self, *, session: Any) -> Any:
+                return session
+
+        assert not isinstance(BadMiddleware(), MiddlewareProtocol)
 
     def test_serializer_protocol_conformance(self) -> None:
-        assert isinstance(self.GoodSerializer(), Serializer)
+        class GoodSerializer:
+            def serialize(self, *, obj: Any) -> bytes:
+                return b"serialized"
+
+            def deserialize(self, *, data: bytes, obj_type: type[Any] | None = None) -> Any:
+                return "deserialized"
+
+        assert isinstance(GoodSerializer(), Serializer)
 
     def test_serializer_protocol_non_conformance(self) -> None:
-        assert not isinstance(self.BadSerializer(), Serializer)
+        class BadSerializer:
+            def serialize(self, *, obj: Any) -> bytes:
+                return b"serialized"
+
+        assert not isinstance(BadSerializer(), Serializer)
+
+    def test_web_transport_protocol_conformance(self) -> None:
+        class GoodTransport:
+            def connection_lost(self, exc: Exception | None) -> None:
+                pass
+
+            def connection_made(self, transport: Any) -> None:
+                pass
+
+            def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+                pass
+
+            def error_received(self, exc: Exception) -> None:
+                pass
+
+        assert isinstance(GoodTransport(), WebTransportProtocol)
+
+    def test_web_transport_protocol_non_conformance(self) -> None:
+        class BadTransport:
+            def connection_made(self, transport: Any) -> None:
+                pass
+
+        assert not isinstance(BadTransport(), WebTransportProtocol)

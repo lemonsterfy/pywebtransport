@@ -57,10 +57,7 @@ class TestWebTransportBrowser:
 
     @pytest.mark.asyncio
     async def test_back_and_forward(
-        self,
-        browser: WebTransportBrowser,
-        mock_underlying_client: Any,
-        mock_session: Any,
+        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any
     ) -> None:
         browser._history = ["https://a.com", "https://b.com"]
         browser._history_index = 1
@@ -90,11 +87,7 @@ class TestWebTransportBrowser:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("session_is_closed", [True, False])
     async def test_close(
-        self,
-        browser: WebTransportBrowser,
-        mock_underlying_client: Any,
-        mock_session: Any,
-        session_is_closed: bool,
+        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any, session_is_closed: bool
     ) -> None:
         mock_session.is_closed = session_is_closed
         browser._current_session = mock_session
@@ -146,10 +139,7 @@ class TestWebTransportBrowser:
         ],
     )
     async def test_methods_raise_if_not_activated(
-        self,
-        browser_unactivated: WebTransportBrowser,
-        method_name: str,
-        kwargs: dict[str, Any],
+        self, browser_unactivated: WebTransportBrowser, method_name: str, kwargs: dict[str, Any]
     ) -> None:
         method_to_test = getattr(browser_unactivated, method_name)
 
@@ -191,10 +181,7 @@ class TestWebTransportBrowser:
 
     @pytest.mark.asyncio
     async def test_navigate_first_time(
-        self,
-        browser: WebTransportBrowser,
-        mock_underlying_client: Any,
-        mock_session: Any,
+        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any
     ) -> None:
         url = "https://a.com"
 
@@ -208,10 +195,7 @@ class TestWebTransportBrowser:
 
     @pytest.mark.asyncio
     async def test_navigate_forward_history_truncation(
-        self,
-        browser: WebTransportBrowser,
-        mock_underlying_client: Any,
-        mock_session: Any,
+        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any
     ) -> None:
         browser._history = ["https://a.com", "https://b.com", "https://c.com"]
         browser._history_index = 0
@@ -252,10 +236,7 @@ class TestWebTransportBrowser:
 
     @pytest.mark.asyncio
     async def test_navigate_to_same_url(
-        self,
-        browser: WebTransportBrowser,
-        mock_underlying_client: Any,
-        mock_session: Any,
+        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any
     ) -> None:
         url = "https://a.com"
         browser._current_session = mock_session
@@ -270,12 +251,23 @@ class TestWebTransportBrowser:
         cast(Any, mock_underlying_client.connect).assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_refresh(
-        self,
-        browser: WebTransportBrowser,
-        mock_underlying_client: Any,
-        mock_session: Any,
+    async def test_navigate_to_same_url_reconnects_if_session_is_none(
+        self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any
     ) -> None:
+        url = "https://a.com"
+        browser._current_session = None
+        browser._history = [url]
+        browser._history_index = 0
+
+        session = await browser.navigate(url=url)
+
+        assert session is mock_session
+        assert await browser.get_history() == [url]
+        assert browser._history_index == 0
+        cast(Any, mock_underlying_client.connect).assert_awaited_once_with(url=url)
+
+    @pytest.mark.asyncio
+    async def test_refresh(self, browser: WebTransportBrowser, mock_underlying_client: Any, mock_session: Any) -> None:
         url = "https://a.com"
         browser._history = [url]
         browser._history_index = 0

@@ -1,0 +1,246 @@
+"""High-performance Benchmark Server System Under Test."""
+
+import asyncio
+import logging
+from pathlib import Path
+from typing import Any, Final
+
+import uvloop
+
+from pywebtransport import (
+    ConnectionError,
+    Event,
+    ServerApp,
+    ServerConfig,
+    StreamError,
+    WebTransportReceiveStream,
+    WebTransportSession,
+    WebTransportStream,
+)
+from pywebtransport.types import EventType
+from pywebtransport.utils import generate_self_signed_cert
+
+SERVER_HOST: Final[str] = "::"
+SERVER_PORT: Final[int] = 4433
+CERT_PATH: Final[Path] = Path("localhost.crt")
+KEY_PATH: Final[Path] = Path("localhost.key")
+CHUNK_SIZE: Final[int] = 65536
+STATIC_VIEW: Final[memoryview] = memoryview(b"x" * (10 * 1024 * 1024))
+
+logging.basicConfig(level=logging.CRITICAL)
+logger = logging.getLogger("bench_server")
+
+
+class BenchmarkServerApp(ServerApp):
+    """A minimal high-performance server application for benchmarking."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize the benchmark server app."""
+        super().__init__(**kwargs)
+        self._register_routes()
+
+    async def handle_discard(self, session: WebTransportSession) -> None:
+        """Handle unidirectional upload streams by draining them."""
+
+        async def stream_drainer(*, stream: WebTransportReceiveStream) -> None:
+            try:
+                while await stream.read(max_bytes=CHUNK_SIZE):
+                    pass
+            except Exception:
+                pass
+
+        async def on_stream(event: Event) -> None:
+            if isinstance(event.data, dict) and (stream := event.data.get("stream")):
+                asyncio.create_task(coro=stream_drainer(stream=stream))
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
+        try:
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
+            pass
+
+    async def handle_duplex(self, session: WebTransportSession) -> None:
+        """Handle full duplex throughput test."""
+
+        async def stream_handler(*, stream: WebTransportStream) -> None:
+            try:
+
+                async def sender() -> None:
+                    bytes_sent = 0
+                    limit = 1024 * 1024
+                    while bytes_sent < limit:
+                        chunk_size = min(CHUNK_SIZE, limit - bytes_sent)
+                        chunk = STATIC_VIEW[:chunk_size]
+                        await stream.write(data=chunk)
+                        bytes_sent += chunk_size
+                    await stream.write(data=b"", end_stream=True)
+
+                async def receiver() -> None:
+                    while await stream.read(max_bytes=CHUNK_SIZE):
+                        pass
+
+                await asyncio.gather(sender(), receiver())
+            except (ConnectionError, StreamError):
+                pass
+            except Exception:
+                if not stream.is_closed:
+                    await stream.close()
+
+        async def on_stream(event: Event) -> None:
+            if isinstance(event.data, dict) and (stream := event.data.get("stream")):
+                asyncio.create_task(coro=stream_handler(stream=stream))
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
+        try:
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
+            pass
+
+    async def handle_echo(self, session: WebTransportSession) -> None:
+        """Handle bidirectional echo for streams and datagrams."""
+
+        async def datagram_loop() -> None:
+            async def on_dgram(event: Event) -> None:
+                if isinstance(event.data, dict) and (data := event.data.get("data")):
+                    try:
+                        await session.send_datagram(data=data)
+                    except Exception:
+                        pass
+
+            session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=on_dgram)
+
+        async def stream_handler(*, stream: WebTransportStream) -> None:
+            try:
+                while True:
+                    data = await stream.read(max_bytes=CHUNK_SIZE)
+                    if not data:
+                        break
+                    await stream.write(data=data)
+
+                await stream.write(data=b"", end_stream=True)
+                await stream.read(max_bytes=1)
+
+            except (ConnectionError, StreamError):
+                pass
+            except Exception:
+                if not stream.is_closed:
+                    await stream.close()
+
+        async def stream_accept_loop() -> None:
+            async def on_stream(event: Event) -> None:
+                if isinstance(event.data, dict) and (stream := event.data.get("stream")):
+                    asyncio.create_task(coro=stream_handler(stream=stream))
+
+            session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
+
+        t1 = asyncio.create_task(coro=datagram_loop())
+        t2 = asyncio.create_task(coro=stream_accept_loop())
+
+        try:
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
+            pass
+        finally:
+            t1.cancel()
+            t2.cancel()
+
+    async def handle_latency(self, session: WebTransportSession) -> None:
+        """Handle request-response latency tests."""
+
+        async def stream_responder(*, stream: WebTransportStream) -> None:
+            try:
+                data = await stream.read_all()
+                await stream.write_all(data=data)
+                await stream.read(max_bytes=1)
+            except (ConnectionError, StreamError):
+                pass
+            except Exception:
+                if not stream.is_closed:
+                    await stream.close()
+
+        async def on_stream(event: Event) -> None:
+            if isinstance(event.data, dict) and (stream := event.data.get("stream")):
+                asyncio.create_task(coro=stream_responder(stream=stream))
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
+        try:
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
+            pass
+
+    async def handle_produce(self, session: WebTransportSession) -> None:
+        """Handle unidirectional download tests by producing static data."""
+
+        async def stream_producer(*, stream: WebTransportStream) -> None:
+            try:
+                cmd_bytes = await stream.read(max_bytes=128)
+                try:
+                    size_to_send = int(cmd_bytes)
+                except ValueError:
+                    return
+
+                bytes_sent = 0
+                while bytes_sent < size_to_send:
+                    chunk_size = min(CHUNK_SIZE, size_to_send - bytes_sent)
+                    chunk = STATIC_VIEW[:chunk_size]
+                    await stream.write(data=chunk)
+                    bytes_sent += chunk_size
+
+                await stream.write(data=b"", end_stream=True)
+                await stream.read(max_bytes=1)
+            except (ConnectionError, StreamError):
+                pass
+            except Exception:
+                if not stream.is_closed:
+                    await stream.close()
+
+        async def on_stream(event: Event) -> None:
+            if isinstance(event.data, dict) and (stream := event.data.get("stream")):
+                asyncio.create_task(coro=stream_producer(stream=stream))
+
+        session.events.on(event_type=EventType.STREAM_OPENED, handler=on_stream)
+        try:
+            await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+        except Exception:
+            pass
+
+    def _register_routes(self) -> None:
+        """Register optimized handlers for benchmark scenarios."""
+        self.route(path="/discard")(self.handle_discard)
+        self.route(path="/duplex")(self.handle_duplex)
+        self.route(path="/echo")(self.handle_echo)
+        self.route(path="/latency")(self.handle_latency)
+        self.route(path="/produce")(self.handle_produce)
+
+
+async def main() -> None:
+    """Run the benchmark server."""
+    if not CERT_PATH.exists() or not KEY_PATH.exists():
+        generate_self_signed_cert(hostname="localhost", output_dir=".")
+
+    config = ServerConfig(
+        bind_host=SERVER_HOST,
+        bind_port=SERVER_PORT,
+        certfile=str(CERT_PATH),
+        keyfile=str(KEY_PATH),
+        debug=False,
+        max_connections=10000,
+        initial_max_data=104857600,
+        flow_control_window_size=104857600,
+        initial_max_streams_bidi=10000,
+        initial_max_streams_uni=10000,
+        stream_flow_control_increment_bidi=1048576,
+        stream_flow_control_increment_uni=1048576,
+    )
+
+    app = BenchmarkServerApp(config=config)
+
+    async with app:
+        await app.serve()
+
+
+if __name__ == "__main__":
+    try:
+        uvloop.run(main())
+    except KeyboardInterrupt:
+        pass

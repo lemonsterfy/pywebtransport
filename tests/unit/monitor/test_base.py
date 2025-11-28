@@ -47,6 +47,7 @@ class FailingMonitor(_BaseMonitor[MockTarget]):
 
 
 class TestBaseMonitor:
+
     @pytest.fixture
     def mock_target(self) -> MockTarget:
         return MockTarget()
@@ -59,12 +60,14 @@ class TestBaseMonitor:
 
         mocker.patch("asyncio.create_task", side_effect=close_coro_and_raise)
         monitor = SyncControllableMonitor(target=mock_target)
+
         async with monitor:
             assert not monitor.is_monitoring
 
     @pytest.mark.asyncio
     async def test_aenter_is_idempotent(self, mock_target: MockTarget) -> None:
         monitor = SyncControllableMonitor(target=mock_target)
+
         async with monitor:
             initial_task = monitor._monitor_task
             async with monitor:
@@ -73,10 +76,12 @@ class TestBaseMonitor:
     @pytest.mark.asyncio
     async def test_aexit_handles_already_done_task(self, mock_target: MockTarget) -> None:
         monitor = FailingMonitor(target=mock_target)
+
         async with monitor:
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(delay=0.01)
             assert monitor._monitor_task is not None
             assert monitor._monitor_task.done()
+
         assert not monitor.is_monitoring
 
     def test_get_and_clear_history(self, mock_target: MockTarget) -> None:
@@ -90,19 +95,23 @@ class TestBaseMonitor:
         assert len(monitor.get_alerts(limit=10)) == 5
 
         monitor.clear_history()
+
         assert not monitor.get_metrics_history()
         assert not monitor.get_alerts()
 
     def test_initialization(self, mock_target: MockTarget) -> None:
         monitor = SyncControllableMonitor(target=mock_target, monitoring_interval=10.0)
+
         assert not monitor.is_monitoring
         assert monitor._interval == 10.0
 
     @pytest.mark.asyncio
     async def test_lifecycle_starts_and_stops_task(self, mock_target: MockTarget) -> None:
         monitor = SyncControllableMonitor(target=mock_target)
+
         async with monitor:
-            await asyncio.wait_for(monitor.loop_ran.wait(), timeout=1)
+            async with asyncio.timeout(delay=1):
+                await monitor.loop_ran.wait()
             assert monitor.is_monitoring
             assert monitor._monitor_task is not None
 
@@ -111,16 +120,19 @@ class TestBaseMonitor:
     @pytest.mark.asyncio
     async def test_loop_handles_async_methods(self, mock_target: MockTarget) -> None:
         monitor = AsyncControllableMonitor(target=mock_target)
+
         async with monitor:
-            await asyncio.wait_for(monitor.loop_ran.wait(), timeout=1)
+            async with asyncio.timeout(delay=1):
+                await monitor.loop_ran.wait()
             assert len(monitor.get_metrics_history()) == 1
 
     @pytest.mark.asyncio
     async def test_loop_handles_critical_error(self, mock_target: MockTarget, mocker: MockerFixture) -> None:
         error_logger_mock = mocker.patch("pywebtransport.monitor._base.logger.error")
         monitor = FailingMonitor(target=mock_target)
+
         async with monitor:
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(delay=0.01)
 
         assert monitor._monitor_task is not None
         assert monitor._monitor_task.done()

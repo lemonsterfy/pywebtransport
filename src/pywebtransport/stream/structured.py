@@ -6,7 +6,7 @@ import asyncio
 import struct
 from typing import TYPE_CHECKING, Any
 
-from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE
+from pywebtransport.constants import ErrorCodes
 from pywebtransport.exceptions import ConfigurationError, SerializationError, StreamError
 from pywebtransport.types import Serializer
 
@@ -29,9 +29,9 @@ class StructuredStream:
         stream: WebTransportStream,
         serializer: Serializer,
         registry: dict[int, type[Any]],
-        max_message_size: int = DEFAULT_MAX_MESSAGE_SIZE,
+        max_message_size: int,
     ) -> None:
-        """Initialize the structured stream."""
+        """Initialize the structured stream wrapper."""
         if len(set(registry.values())) != len(registry):
             raise ConfigurationError(message="Types in the structured stream registry must be unique.")
 
@@ -65,7 +65,7 @@ class StructuredStream:
         type_id, payload_len = struct.unpack(self._HEADER_FORMAT, header_bytes)
 
         if payload_len > self._max_message_size:
-            await self._stream.abort()
+            await self._stream.close(error_code=ErrorCodes.APPLICATION_ERROR)
             raise SerializationError(
                 message=f"Incoming message size {payload_len} exceeds the configured limit of {self._max_message_size}."
             )
@@ -79,7 +79,7 @@ class StructuredStream:
         except asyncio.IncompleteReadError as e:
             raise StreamError(
                 message=(
-                    f"Stream closed prematurely while reading payload of size {payload_len} " f"for type ID {type_id}."
+                    f"Stream closed prematurely while reading payload of size {payload_len} for type ID {type_id}."
                 )
             ) from e
 
@@ -98,7 +98,7 @@ class StructuredStream:
 
         await self._stream.write(data=header + payload)
 
-    def __aiter__(self) -> "StructuredStream":
+    def __aiter__(self) -> StructuredStream:
         """Return self as the asynchronous iterator."""
         return self
 

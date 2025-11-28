@@ -18,13 +18,7 @@ __all__: list[str] = ["SessionPool"]
 class SessionPool(_AsyncObjectPool[WebTransportSession]):
     """A robust pool for reusing and managing concurrent sessions for a client and URL."""
 
-    def __init__(
-        self,
-        *,
-        client: WebTransportClient,
-        url: URL,
-        max_size: int,
-    ) -> None:
+    def __init__(self, *, client: WebTransportClient, url: URL, max_size: int) -> None:
         """Initialize the session pool."""
 
         async def factory() -> WebTransportSession:

@@ -63,6 +63,5 @@ class _BaseDataclassSerializer:
             return cls(**constructor_args)
         except TypeError as e:
             raise SerializationError(
-                message=f"Failed to unpack dictionary to dataclass {cls.__name__}.",
-                original_exception=e,
+                message=f"Failed to unpack dictionary to dataclass {cls.__name__}.", original_exception=e
             ) from e

@@ -37,7 +37,7 @@ pipx install tox
     ```
 
 2.  **Set up the Python version**:
-    This project requires Python 3.11 or newer. We use a `.python-version` file to recommend a specific version for local development with `pyenv`.
+    This project requires Python 3.12 or newer. We use a `.python-version` file to recommend a specific version for local development with `pyenv`.
 
     ```bash
     # pyenv will automatically pick up the version from the .python-version file.
@@ -51,7 +51,7 @@ pipx install tox
     ```bash
     # Create and activate a virtual environment named .venv
     python -m venv .venv
-    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    source .venv/bin/activate
     ```
 
 4.  **Install development dependencies**:
@@ -118,7 +118,7 @@ We use the following tools to maintain code quality, with configurations located
 ### Type Hints
 
 - All public functions and methods must include type hints.
-- Use modern Python 3.11+ typing syntax. For example:
+- Use modern Python 3.12+ typing syntax. For example:
   - Use `list` instead of `typing.List`
   - Use `X | Y` instead of `typing.Union[X, Y]`
 - Use built-in generics (`list`, `dict`) instead of imports from `typing`.
@@ -145,10 +145,11 @@ async def create_bidirectional_stream(self) -> WebTransportStream:
 
 ### Test Structure
 
-Tests are organized by type and mirror the source code structure.
+Tests are organized by type and mirror the source code structure:
 
 ```
 tests/
+├── benchmark/
 ├── e2e/
 ├── integration/
 ├── performance/
@@ -166,34 +167,7 @@ tests/
 
 The primary way to run the full test suite is with `tox`.
 
-```bash
-# Run all checks and tests across all supported Python versions
-tox
-```
-
 For faster, iterative development, you can run `pytest` directly in your activated virtual environment.
-
-```bash
-# Run all tests using pytest
-pytest
-
-# Run a specific test file
-pytest tests/unit/client/test_client.py
-
-# Run tests with a specific marker
-pytest -m integration
-
-# Run tests and generate a coverage report
-pytest --cov=pywebtransport --cov-report=html
-```
-
-### WebTransport Testing Requirements
-
-- Test both client and server implementations.
-- Test stream multiplexing scenarios.
-- Test connection failure and recovery.
-- Test certificate validation.
-- Include performance benchmarks for critical paths.
 
 ## Documentation
 
@@ -215,27 +189,14 @@ When updating documentation:
 
 ### Before Submitting
 
-1.  **Ensure all tests pass with `tox`**:
+1.  **Ensure all checks and tests pass**.
+2.  **Update documentation** if needed.
 
-    ```bash
-    tox
-    ```
-
-2.  **Ensure code is formatted and passes quality checks**:
-
-    ```bash
-    black src tests
-    flake8 src tests
-    mypy src tests
-    ```
-
-3.  **Update documentation** if needed.
-
-4.  **Add entries to `CHANGELOG.md`** for user-facing changes.
+3.  **Add entries to `CHANGELOG.md`** for user-facing changes.
 
 ### Submitting a Pull Request
 
-Once your changes are ready, push your branch to your fork and open a pull request against the `main` branch of the original repository. GitHub will automatically use our [PR template](/.github/pull_request_template.md).
+Once your changes are ready, push your branch to your fork and open a pull request against the `main` branch of the original repository. GitHub will automatically use our PR template.
 
 - **Title**: Use a clear, descriptive title following Conventional Commits.
 - **Description**: Explain what the PR does and why.
@@ -283,27 +244,11 @@ For feature requests:
 - Consider backward compatibility
 - Reference relevant WebTransport specifications
 
-## Community
-
-### Getting Help
-
-- **GitHub Discussions**: General questions and discussions
-- **GitHub Issues**: Bug reports and feature requests
-- **Email**: lemonsterfy@gmail.com for security issues
-
-### Contributing Beyond Code
-
-- Report bugs and suggest features
-- Improve documentation
-- Help other users in discussions
-- Review pull requests
-- Write blog posts or tutorials
-
 ## Performance Considerations
 
 When contributing performance-sensitive code:
 
-- Include benchmarks for significant changes
+- Include benchmarks for significant changes (add to `tests/benchmark/`)
 - Consider memory allocation patterns
 - Test with realistic WebTransport workloads
 - Profile critical code paths
@@ -313,16 +258,8 @@ When contributing performance-sensitive code:
 
 Ensure contributions maintain compliance with the WebTransport protocol suite and its underlying dependencies. Key documents include:
 
-- [WebTransport over HTTP/3 (draft-ietf-webtrans-http3-13)](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.txt)
+- [WebTransport over HTTP/3 (draft-ietf-webtrans-http3-14)](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.txt)
 - [RFC 9114 (HTTP/3)](https://www.rfc-editor.org/rfc/rfc9114.txt)
-
-## Recognition
-
-Contributors are recognized in:
-
-- `CHANGELOG.md` for significant contributions
-- GitHub contributors page
-- Release notes for major contributions
 
 ---
 

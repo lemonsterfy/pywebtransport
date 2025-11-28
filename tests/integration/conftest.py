@@ -2,6 +2,7 @@
 
 import asyncio
 import socket
+import ssl
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import cast
@@ -32,7 +33,7 @@ def certificates_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def client_config(certificates_dir: Path) -> ClientConfig:
     """Provide a ClientConfig that trusts the self-signed server certificate."""
     return ClientConfig(
-        ca_certs=str(certificates_dir / "localhost.crt"),
+        verify_mode=ssl.CERT_NONE,
         connect_timeout=5.0,
         initial_max_data=1024 * 1024,
         initial_max_streams_bidi=100,
@@ -62,9 +63,7 @@ async def client(client_config: ClientConfig) -> AsyncGenerator[WebTransportClie
 
 
 @asyncio_fixture
-async def server(
-    server_app: ServerApp,
-) -> AsyncGenerator[tuple[str, int], None]:
+async def server(server_app: ServerApp) -> AsyncGenerator[tuple[str, int], None]:
     """Start a WebTransport server in a background task for a test."""
     host = "127.0.0.1"
     port = find_free_port()
@@ -76,7 +75,8 @@ async def server(
         try:
             yield host, port
         finally:
-            server_task.cancel()
+            if not server_task.done():
+                server_task.cancel()
             try:
                 await server_task
             except asyncio.CancelledError:
@@ -85,10 +85,12 @@ async def server(
 
 @pytest.fixture
 def server_app(request: pytest.FixtureRequest, server_config: ServerConfig) -> ServerApp:
-    """Provide a ServerApp instance, supporting indirect parametrization for config overrides."""
+    """Provide a ServerApp instance configured with basic echo handlers."""
     config_overrides = getattr(request, "param", {})
     if config_overrides and isinstance(config_overrides, dict):
         custom_config = server_config.update(**config_overrides)
-        return ServerApp(config=custom_config)
+        app = ServerApp(config=custom_config)
+    else:
+        app = ServerApp(config=server_config)
 
-    return ServerApp(config=server_config)
+    return app

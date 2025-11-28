@@ -6,65 +6,77 @@ This document provides a reference for the `pywebtransport.stream` subpackage, w
 
 ## WebTransportStream Class
 
-Represents a bidirectional WebTransport stream that can be both read from and written to. It inherits all methods and properties from `WebTransportReceiveStream` and `WebTransportSendStream`.
+Represents a bidirectional WebTransport stream that can be both read from and written to. It inherits all methods and properties from `WebTransportReceiveStream` and `WebTransportSendStream`. This class supports asynchronous iteration to yield data chunks as they arrive.
 
-**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession` (e.g., via `session.create_bidirectional_stream()`).
+### Properties
+
+- `direction` (`StreamDirection`): The directionality of the stream (`BIDIRECTIONAL`).
+- `is_closed` (`bool`): `True` if the stream is fully closed.
+- `session` (`WebTransportSession`): The parent session object.
+- `state` (`StreamState`): The current state of the stream (e.g., `OPEN`, `CLOSED`).
+- `stream_id` (`int`): The unique identifier for this stream.
 
 ### Instance Methods
 
-- **`async def close(self) -> None`**: Gracefully closes the stream's write side by sending a `FIN` bit.
-- **`def diagnose_issues(self, *, error_rate_threshold: float = 0.1, latency_threshold: float = 1.0, stale_threshold: float = 3600.0) -> list[str]`**: Runs checks and returns a list of strings describing potential issues.
-- **`async def monitor_health(self, *, check_interval: float = 30.0, error_rate_threshold: float = 0.1) -> None`**: A long-running task that continuously monitors stream health.
+- **`async def close(self, *, error_code: int | None = None) -> None`**: Closes both sides of the stream. Optionally sends an application error code.
+- **`async def diagnostics(self) -> StreamDiagnostics`**: Asynchronously retrieves a snapshot of the stream's diagnostic information.
 
 ## WebTransportSendStream Class
 
-Represents a unidirectional (send-only) WebTransport stream.
-
-**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession`.
+Represents the writable side of a WebTransport stream (or a unidirectional send stream).
 
 ### Properties
 
-- `is_writable` (`bool`): `True` if the stream can be written to.
+- `can_write` (`bool`): `True` if the stream is in a writable state.
+- `direction` (`StreamDirection`): The directionality of the stream.
+- `is_closed` (`bool`): `True` if the stream is fully closed.
+- `session` (`WebTransportSession`): The parent session object.
+- `state` (`StreamState`): The current state of the stream.
+- `stream_id` (`int`): The unique identifier for this stream.
 
 ### Instance Methods
 
-- **`async def abort(self, *, code: int = 0) -> None`**: Forcefully closes the stream with an error code.
-- **`async def close(self) -> None`**: Gracefully closes the stream's write side by sending a `FIN` bit.
-- **`async def flush(self) -> None`**: Waits until the stream's internal write buffer is empty.
-- **`async def wait_closed(self) -> None`**: Waits until the stream is fully closed.
-- **`async def write(self, *, data: Data, end_stream: bool = False, wait_flush: bool = True) -> None`**: Writes data to the stream.
-- **`async def write_all(self, *, data: bytes, chunk_size: int = 8192) -> None`**: Writes a large bytes object to the stream in chunks and then closes it.
+- **`async def close(self, *, error_code: int | None = None) -> None`**: Closes the sending side. If `error_code` is provided, it resets the stream; otherwise, it sends a FIN.
+- **`async def diagnostics(self) -> StreamDiagnostics`**: Asynchronously retrieves a snapshot of the stream's diagnostic information.
+- **`async def stop_sending(self, *, error_code: int = 0) -> None`**: Sends a `RESET_STREAM` frame to the peer to stop sending data.
+- **`async def write(self, *, data: Data, end_stream: bool = False) -> None`**: Writes data to the stream.
+- **`async def write_all(self, *, data: bytes, chunk_size: int = 65536) -> None`**: Writes a large bytes object in chunks.
 
 ## WebTransportReceiveStream Class
 
-Represents a unidirectional (receive-only) WebTransport stream.
-
-**Note on Usage**: Stream objects are not instantiated directly. They are created and provided by a `WebTransportSession`.
+Represents the readable side of a WebTransport stream. This class supports asynchronous iteration (`async for chunk in stream`) to read data chunks.
 
 ### Properties
 
-- `is_readable` (`bool`): `True` if the stream can be read from.
+- `can_read` (`bool`): `True` if the stream is in a readable state.
+- `direction` (`StreamDirection`): The directionality of the stream.
+- `is_closed` (`bool`): `True` if the stream is fully closed.
+- `session` (`WebTransportSession`): The parent session object.
+- `state` (`StreamState`): The current state of the stream.
+- `stream_id` (`int`): The unique identifier for this stream.
 
 ### Instance Methods
 
-- **`async def abort(self, *, code: int = 0) -> None`**: Aborts the reading side of the stream.
-- **`async def read(self, *, size: int = 8192) -> bytes`**: Reads up to `size` bytes from the stream. Returns `b""` on EOF.
-- **`async def read_all(self, *, max_size: int | None = None) -> bytes`**: Reads the entire stream content into a single bytes object.
-- **`async def read_iter(self, *, chunk_size: int = 8192) -> AsyncIterator[bytes]`**: Returns an async iterator to read the stream in chunks.
-- **`async def readexactly(self, *, n: int) -> bytes`**: Reads exactly `n` bytes.
-- **`async def readline(self, *, limit: int = 65536) -> bytes`**: Reads one line from the stream.
-- **`async def readuntil(self, *, separator: bytes = b"\n", limit: int | None = None) -> bytes`**: Reads data until a separator is found.
-- **`async def wait_closed(self) -> None`**: Waits until the stream is fully closed.
+- **`async def close(self) -> None`**: Closes the receiving side (stops receiving).
+- **`async def diagnostics(self) -> StreamDiagnostics`**: Asynchronously retrieves a snapshot of the stream's diagnostic information.
+- **`async def read(self, *, max_bytes: int = -1) -> bytes`**: Reads up to `max_bytes` from the stream. Returns `b""` on EOF.
+- **`async def read_all(self) -> bytes`**: Reads all remaining data from the stream until EOF.
+- **`async def readexactly(self, *, n: int) -> bytes`**: Reads exactly `n` bytes. Raises `IncompleteReadError` if EOF is reached before `n` bytes.
+- **`async def readline(self, *, limit: int = -1) -> bytes`**: Reads one line (terminated by `\n`).
+- **`async def readuntil(self, *, separator: bytes, limit: int = -1) -> bytes`**: Reads data until a separator is found.
+- **`async def stop_receiving(self, *, error_code: int = 0) -> None`**: Sends a `STOP_SENDING` frame to the peer.
 
 ## StructuredStream Class
 
-A high-level wrapper for sending and receiving structured Python objects over a `WebTransportStream`.
+A high-level wrapper for sending and receiving structured Python objects over a `WebTransportStream`. This class supports asynchronous iteration (`async for obj in stream`) to receive deserialized objects.
 
-**Note on Usage**: This class is not instantiated directly but through `WebTransportSession.create_structured_stream()`.
+### Constructor
+
+- **`def __init__(self, *, stream: WebTransportStream, serializer: Serializer, registry: dict[int, type[Any]], max_message_size: int) -> None`**: Initializes the structured stream.
 
 ### Properties
 
-- `is_closed` (`bool`): `True` if the underlying stream is fully closed.
+- `is_closed` (`bool`): `True` if the underlying stream is closed.
 - `stream_id` (`int`): The underlying stream's ID.
 
 ### Instance Methods
@@ -73,48 +85,30 @@ A high-level wrapper for sending and receiving structured Python objects over a 
 - **`async def receive_obj(self) -> Any`**: Receives, deserializes, and returns a Python object from the stream.
 - **`async def send_obj(self, *, obj: Any) -> None`**: Serializes and sends a Python object over the stream.
 
-## Supporting Data Classes
+## StreamDiagnostics Class
 
-### StreamDiagnostics Class
-
-A structured, immutable snapshot of a stream's health.
+A dataclass representing a snapshot of stream diagnostics.
 
 ### Attributes
 
-- `stats` (`StreamStats`): The full statistics object for the stream.
-- `read_buffer_size` (`int`): The current size of the read buffer in bytes.
-- `write_buffer_size` (`int`): The current size of the write buffer in bytes.
-
-### StreamStats Class
-
-A dataclass holding statistics for a single stream.
-
-### Attributes
-
-- `stream_id` (`StreamId`): The ID of the stream.
+- `stream_id` (`int`): The ID of the stream.
+- `session_id` (`str`): The ID of the parent session.
+- `direction` (`StreamDirection`): The direction of the stream.
+- `state` (`StreamState`): The current state of the stream.
 - `created_at` (`float`): Timestamp when the stream was created.
-- `closed_at` (`float | None`): Timestamp when the stream was closed. `Default: None`.
-- `bytes_sent` (`int`): Total bytes sent. `Default: 0`.
-- `bytes_received` (`int`): Total bytes received. `Default: 0`.
-- `writes_count` (`int`): Number of write operations. `Default: 0`.
-- `reads_count` (`int`): Number of read operations. `Default: 0`.
-- `total_write_time` (`float`): Cumulative time spent in write operations. `Default: 0.0`.
-- `total_read_time` (`float`): Cumulative time spent in read operations. `Default: 0.0`.
-- `max_write_time` (`float`): The longest time a single write operation took. `Default: 0.0`.
-- `max_read_time` (`float`): The longest time a single read operation took. `Default: 0.0`.
-- `write_errors` (`int`): Number of write operations that failed. `Default: 0`.
-- `read_errors` (`int`): Number of read operations that failed. `Default: 0`.
-- `flow_control_errors` (`int`): Number of times flow control was triggered. `Default: 0`.
-
-### Properties
-
-- `avg_read_time` (`float`): The average time for a read operation in seconds.
-- `avg_write_time` (`float`): The average time for a write operation in seconds.
-- `uptime` (`float`): The total uptime of the stream in seconds.
+- `bytes_sent` (`int`): Total bytes sent.
+- `bytes_received` (`int`): Total bytes received.
+- `read_buffer` (`bytes`): Current content of the read buffer (snapshot).
+- `read_buffer_size` (`int`): Size of the read buffer in bytes.
+- `pending_read_requests` (`list[Any]`): List of pending read futures.
+- `write_buffer` (`list[tuple[bytes, Any, bool]]`): List of buffered write chunks.
+- `close_code` (`int | None`): The error code if the stream is closed.
+- `close_reason` (`str | None`): The reason string if the stream is closed.
+- `closed_at` (`float | None`): Timestamp when the stream was closed.
 
 ## See Also
 
 - **[Configuration API](config.md)**: Understand how to configure clients and servers.
+- **[Constants API](constants.md)**: Review default values and protocol-level constants.
 - **[Events API](events.md)**: Learn about the event system and how to use handlers.
 - **[Exceptions API](exceptions.md)**: Understand the library's error and exception hierarchy.
-- **[Constants API](constants.md)**: Review default values and protocol-level constants.

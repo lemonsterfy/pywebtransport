@@ -18,6 +18,7 @@ from pywebtransport import (
     TimeoutError,
     WebTransportClient,
 )
+from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE
 from pywebtransport.serializer import JSONSerializer, MsgPackSerializer
 
 SERVER_HOST: Final[str] = "127.0.0.1"
@@ -71,7 +72,12 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
 
             logger.info("[%s] Testing StructuredStream...", serializer_name.upper())
             raw_stream = await session.create_bidirectional_stream()
-            structured_stream = StructuredStream(stream=raw_stream, serializer=serializer, registry=MESSAGE_REGISTRY)
+            structured_stream = StructuredStream(
+                stream=raw_stream,
+                serializer=serializer,
+                registry=MESSAGE_REGISTRY,
+                max_message_size=DEFAULT_MAX_MESSAGE_SIZE,
+            )
 
             user_obj = UserData(id=1, name="test", email="test@example.com")
             logger.info("   - Sending stream object: %s", user_obj)
@@ -94,10 +100,10 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
             await structured_stream.close()
 
             logger.info("[%s] Testing StructuredDatagramTransport...", serializer_name.upper())
-            raw_datagram_transport = await session.create_datagram_transport()
             structured_datagram_transport = StructuredDatagramTransport(
-                datagram_transport=raw_datagram_transport, serializer=serializer, registry=MESSAGE_REGISTRY
+                session=session, serializer=serializer, registry=MESSAGE_REGISTRY
             )
+            await structured_datagram_transport.initialize()
 
             datagram_obj = UserData(id=99, name="datagram_user", email="dg@example.com")
             logger.info("   - Sending datagram object: %s", datagram_obj)
@@ -108,6 +114,7 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
                 logger.error("FAILURE: Datagram object mismatch.")
                 return False
             logger.info("   - SUCCESS: StructuredDatagramTransport echo correct.")
+            await structured_datagram_transport.close()
 
             return True
 

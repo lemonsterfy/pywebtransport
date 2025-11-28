@@ -8,7 +8,8 @@ from pywebtransport.pool._base import _AsyncObjectPool
 from pywebtransport.stream.stream import WebTransportStream
 
 if TYPE_CHECKING:
-    from pywebtransport.manager.stream import StreamManager
+    from pywebtransport.session.session import WebTransportSession
+
 
 __all__: list[str] = ["StreamPool"]
 
@@ -16,11 +17,11 @@ __all__: list[str] = ["StreamPool"]
 class StreamPool(_AsyncObjectPool[WebTransportStream]):
     """A robust pool for reusing and managing concurrent bidirectional streams."""
 
-    def __init__(self, *, stream_manager: StreamManager, max_size: int) -> None:
+    def __init__(self, *, session: WebTransportSession, max_size: int) -> None:
         """Initialize the stream pool."""
 
         async def factory() -> WebTransportStream:
-            return await stream_manager.create_bidirectional_stream()
+            return await session.create_bidirectional_stream()
 
         super().__init__(max_size=max_size, factory=factory)
 

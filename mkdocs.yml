@@ -29,8 +29,6 @@ theme:
 
 nav:
   - Home: index.md
-  - Installation: installation.md
-  - Quick Start: quickstart.md
   - API Reference:
       - Overview: api-reference/index.md
       - Client: api-reference/client.md
@@ -43,7 +41,6 @@ nav:
       - Manager: api-reference/manager.md
       - Monitor: api-reference/monitor.md
       - Pool: api-reference/pool.md
-      - Protocol: api-reference/protocol.md
       - Pub/Sub: api-reference/pubsub.md
       - RPC: api-reference/rpc.md
       - Serializer: api-reference/serializer.md

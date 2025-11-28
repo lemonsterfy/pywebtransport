@@ -3,7 +3,7 @@
 import asyncio
 import ssl
 from hashlib import md5
-from typing import Final, Protocol
+from typing import Any, Final, Protocol, cast
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
@@ -80,7 +80,8 @@ class TestStreamThroughput:
 
         benchmark(benchmark_wrapper)
 
-        mean_time = benchmark.stats["mean"]
+        stats = cast(dict[str, Any], benchmark.stats)
+        mean_time = stats["mean"]
         megabytes_transferred = (len(test_data) + len(expected_response)) / (1024 * 1024)
         benchmark.extra_info["mb_per_second"] = megabytes_transferred / mean_time if mean_time > 0 else 0
 
@@ -102,7 +103,8 @@ class TestStreamThroughput:
 
         benchmark(lambda: asyncio.run(run_upload_transfer()))
 
-        mean_time = benchmark.stats["mean"]
+        stats = cast(dict[str, Any], benchmark.stats)
+        mean_time = stats["mean"]
         megabytes_transferred = data_size / (1024 * 1024)
         benchmark.extra_info["mb_per_second"] = megabytes_transferred / mean_time if mean_time > 0 else 0
 
@@ -128,6 +130,7 @@ class TestStreamThroughput:
 
         benchmark(benchmark_wrapper)
 
-        mean_time = benchmark.stats["mean"]
+        stats = cast(dict[str, Any], benchmark.stats)
+        mean_time = stats["mean"]
         megabytes_transferred = data_size / (1024 * 1024)
         benchmark.extra_info["mb_per_second"] = megabytes_transferred / mean_time if mean_time > 0 else 0

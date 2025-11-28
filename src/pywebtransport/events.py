@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Self
 
-from pywebtransport.types import EventData, EventType, Timeout
+from pywebtransport.types import EventData, EventType, Future, Timeout
 from pywebtransport.utils import get_logger, get_timestamp
 
 __all__: list[str] = ["Event", "EventEmitter", "EventHandler"]
@@ -53,11 +53,7 @@ class Event:
 
         return cls(
             type=EventType.PROTOCOL_ERROR,
-            data={
-                "error_type": type(error).__name__,
-                "error_message": str(error),
-                "error_details": details,
-            },
+            data={"error_type": type(error).__name__, "error_message": str(error), "error_details": details},
             source=source,
         )
 
@@ -149,28 +145,7 @@ class EventEmitter:
         self.remove_all_listeners()
         logger.debug("EventEmitter closed and listeners cleared.")
 
-    def pause(self) -> None:
-        """Pause event processing and queue subsequent events."""
-        self._paused = True
-        logger.debug("Event processing paused")
-
-    def resume(self) -> asyncio.Task[None] | None:
-        """Resume event processing and handle all queued events."""
-        self._paused = False
-        logger.debug("Event processing resumed")
-
-        if self._event_queue and (self._processing_task is None or self._processing_task.done()):
-            self._processing_task = asyncio.create_task(self._process_queued_events())
-            return self._processing_task
-        return None
-
-    async def emit(
-        self,
-        *,
-        event_type: EventType | str,
-        data: EventData | None = None,
-        source: Any = None,
-    ) -> None:
+    async def emit(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None:
         """Emit an event to all corresponding listeners."""
         event = Event(type=event_type, data=data, source=source)
         self._add_to_history(event=event)
@@ -180,6 +155,21 @@ class EventEmitter:
             return
 
         await self._process_event(event=event)
+
+    def emit_nowait(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None:
+        """Schedule an event emission synchronously without blocking."""
+        event = Event(type=event_type, data=data, source=source)
+        self._add_to_history(event=event)
+
+        if self._paused:
+            self._event_queue.append(event)
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon(asyncio.create_task, self._process_event(event=event))
+        except RuntimeError:
+            logger.warning("No running event loop, cannot schedule emit for %s", event_type)
 
     def off(self, *, event_type: EventType | str, handler: EventHandler | None = None) -> None:
         """Unregister a specific event handler or all handlers for an event."""
@@ -208,11 +198,7 @@ class EventEmitter:
         """Register a persistent event handler."""
         handlers = self._handlers[event_type]
         if len(handlers) >= self._max_listeners:
-            logger.warning(
-                "Maximum listeners (%d) exceeded for event %s",
-                self._max_listeners,
-                event_type,
-            )
+            logger.warning("Maximum listeners (%d) exceeded for event %s", self._max_listeners, event_type)
 
         if handler not in handlers:
             handlers.append(handler)
@@ -234,6 +220,18 @@ class EventEmitter:
             once_handlers.append(handler)
             logger.debug("Registered once handler for event %s", event_type)
 
+    def remove_all_listeners(self, *, event_type: EventType | str | None = None) -> None:
+        """Remove all listeners for a specific event or for all events."""
+        if event_type is None:
+            self._handlers.clear()
+            self._once_handlers.clear()
+            self._wildcard_handlers.clear()
+            logger.debug("Removed all event listeners")
+        else:
+            self._handlers[event_type].clear()
+            self._once_handlers[event_type].clear()
+            logger.debug("Removed all listeners for event %s", event_type)
+
     async def wait_for(
         self,
         *,
@@ -242,7 +240,7 @@ class EventEmitter:
         condition: Callable[[Event], bool] | None = None,
     ) -> Event:
         """Wait for a specific event to be emitted."""
-        future: asyncio.Future[Event] = asyncio.Future()
+        future: Future[Event] = asyncio.Future()
 
         async def handler(event: Event) -> None:
             try:
@@ -255,7 +253,12 @@ class EventEmitter:
 
         self.on(event_type=event_type, handler=handler)
         try:
-            return await asyncio.wait_for(future, timeout=timeout)
+            try:
+                async with asyncio.timeout(delay=timeout):
+                    return await future
+            except TimeoutError:
+                future.cancel()
+                raise
         finally:
             self.off(event_type=event_type, handler=handler)
 
@@ -294,17 +297,20 @@ class EventEmitter:
         """Get all listeners for a specific event type."""
         return self._handlers[event_type][:] + self._once_handlers[event_type][:]
 
-    def remove_all_listeners(self, *, event_type: EventType | str | None = None) -> None:
-        """Remove all listeners for a specific event or for all events."""
-        if event_type is None:
-            self._handlers.clear()
-            self._once_handlers.clear()
-            self._wildcard_handlers.clear()
-            logger.debug("Removed all event listeners")
-        else:
-            self._handlers[event_type].clear()
-            self._once_handlers[event_type].clear()
-            logger.debug("Removed all listeners for event %s", event_type)
+    def pause(self) -> None:
+        """Pause event processing and queue subsequent events."""
+        self._paused = True
+        logger.debug("Event processing paused")
+
+    def resume(self) -> asyncio.Task[None] | None:
+        """Resume event processing and handle all queued events."""
+        self._paused = False
+        logger.debug("Event processing resumed")
+
+        if self._event_queue and (self._processing_task is None or self._processing_task.done()):
+            self._processing_task = asyncio.create_task(coro=self._process_queued_events())
+            return self._processing_task
+        return None
 
     def set_max_listeners(self, *, max_listeners: int) -> None:
         """Set the maximum number of listeners per event."""
@@ -331,10 +337,9 @@ class EventEmitter:
         logger.debug("Emitting event %s to %d handlers", event.type, len(all_handlers))
         for handler in all_handlers:
             try:
-                if asyncio.iscoroutinefunction(handler):
-                    await handler(event)
-                else:
-                    handler(event)
+                result = handler(event)
+                if isinstance(result, Awaitable):
+                    await result
             except Exception as e:
                 logger.error("Error in handler for event %s: %s", event.type, e, exc_info=True)
 

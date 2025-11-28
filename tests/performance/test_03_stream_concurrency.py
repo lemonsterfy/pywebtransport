@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import ssl
-from typing import Final
+from typing import Any, Final, cast
 
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
@@ -13,8 +13,8 @@ from pywebtransport import ClientConfig, WebTransportClient, WebTransportSession
 DATA_PER_STREAM: Final[int] = 1024
 SERVER_URL: Final[str] = "https://127.0.0.1:4433"
 ECHO_ENDPOINT: Final[str] = "/echo"
-MAX_CONCURRENT_STREAMS: Final[int] = 10
-TOTAL_STREAM_COUNTS: Final[list[int]] = [10, 50, 100]
+MAX_CONCURRENT_STREAMS: Final[int] = 1000
+TOTAL_STREAM_COUNTS: Final[list[int]] = [10, 100, 1000]
 
 logger = logging.getLogger("test_03_stream_concurrency")
 
@@ -68,7 +68,8 @@ class TestStreamConcurrency:
 
         benchmark(lambda: asyncio.run(run_concurrency_cycle()))
 
-        mean_time = benchmark.stats["mean"]
+        stats = cast(dict[str, Any], benchmark.stats)
+        mean_time = stats["mean"]
         total_data_mb = (stream_count * (len(payload) + len(expected_response))) / (1024 * 1024)
         aggregate_throughput_mbps = total_data_mb / mean_time if mean_time > 0 else 0
 

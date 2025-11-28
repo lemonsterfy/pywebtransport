@@ -13,8 +13,10 @@ import psutil
 
 from pywebtransport import (
     ConnectionError,
+    Event,
     ServerApp,
     ServerConfig,
+    StreamError,
     WebTransportReceiveStream,
     WebTransportSendStream,
     WebTransportSession,
@@ -27,9 +29,6 @@ from pywebtransport.utils import generate_self_signed_cert
 CERT_PATH: Final[Path] = Path("localhost.crt")
 KEY_PATH: Final[Path] = Path("localhost.key")
 DEBUG_MODE: Final[bool] = "--debug" in sys.argv
-SESSION_CLEANUP_INTERVAL: Final[float] = 2.0
-CONNECTION_CLEANUP_INTERVAL: Final[float] = 2.0
-STREAM_CLEANUP_INTERVAL: Final[float] = 2.0
 SERVER_HOST: Final[str] = "::"
 SERVER_PORT: Final[int] = 4433
 
@@ -72,11 +71,19 @@ class PerformanceServerApp(ServerApp):
         """Create a session handler for long-running stream-based tests."""
 
         async def session_handler(session: WebTransportSession) -> None:
+            async def stream_opened_handler(event: Event) -> None:
+                if isinstance(event.data, dict):
+                    stream = event.data.get("stream")
+                    if stream:
+                        asyncio.create_task(stream_handler(stream))
+
+            session.events.on(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
             try:
-                async for stream in session.incoming_streams():
-                    asyncio.create_task(stream_handler(stream))
+                await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
             except ConnectionError:
                 pass
+            finally:
+                session.events.off(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
 
         return session_handler
 
@@ -87,42 +94,48 @@ class PerformanceServerApp(ServerApp):
     async def persistent_echo_handler(self, session: WebTransportSession) -> None:
         """Handle persistent echo sessions over a single stream."""
         try:
-            async for stream in session.incoming_streams():
-                if not isinstance(stream, WebTransportStream):
-                    continue
+            stream_event = await session.events.wait_for(event_type=EventType.STREAM_OPENED, timeout=10.0)
+            if not isinstance(stream_event.data, dict):
+                return
+            stream = stream_event.data.get("stream")
 
-                async def echo_worker() -> None:
-                    while True:
-                        data = await stream.read(size=8192)
-                        if not data:
-                            break
-                        await stream.write(data=b"ECHO: " + data)
+            if not isinstance(stream, WebTransportStream):
+                return
 
-                await echo_worker()
-                break
-        except (ConnectionError, asyncio.CancelledError):
+            async def echo_worker() -> None:
+                while True:
+                    data = await stream.read(max_bytes=8192)
+                    if not data:
+                        break
+                    await stream.write(data=b"ECHO: " + data)
+
+            await echo_worker()
+        except (ConnectionError, StreamError, asyncio.CancelledError, asyncio.TimeoutError):
             pass
 
     async def resource_usage_handler(self, session: WebTransportSession) -> None:
         """Handle requests for server resource usage statistics."""
         try:
-            async for stream in session.incoming_streams():
-                if not isinstance(stream, WebTransportStream):
-                    continue
+            stream_event = await session.events.wait_for(event_type=EventType.STREAM_OPENED, timeout=10.0)
+            if not isinstance(stream_event.data, dict):
+                return
+            stream = stream_event.data.get("stream")
 
-                await stream.read(size=1)
-                diagnostics = await self.server.diagnostics()
-                cpu_percent = SERVER_PROCESS.cpu_percent(interval=0.1)
-                memory_info = SERVER_PROCESS.memory_info()
-                usage_data = {
-                    "cpu_percent": cpu_percent,
-                    "memory_rss_bytes": memory_info.rss,
-                    "active_connections": diagnostics.connection_states.get(ConnectionState.CONNECTED, 0),
-                }
-                await stream.write_all(data=json.dumps(usage_data).encode())
-                await stream.read_all()
-                break
-        except (ConnectionError, asyncio.CancelledError):
+            if not isinstance(stream, WebTransportStream):
+                return
+
+            await stream.read(max_bytes=1)
+            diagnostics = await self.server.diagnostics()
+            cpu_percent = SERVER_PROCESS.cpu_percent(interval=0.1)
+            memory_info = SERVER_PROCESS.memory_info()
+            usage_data = {
+                "cpu_percent": cpu_percent,
+                "memory_rss_bytes": memory_info.rss,
+                "active_connections": diagnostics.connection_states.get(ConnectionState.CONNECTED, 0),
+            }
+            await stream.write_all(data=json.dumps(usage_data).encode())
+            await stream.read_all()
+        except (ConnectionError, StreamError, asyncio.CancelledError, asyncio.TimeoutError):
             pass
         except Exception as e:
             logger.error("Error in resource_usage_handler for session %s: %s", session.session_id, e)
@@ -144,7 +157,7 @@ async def handle_stream_echo(*, stream: WebTransportStream) -> None:
         request_data = await stream.read_all()
         if request_data:
             await stream.write_all(data=b"ECHO: " + request_data)
-    except ConnectionError:
+    except (ConnectionError, StreamError):
         pass
     finally:
         if not stream.is_closed:
@@ -155,14 +168,14 @@ async def handle_stream_discard(stream: WebTransportReceiveStream) -> None:
     """Read and discard all data from a receive stream."""
     try:
         await stream.read_all()
-    except ConnectionError:
+    except (ConnectionError, StreamError):
         pass
 
 
 async def handle_stream_produce(stream: WebTransportStream) -> None:
     """Produce a specified amount of data on a stream."""
     try:
-        control_message_bytes = await stream.read(size=128)
+        control_message_bytes = await stream.read(max_bytes=128)
         control_message = control_message_bytes.decode()
 
         if not control_message.startswith("SEND:"):
@@ -176,7 +189,7 @@ async def handle_stream_produce(stream: WebTransportStream) -> None:
             await stream.write(data=chunk)
             bytes_sent += len(chunk)
 
-    except (ValueError, ConnectionError):
+    except (ValueError, ConnectionError, StreamError):
         pass
     finally:
         if not stream.is_closed:
@@ -190,7 +203,7 @@ async def handle_stream_request_response(stream: WebTransportStream) -> None:
         if request:
             response = b"R" * len(request)
             await stream.write_all(data=response)
-    except ConnectionError:
+    except (ConnectionError, StreamError):
         pass
     finally:
         if not stream.is_closed:
@@ -199,23 +212,41 @@ async def handle_stream_request_response(stream: WebTransportStream) -> None:
 
 async def datagram_echo_task(*, session: WebTransportSession) -> None:
     """Receive datagrams and echo them back in a loop."""
+
+    async def datagram_handler(event: Event) -> None:
+        if isinstance(event.data, dict):
+            data = event.data.get("data")
+            if isinstance(data, bytes):
+                try:
+                    await session.send_datagram(data=b"ECHO: " + data)
+                except ConnectionError:
+                    pass
+
+    session.events.on(event_type=EventType.DATAGRAM_RECEIVED, handler=datagram_handler)
     try:
-        datagram_transport = await session.create_datagram_transport()
-        while True:
-            data = await datagram_transport.receive()
-            await datagram_transport.send(data=b"ECHO: " + data)
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     except (ConnectionError, asyncio.CancelledError):
         pass
+    finally:
+        session.events.off(event_type=EventType.DATAGRAM_RECEIVED, handler=datagram_handler)
 
 
 async def stream_handling_task(*, session: WebTransportSession) -> None:
     """Handle all incoming streams for a session's lifetime."""
-    try:
-        async for stream in session.incoming_streams():
+
+    async def stream_opened_handler(event: Event) -> None:
+        if isinstance(event.data, dict):
+            stream = event.data.get("stream")
             if isinstance(stream, WebTransportStream):
                 asyncio.create_task(handle_stream_echo(stream=stream))
+
+    session.events.on(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
+    try:
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     except (ConnectionError, asyncio.CancelledError):
         pass
+    finally:
+        session.events.off(event_type=EventType.STREAM_OPENED, handler=stream_opened_handler)
 
 
 async def combined_echo_handler(session: WebTransportSession) -> None:
@@ -224,7 +255,9 @@ async def combined_echo_handler(session: WebTransportSession) -> None:
     strm_task = asyncio.create_task(stream_handling_task(session=session))
 
     try:
-        await session.wait_closed()
+        await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+    except (ConnectionError, asyncio.CancelledError):
+        pass
     finally:
         dgram_task.cancel()
         strm_task.cancel()
@@ -245,9 +278,7 @@ async def main() -> None:
         keyfile=str(KEY_PATH),
         debug=DEBUG_MODE,
         log_level="DEBUG" if DEBUG_MODE else "INFO",
-        session_cleanup_interval=SESSION_CLEANUP_INTERVAL,
-        connection_cleanup_interval=CONNECTION_CLEANUP_INTERVAL,
-        stream_cleanup_interval=STREAM_CLEANUP_INTERVAL,
+        max_connections=10000,
         initial_max_data=1024 * 1024 * 100,
         initial_max_streams_bidi=10000,
         initial_max_streams_uni=10000,
@@ -258,8 +289,6 @@ async def main() -> None:
     app = PerformanceServerApp(config=config)
     logger.info("Server binding to %s:%s", config.bind_host, config.bind_port)
     logger.info("Maximum connections (default): %s", config.max_connections)
-    logger.info("Connection idle timeout (default): %s" "s", config.connection_idle_timeout)
-    logger.info("Session cleanup interval set to: %s" "s", config.session_cleanup_interval)
     logger.info("Flow Control: initial_max_data=%d", config.initial_max_data)
     logger.info("Flow Control: initial_max_streams_bidi=%d", config.initial_max_streams_bidi)
     if DEBUG_MODE:

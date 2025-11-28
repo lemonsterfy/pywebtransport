@@ -22,10 +22,7 @@ class MsgPackSerializer(_BaseDataclassSerializer, Serializer):
     """Serializer for encoding and decoding using the MsgPack format."""
 
     def __init__(
-        self,
-        *,
-        pack_kwargs: dict[str, Any] | None = None,
-        unpack_kwargs: dict[str, Any] | None = None,
+        self, *, pack_kwargs: dict[str, Any] | None = None, unpack_kwargs: dict[str, Any] | None = None
     ) -> None:
         """Initialize the MsgPack serializer."""
         if msgpack is None:
@@ -49,8 +46,7 @@ class MsgPackSerializer(_BaseDataclassSerializer, Serializer):
             return self._convert_to_type(data=decoded_obj, target_type=obj_type)
         except (msgpack.UnpackException, TypeError, ValueError) as e:
             raise SerializationError(
-                message="Data is not valid MsgPack or cannot be unpacked.",
-                original_exception=e,
+                message="Data is not valid MsgPack or cannot be unpacked.", original_exception=e
             ) from e
 
     def serialize(self, *, obj: Any) -> bytes:
@@ -62,12 +58,8 @@ class MsgPackSerializer(_BaseDataclassSerializer, Serializer):
             raise TypeError(f"Object of type {o.__class__.__name__} is not MsgPack serializable")
 
         try:
-            return cast(
-                bytes,
-                msgpack.packb(o=obj, default=default_handler, **self._pack_kwargs),
-            )
+            return cast(bytes, msgpack.packb(o=obj, default=default_handler, **self._pack_kwargs))
         except TypeError as e:
             raise SerializationError(
-                message=f"Object of type {type(obj).__name__} is not MsgPack serializable.",
-                original_exception=e,
+                message=f"Object of type {type(obj).__name__} is not MsgPack serializable.", original_exception=e
             ) from e

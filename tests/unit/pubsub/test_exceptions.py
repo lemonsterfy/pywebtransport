@@ -7,12 +7,8 @@ from pywebtransport.pubsub import NotSubscribedError, PubSubError, SubscriptionF
 
 
 @pytest.mark.parametrize(
-    ("exception_class", "base_class"),
-    [
-        (PubSubError, WebTransportError),
-        (NotSubscribedError, PubSubError),
-        (SubscriptionFailedError, PubSubError),
-    ],
+    "exception_class, base_class",
+    [(PubSubError, WebTransportError), (NotSubscribedError, PubSubError), (SubscriptionFailedError, PubSubError)],
 )
 def test_exception_inheritance_and_instantiation(
     exception_class: type[WebTransportError], base_class: type[Exception]

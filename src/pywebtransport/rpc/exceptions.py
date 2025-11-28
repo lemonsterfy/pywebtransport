@@ -39,58 +39,28 @@ class RpcError(WebTransportError):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a JSON-RPC compliant error object."""
-        return {
-            "code": self.error_code,
-            "message": self.message,
-        }
+        return {"code": self.error_code, "message": self.message}
 
 
 class InvalidParamsError(RpcError):
     """Raised when the parameters for an RPC call are invalid."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        session_id: SessionId | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, session_id: SessionId | None = None) -> None:
         """Initialize the invalid params error."""
-        super().__init__(
-            message=message,
-            error_code=RpcErrorCode.INVALID_PARAMS,
-            session_id=session_id,
-        )
+        super().__init__(message=message, error_code=RpcErrorCode.INVALID_PARAMS, session_id=session_id)
 
 
 class MethodNotFoundError(RpcError):
     """Raised when the remote method does not exist."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        session_id: SessionId | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, session_id: SessionId | None = None) -> None:
         """Initialize the method not found error."""
-        super().__init__(
-            message=message,
-            error_code=RpcErrorCode.METHOD_NOT_FOUND,
-            session_id=session_id,
-        )
+        super().__init__(message=message, error_code=RpcErrorCode.METHOD_NOT_FOUND, session_id=session_id)
 
 
 class RpcTimeoutError(RpcError):
     """Raised when an RPC call times out."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        session_id: SessionId | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, session_id: SessionId | None = None) -> None:
         """Initialize the RPC timeout error."""
-        super().__init__(
-            message=message,
-            error_code=RpcErrorCode.INTERNAL_ERROR,
-            session_id=session_id,
-        )
+        super().__init__(message=message, error_code=RpcErrorCode.INTERNAL_ERROR, session_id=session_id)

@@ -9,8 +9,8 @@ from typing import Self
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.events import EventEmitter
 from pywebtransport.exceptions import ClientError, ConnectionError, TimeoutError
-from pywebtransport.session import WebTransportSession
-from pywebtransport.types import URL, EventType
+from pywebtransport.session.session import WebTransportSession
+from pywebtransport.types import URL, EventType, SessionState
 from pywebtransport.utils import get_logger
 
 __all__: list[str] = ["ReconnectingClient"]
@@ -21,12 +21,7 @@ logger = get_logger(name=__name__)
 class ReconnectingClient(EventEmitter):
     """A client that automatically reconnects based on the provided configuration."""
 
-    def __init__(
-        self,
-        *,
-        url: URL,
-        client: WebTransportClient,
-    ) -> None:
+    def __init__(self, *, url: URL, client: WebTransportClient) -> None:
         """Initialize the reconnecting client."""
         super().__init__()
         self._url = url
@@ -43,7 +38,7 @@ class ReconnectingClient(EventEmitter):
         """Check if the client is currently connected with a ready session."""
         return (
             self._session is not None
-            and self._session.is_ready
+            and self._session.state == SessionState.CONNECTED
             and self._connected_event is not None
             and self._connected_event.is_set()
         )
@@ -56,16 +51,13 @@ class ReconnectingClient(EventEmitter):
             return self
 
         self._connected_event = asyncio.Event()
-        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+        self._reconnect_task = asyncio.create_task(coro=self._reconnect_loop())
         self._is_initialized = True
         logger.info("ReconnectingClient started for URL: %s", self._url)
         return self
 
     async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
     ) -> None:
         """Exit the async context, ensuring the client is closed."""
         await self.close()
@@ -97,7 +89,8 @@ class ReconnectingClient(EventEmitter):
         if self._closed or self._connected_event is None:
             return None
         try:
-            await asyncio.wait_for(self._connected_event.wait(), timeout=wait_timeout)
+            async with asyncio.timeout(delay=wait_timeout):
+                await self._connected_event.wait()
             return self._session
         except asyncio.TimeoutError:
             return None
@@ -125,7 +118,7 @@ class ReconnectingClient(EventEmitter):
                         data={"session": self._session, "attempt": retry_count + 1},
                     )
                     retry_count = 0
-                    await self._session.wait_closed()
+                    await self._session.events.wait_for(event_type=EventType.SESSION_CLOSED)
 
                     self._session = None
                     self._connected_event.clear()
@@ -153,7 +146,7 @@ class ReconnectingClient(EventEmitter):
                         e,
                         exc_info=True,
                     )
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(delay=delay)
         except asyncio.CancelledError:
             pass
         finally:

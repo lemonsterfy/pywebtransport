@@ -33,7 +33,7 @@ test:
   stage: test
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13"]
+      - PYTHON_VERSION: ["3.12", "3.13"]
   image: python:$PYTHON_VERSION-slim
   before_script:
     - python -m pip install --upgrade pip
