@@ -8,16 +8,18 @@ repo_name: lemonsterfy/pywebtransport
 
 theme:
   name: material
+  logo: "assets/favicon.svg"
+  favicon: assets/favicon.svg
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: blue
+      primary: blue-grey
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: blue
+      primary: blue-grey
       toggle:
         icon: material/brightness-4
         name: Switch to light mode

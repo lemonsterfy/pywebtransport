@@ -1,13 +1,24 @@
+<div align="center">
+  <img
+    src="https://raw.githubusercontent.com/lemonsterfy/pywebtransport/main/docs/assets/favicon.svg"
+    alt="PyWebTransport Icon"
+    width="100"
+  />
+
 # PyWebTransport
 
-[![PyPI version](https://badge.fury.io/py/pywebtransport.svg)](https://badge.fury.io/py/pywebtransport)
-[![Python Versions](https://img.shields.io/pypi/pyversions/pywebtransport.svg)](https://pypi.org/project/pywebtransport/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Build Status](https://github.com/lemonsterfy/pywebtransport/workflows/CI/badge.svg)](https://github.com/lemonsterfy/pywebtransport/actions)
-[![Coverage](https://codecov.io/gh/lemonsterfy/pywebtransport/branch/main/graph/badge.svg)](https://codecov.io/gh/lemonsterfy/pywebtransport)
-[![Docs](https://readthedocs.org/projects/pywebtransport/badge/?version=latest)](https://docs.pywebtransport.org/en/latest/)
+_An async-native WebTransport stack for Python_
 
-An async-native WebTransport stack for Python.
+<br/>
+
+[![PyPI version](https://badge.fury.io/py/pywebtransport.svg)](https://pypi.org/project/pywebtransport/)
+[![Python Version](https://img.shields.io/pypi/pyversions/pywebtransport)](https://pypi.org/project/pywebtransport/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![CI](https://github.com/lemonsterfy/pywebtransport/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lemonsterfy/pywebtransport/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/lemonsterfy/pywebtransport/branch/main/graph/badge.svg)](https://codecov.io/gh/lemonsterfy/pywebtransport)
+[![Docs](https://app.readthedocs.org/projects/pywebtransport/badge/?version=latest)](https://docs.pywebtransport.org/)
+
+</div>
 
 ## Features
 
@@ -30,7 +41,6 @@ pip install pywebtransport
 ### Server
 
 ```python
-# server.py
 import asyncio
 
 from pywebtransport import Event, ServerApp, ServerConfig, WebTransportSession, WebTransportStream
@@ -86,7 +96,6 @@ if __name__ == "__main__":
 ### Client
 
 ```python
-# client.py
 import asyncio
 import ssl
 
@@ -141,7 +150,7 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ## Sponsors
 
-<p>
+<div>
   <a href="https://www.fastly.com/" target="_blank" rel="noopener noreferrer">
     <img
       src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Fastly_logo.svg"
@@ -149,7 +158,7 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
       width="100"
     />
   </a>
-</p>
+</div>
 
 ## Acknowledgments
 
@@ -164,4 +173,4 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
