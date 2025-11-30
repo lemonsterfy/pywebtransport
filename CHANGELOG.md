@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.9.1] - 2025-11-30
+
+This is a critical administrative and compliance release that transitions the project's licensing model from MIT to the **Apache License, Version 2.0**. This change provides explicit patent grants and greater legal certainty for enterprise adoption. Additionally, this release unifies the project's visual identity assets across all documentation platforms. No functional code changes are included.
+
+### Added
+
+- **Legal Compliance**: Added a `NOTICE` file to the distribution artifacts as strictly required by section 4(d) of the Apache License 2.0.
+- **Documentation Assets**: Added a dedicated `docs/assets/` directory containing vector graphics (`logo.svg`, `favicon.svg`) to ensure high-resolution rendering on all platforms.
+
+### Changed
+
+- **License Migration**: Re-licensed the entire codebase under the **Apache License, Version 2.0** to align with the patent and legal requirements of production-grade network infrastructure standards (replacing the MIT License).
+- **Visual Identity Refresh**: Updated the project's branding and logo assets across `README.md`, `mkdocs.yml`, and the documentation site.
+- **Project Metadata**: Updated `pyproject.toml` classifiers and license configuration to formally reflect the adoption of the Apache 2.0 license.
+
 ## [0.9.0] - 2025-11-28
 
 This is a transformative architectural release that rebuilds the library's core upon a **Sans-I/O Unified State Machine & Event-Driven Architecture**. It fundamentally solves concurrency race conditions by enforcing a deterministic, single source of truth for all protocol state. This release also establishes a strict boundary between synchronous logic and asynchronous I/O, resulting in a significantly more robust, testable, and performant foundation. While the public API surface remains largely compatible, the internal execution model and resource management strategies have been completely rewritten.
@@ -477,7 +492,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.7.1...v0.8.0

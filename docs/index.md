@@ -1,6 +1,14 @@
-# PyWebTransport Documentation
+<div style="text-align: center">
+  <h1>
+    <img src="assets/favicon.svg" alt="PyWebTransport Icon" width="120" />
+  </h1>
 
-Welcome to PyWebTransport, an async-native WebTransport stack for Python.
+  <p>
+    <em>An async-native WebTransport stack for Python</em>
+  </p>
+</div>
+
+---
 
 ## What is PyWebTransport?
 
@@ -75,4 +83,4 @@ Datagrams offer low-latency, unreliable, and out-of-order messaging, ideal for r
 
 ## License
 
-PyWebTransport is released under the MIT License. See [LICENSE](https://github.com/lemonsterfy/pywebtransport/blob/main/LICENSE) for details.
+PyWebTransport is released under the Apache License 2.0. See [LICENSE](https://github.com/lemonsterfy/pywebtransport/blob/main/LICENSE) for details.
