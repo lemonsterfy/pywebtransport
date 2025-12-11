@@ -1,6 +1,7 @@
 """Integration tests for data exchange over streams and datagrams."""
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -24,7 +25,7 @@ async def test_bidirectional_stream_echo(
     server_handler_finished = asyncio.Event()
 
     @server_app.route(path="/echo")
-    async def echo_handler(session: WebTransportSession) -> None:
+    async def echo_handler(session: WebTransportSession, **kwargs: Any) -> None:
         stream_queue: asyncio.Queue[WebTransportStream] = asyncio.Queue()
 
         async def on_stream(event: Event) -> None:
@@ -66,7 +67,7 @@ async def test_concurrent_streams_and_datagrams(
     num_concurrent_ops = 5
 
     @server_app.route(path="/concurrent")
-    async def concurrent_handler(session: WebTransportSession) -> None:
+    async def concurrent_handler(session: WebTransportSession, **kwargs: Any) -> None:
         async def on_stream(event: Event) -> None:
             if isinstance(event.data, dict):
                 s = event.data.get("stream")
@@ -138,7 +139,7 @@ async def test_datagram_echo(server: tuple[str, int], client: WebTransportClient
     server_handler_finished = asyncio.Event()
 
     @server_app.route(path="/datagram")
-    async def datagram_echo_handler(session: WebTransportSession) -> None:
+    async def datagram_echo_handler(session: WebTransportSession, **kwargs: Any) -> None:
         async def on_datagram(event: Event) -> None:
             if isinstance(event.data, dict):
                 data = event.data.get("data")
@@ -186,7 +187,7 @@ async def test_unidirectional_stream_to_server(
     data_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     @server_app.route(path="/uni")
-    async def uni_handler(session: WebTransportSession) -> None:
+    async def uni_handler(session: WebTransportSession, **kwargs: Any) -> None:
         async def on_stream(event: Event) -> None:
             if isinstance(event.data, dict):
                 s = event.data.get("stream")

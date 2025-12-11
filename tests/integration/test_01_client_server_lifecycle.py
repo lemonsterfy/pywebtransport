@@ -1,6 +1,7 @@
 """Integration tests for the basic client-server connection lifecycle."""
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,7 @@ async def test_client_initiated_close(
     server_entered = asyncio.Event()
 
     @server_app.route(path="/")
-    async def simple_handler(session: WebTransportSession) -> None:
+    async def simple_handler(session: WebTransportSession, **kwargs: Any) -> None:
         server_entered.set()
         try:
             await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
@@ -62,7 +63,7 @@ async def test_server_initiated_close(
     url = f"https://{host}:{port}/close-me"
 
     @server_app.route(path="/close-me")
-    async def immediate_close_handler(session: WebTransportSession) -> None:
+    async def immediate_close_handler(session: WebTransportSession, **kwargs: Any) -> None:
         await asyncio.sleep(0.2)
         await session.close(reason="Server closed immediately.")
 
@@ -86,7 +87,7 @@ async def test_successful_connection_and_session(
     handler_called = asyncio.Event()
 
     @server_app.route(path="/")
-    async def basic_handler(session: WebTransportSession) -> None:
+    async def basic_handler(session: WebTransportSession, **kwargs: Any) -> None:
         handler_called.set()
         try:
             await session.events.wait_for(event_type=EventType.SESSION_CLOSED)

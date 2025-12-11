@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ssl
 from enum import IntEnum
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from pywebtransport.types import Headers
 from pywebtransport.version import __version__
@@ -14,9 +14,8 @@ __all__: list[str] = [
     "BIDIRECTIONAL_STREAM",
     "CLOSE_WEBTRANSPORT_SESSION_TYPE",
     "ClientConfigDefaults",
-    "DEFAULT_ACCESS_LOG",
+    "CommonConfigDefaults",
     "DEFAULT_ALPN_PROTOCOLS",
-    "DEFAULT_AUTO_RECONNECT",
     "DEFAULT_BIND_HOST",
     "DEFAULT_CERTFILE",
     "DEFAULT_CLIENT_MAX_CONNECTIONS",
@@ -26,8 +25,6 @@ __all__: list[str] = [
     "DEFAULT_CONGESTION_CONTROL_ALGORITHM",
     "DEFAULT_CONNECT_TIMEOUT",
     "DEFAULT_CONNECTION_IDLE_TIMEOUT",
-    "DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT",
-    "DEFAULT_DEBUG",
     "DEFAULT_DEV_PORT",
     "DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE",
     "DEFAULT_FLOW_CONTROL_WINDOW_SIZE",
@@ -37,22 +34,22 @@ __all__: list[str] = [
     "DEFAULT_KEEP_ALIVE",
     "DEFAULT_KEYFILE",
     "DEFAULT_LOG_LEVEL",
+    "DEFAULT_MAX_CONNECTION_RETRIES",
     "DEFAULT_MAX_DATAGRAM_SIZE",
+    "DEFAULT_MAX_EVENT_HISTORY_SIZE",
+    "DEFAULT_MAX_EVENT_LISTENERS",
+    "DEFAULT_MAX_EVENT_QUEUE_SIZE",
     "DEFAULT_MAX_MESSAGE_SIZE",
     "DEFAULT_MAX_PENDING_EVENTS_PER_SESSION",
-    "DEFAULT_MAX_RETRIES",
     "DEFAULT_MAX_RETRY_DELAY",
     "DEFAULT_MAX_STREAM_READ_BUFFER",
     "DEFAULT_MAX_STREAM_WRITE_BUFFER",
     "DEFAULT_MAX_TOTAL_PENDING_EVENTS",
     "DEFAULT_PENDING_EVENT_TTL",
-    "DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE",
     "DEFAULT_READ_TIMEOUT",
     "DEFAULT_RESOURCE_CLEANUP_INTERVAL",
     "DEFAULT_RETRY_BACKOFF",
     "DEFAULT_RETRY_DELAY",
-    "DEFAULT_RPC_CONCURRENCY_LIMIT",
-    "DEFAULT_SECURE_PORT",
     "DEFAULT_SERVER_MAX_CONNECTIONS",
     "DEFAULT_SERVER_MAX_SESSIONS",
     "DEFAULT_SERVER_VERIFY_MODE",
@@ -90,6 +87,7 @@ __all__: list[str] = [
     "ServerConfigDefaults",
     "UNIDIRECTIONAL_STREAM",
     "USER_AGENT_HEADER",
+    "WEBTRANSPORT_DEFAULT_PORT",
     "WEBTRANSPORT_SCHEME",
     "WT_DATA_BLOCKED_TYPE",
     "WT_MAX_DATA_TYPE",
@@ -103,99 +101,10 @@ __all__: list[str] = [
     "get_default_server_config",
 ]
 
-
-class ClientConfigDefaults(TypedDict):
-    """A type definition for the client configuration dictionary."""
-
-    alpn_protocols: list[str]
-    auto_reconnect: bool
-    ca_certs: str | None
-    certfile: str | None
-    close_timeout: float
-    congestion_control_algorithm: str
-    connect_timeout: float
-    connection_idle_timeout: float
-    connection_keepalive_timeout: float
-    debug: bool
-    flow_control_window_auto_scale: bool
-    flow_control_window_size: int
-    headers: Headers
-    initial_max_data: int
-    initial_max_streams_bidi: int
-    initial_max_streams_uni: int
-    keep_alive: bool
-    keyfile: str | None
-    log_level: str
-    max_connections: int
-    max_datagram_size: int
-    max_message_size: int
-    max_pending_events_per_session: int
-    max_retries: int
-    max_retry_delay: float
-    max_sessions: int
-    max_stream_read_buffer: int
-    max_stream_write_buffer: int
-    max_total_pending_events: int
-    pending_event_ttl: float
-    pubsub_subscription_queue_size: int
-    read_timeout: float | None
-    resource_cleanup_interval: float
-    retry_backoff: float
-    retry_delay: float
-    rpc_concurrency_limit: int
-    stream_creation_timeout: float
-    stream_flow_control_increment_bidi: int
-    stream_flow_control_increment_uni: int
-    user_agent: str
-    verify_mode: ssl.VerifyMode | None
-    write_timeout: float | None
-
-
-class ServerConfigDefaults(TypedDict):
-    """A type definition for the server configuration dictionary."""
-
-    access_log: bool
-    alpn_protocols: list[str]
-    bind_host: str
-    bind_port: int
-    ca_certs: str | None
-    certfile: str
-    congestion_control_algorithm: str
-    connection_idle_timeout: float
-    connection_keepalive_timeout: float
-    debug: bool
-    flow_control_window_auto_scale: bool
-    flow_control_window_size: int
-    initial_max_data: int
-    initial_max_streams_bidi: int
-    initial_max_streams_uni: int
-    keep_alive: bool
-    keyfile: str
-    log_level: str
-    max_connections: int
-    max_datagram_size: int
-    max_message_size: int
-    max_pending_events_per_session: int
-    max_sessions: int
-    max_stream_read_buffer: int
-    max_stream_write_buffer: int
-    max_total_pending_events: int
-    middleware: list[Any]
-    pending_event_ttl: float
-    pubsub_subscription_queue_size: int
-    read_timeout: float | None
-    resource_cleanup_interval: float
-    rpc_concurrency_limit: int
-    stream_creation_timeout: float
-    stream_flow_control_increment_bidi: int
-    stream_flow_control_increment_uni: int
-    verify_mode: ssl.VerifyMode
-    write_timeout: float | None
-
-
 ALPN_H3: str = "h3"
 USER_AGENT_HEADER: str = "user-agent"
 WEBTRANSPORT_SCHEME: str = "https"
+WEBTRANSPORT_DEFAULT_PORT: int = 443
 
 BIDIRECTIONAL_STREAM: int = 0x0
 CLOSE_WEBTRANSPORT_SESSION_TYPE: int = 0x2843
@@ -234,11 +143,9 @@ WT_STREAM_DATA_BLOCKED_TYPE: int = 0x190B4D42
 WT_STREAMS_BLOCKED_BIDI_TYPE: int = 0x190B4D43
 WT_STREAMS_BLOCKED_UNI_TYPE: int = 0x190B4D44
 
-DEFAULT_ACCESS_LOG: bool = True
 DEFAULT_ALPN_PROTOCOLS: tuple[str, ...] = (ALPN_H3,)
-DEFAULT_AUTO_RECONNECT: bool = False
 DEFAULT_BIND_HOST: str = "localhost"
-DEFAULT_CERTFILE: str = ""
+DEFAULT_CERTFILE: str | None = None
 DEFAULT_CLIENT_MAX_CONNECTIONS: int = 100
 DEFAULT_CLIENT_MAX_SESSIONS: int = 100
 DEFAULT_CLIENT_VERIFY_MODE: ssl.VerifyMode = ssl.CERT_REQUIRED
@@ -246,8 +153,6 @@ DEFAULT_CLOSE_TIMEOUT: float = 5.0
 DEFAULT_CONNECT_TIMEOUT: float = 30.0
 DEFAULT_CONGESTION_CONTROL_ALGORITHM: str = "cubic"
 DEFAULT_CONNECTION_IDLE_TIMEOUT: float = 60.0
-DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT: float = 30.0
-DEFAULT_DEBUG: bool = False
 DEFAULT_DEV_PORT: int = 4433
 DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE: bool = True
 DEFAULT_FLOW_CONTROL_WINDOW_SIZE: int = 1024 * 1024
@@ -255,27 +160,27 @@ DEFAULT_INITIAL_MAX_DATA: int = 0
 DEFAULT_INITIAL_MAX_STREAMS_BIDI: int = 0
 DEFAULT_INITIAL_MAX_STREAMS_UNI: int = 0
 DEFAULT_KEEP_ALIVE: bool = True
-DEFAULT_KEYFILE: str = ""
+DEFAULT_KEYFILE: str | None = None
 DEFAULT_LOG_LEVEL: str = "INFO"
+DEFAULT_MAX_CONNECTION_RETRIES: int = 3
 DEFAULT_MAX_DATAGRAM_SIZE: int = 65535
+DEFAULT_MAX_EVENT_HISTORY_SIZE: int = 0
+DEFAULT_MAX_EVENT_LISTENERS: int = 100
+DEFAULT_MAX_EVENT_QUEUE_SIZE: int = 1000
 DEFAULT_MAX_MESSAGE_SIZE: int = 1024 * 1024
 DEFAULT_MAX_PENDING_EVENTS_PER_SESSION: int = 16
-DEFAULT_MAX_RETRIES: int = 3
 DEFAULT_MAX_RETRY_DELAY: float = 30.0
 DEFAULT_MAX_STREAM_READ_BUFFER: int = 65536
 DEFAULT_MAX_STREAM_WRITE_BUFFER: int = 1024 * 1024
 DEFAULT_MAX_TOTAL_PENDING_EVENTS: int = 1000
 DEFAULT_PENDING_EVENT_TTL: float = 5.0
-DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE: int = 16
 DEFAULT_READ_TIMEOUT: float = 60.0
 DEFAULT_RESOURCE_CLEANUP_INTERVAL: float = 15.0
 DEFAULT_RETRY_BACKOFF: float = 2.0
 DEFAULT_RETRY_DELAY: float = 1.0
-DEFAULT_RPC_CONCURRENCY_LIMIT: int = 100
-DEFAULT_SECURE_PORT: int = 443
 DEFAULT_SERVER_MAX_CONNECTIONS: int = 3000
 DEFAULT_SERVER_MAX_SESSIONS: int = 10000
-DEFAULT_SERVER_VERIFY_MODE: ssl.VerifyMode = ssl.CERT_OPTIONAL
+DEFAULT_SERVER_VERIFY_MODE: ssl.VerifyMode = ssl.CERT_NONE
 DEFAULT_STREAM_CREATION_TIMEOUT: float = 10.0
 DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI: int = 10
 DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI: int = 10
@@ -283,90 +188,61 @@ DEFAULT_WRITE_TIMEOUT: float = 30.0
 SUPPORTED_CONGESTION_CONTROL_ALGORITHMS: tuple[str, str] = ("reno", "cubic")
 
 
-_DEFAULT_CLIENT_CONFIG: ClientConfigDefaults = {
-    "alpn_protocols": list(DEFAULT_ALPN_PROTOCOLS),
-    "auto_reconnect": DEFAULT_AUTO_RECONNECT,
-    "ca_certs": None,
-    "certfile": None,
-    "close_timeout": DEFAULT_CLOSE_TIMEOUT,
-    "congestion_control_algorithm": DEFAULT_CONGESTION_CONTROL_ALGORITHM,
-    "connect_timeout": DEFAULT_CONNECT_TIMEOUT,
-    "connection_idle_timeout": DEFAULT_CONNECTION_IDLE_TIMEOUT,
-    "connection_keepalive_timeout": DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
-    "debug": DEFAULT_DEBUG,
-    "flow_control_window_auto_scale": DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE,
-    "flow_control_window_size": DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
-    "headers": {},
-    "initial_max_data": DEFAULT_INITIAL_MAX_DATA,
-    "initial_max_streams_bidi": DEFAULT_INITIAL_MAX_STREAMS_BIDI,
-    "initial_max_streams_uni": DEFAULT_INITIAL_MAX_STREAMS_UNI,
-    "keep_alive": DEFAULT_KEEP_ALIVE,
-    "keyfile": None,
-    "log_level": DEFAULT_LOG_LEVEL,
-    "max_connections": DEFAULT_CLIENT_MAX_CONNECTIONS,
-    "max_datagram_size": DEFAULT_MAX_DATAGRAM_SIZE,
-    "max_message_size": DEFAULT_MAX_MESSAGE_SIZE,
-    "max_pending_events_per_session": DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
-    "max_retries": DEFAULT_MAX_RETRIES,
-    "max_retry_delay": DEFAULT_MAX_RETRY_DELAY,
-    "max_sessions": DEFAULT_CLIENT_MAX_SESSIONS,
-    "max_stream_read_buffer": DEFAULT_MAX_STREAM_READ_BUFFER,
-    "max_stream_write_buffer": DEFAULT_MAX_STREAM_WRITE_BUFFER,
-    "max_total_pending_events": DEFAULT_MAX_TOTAL_PENDING_EVENTS,
-    "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
-    "pubsub_subscription_queue_size": DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
-    "read_timeout": DEFAULT_READ_TIMEOUT,
-    "resource_cleanup_interval": DEFAULT_RESOURCE_CLEANUP_INTERVAL,
-    "retry_backoff": DEFAULT_RETRY_BACKOFF,
-    "retry_delay": DEFAULT_RETRY_DELAY,
-    "rpc_concurrency_limit": DEFAULT_RPC_CONCURRENCY_LIMIT,
-    "stream_creation_timeout": DEFAULT_STREAM_CREATION_TIMEOUT,
-    "stream_flow_control_increment_bidi": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
-    "stream_flow_control_increment_uni": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
-    "user_agent": f"pywebtransport/{__version__}",
-    "verify_mode": DEFAULT_CLIENT_VERIFY_MODE,
-    "write_timeout": DEFAULT_WRITE_TIMEOUT,
-}
+class CommonConfigDefaults(TypedDict):
+    """Common configuration fields shared between client and server."""
 
-_DEFAULT_SERVER_CONFIG: ServerConfigDefaults = {
-    "access_log": DEFAULT_ACCESS_LOG,
-    "alpn_protocols": list(DEFAULT_ALPN_PROTOCOLS),
-    "bind_host": DEFAULT_BIND_HOST,
-    "bind_port": DEFAULT_DEV_PORT,
-    "ca_certs": None,
-    "certfile": DEFAULT_CERTFILE,
-    "congestion_control_algorithm": DEFAULT_CONGESTION_CONTROL_ALGORITHM,
-    "connection_idle_timeout": DEFAULT_CONNECTION_IDLE_TIMEOUT,
-    "connection_keepalive_timeout": DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
-    "debug": DEFAULT_DEBUG,
-    "flow_control_window_auto_scale": DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE,
-    "flow_control_window_size": DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
-    "initial_max_data": DEFAULT_INITIAL_MAX_DATA,
-    "initial_max_streams_bidi": DEFAULT_INITIAL_MAX_STREAMS_BIDI,
-    "initial_max_streams_uni": DEFAULT_INITIAL_MAX_STREAMS_UNI,
-    "keep_alive": DEFAULT_KEEP_ALIVE,
-    "keyfile": DEFAULT_KEYFILE,
-    "log_level": DEFAULT_LOG_LEVEL,
-    "max_connections": DEFAULT_SERVER_MAX_CONNECTIONS,
-    "max_datagram_size": DEFAULT_MAX_DATAGRAM_SIZE,
-    "max_message_size": DEFAULT_MAX_MESSAGE_SIZE,
-    "max_pending_events_per_session": DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
-    "max_sessions": DEFAULT_SERVER_MAX_SESSIONS,
-    "max_stream_read_buffer": DEFAULT_MAX_STREAM_READ_BUFFER,
-    "max_stream_write_buffer": DEFAULT_MAX_STREAM_WRITE_BUFFER,
-    "max_total_pending_events": DEFAULT_MAX_TOTAL_PENDING_EVENTS,
-    "middleware": [],
-    "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
-    "pubsub_subscription_queue_size": DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
-    "read_timeout": DEFAULT_READ_TIMEOUT,
-    "resource_cleanup_interval": DEFAULT_RESOURCE_CLEANUP_INTERVAL,
-    "rpc_concurrency_limit": DEFAULT_RPC_CONCURRENCY_LIMIT,
-    "stream_creation_timeout": DEFAULT_STREAM_CREATION_TIMEOUT,
-    "stream_flow_control_increment_bidi": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
-    "stream_flow_control_increment_uni": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
-    "verify_mode": DEFAULT_SERVER_VERIFY_MODE,
-    "write_timeout": DEFAULT_WRITE_TIMEOUT,
-}
+    alpn_protocols: list[str]
+    ca_certs: str | None
+    certfile: str | None
+    close_timeout: float
+    congestion_control_algorithm: str
+    connection_idle_timeout: float
+    flow_control_window_auto_scale: bool
+    flow_control_window_size: int
+    initial_max_data: int
+    initial_max_streams_bidi: int
+    initial_max_streams_uni: int
+    keep_alive: bool
+    keyfile: str | None
+    log_level: str
+    max_connections: int
+    max_datagram_size: int
+    max_event_history_size: int
+    max_event_listeners: int
+    max_event_queue_size: int
+    max_message_size: int
+    max_pending_events_per_session: int
+    max_sessions: int
+    max_stream_read_buffer: int
+    max_stream_write_buffer: int
+    max_total_pending_events: int
+    pending_event_ttl: float
+    read_timeout: float | None
+    resource_cleanup_interval: float
+    stream_creation_timeout: float
+    stream_flow_control_increment_bidi: int
+    stream_flow_control_increment_uni: int
+    verify_mode: ssl.VerifyMode | None
+    write_timeout: float | None
+
+
+class ClientConfigDefaults(CommonConfigDefaults):
+    """A type definition for the client configuration dictionary."""
+
+    connect_timeout: float
+    headers: Headers
+    max_connection_retries: int
+    max_retry_delay: float
+    retry_backoff: float
+    retry_delay: float
+    user_agent: str
+
+
+class ServerConfigDefaults(CommonConfigDefaults):
+    """A type definition for the server configuration dictionary."""
+
+    bind_host: str
+    bind_port: int
 
 
 class ErrorCodes(IntEnum):
@@ -424,10 +300,87 @@ class ErrorCodes(IntEnum):
 
 
 def get_default_client_config() -> ClientConfigDefaults:
-    """Return a copy of the default client configuration."""
-    return _DEFAULT_CLIENT_CONFIG.copy()
+    """Return a new instance of the default client configuration."""
+    return {
+        "alpn_protocols": list(DEFAULT_ALPN_PROTOCOLS),
+        "ca_certs": None,
+        "certfile": None,
+        "close_timeout": DEFAULT_CLOSE_TIMEOUT,
+        "congestion_control_algorithm": DEFAULT_CONGESTION_CONTROL_ALGORITHM,
+        "connect_timeout": DEFAULT_CONNECT_TIMEOUT,
+        "connection_idle_timeout": DEFAULT_CONNECTION_IDLE_TIMEOUT,
+        "flow_control_window_auto_scale": DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE,
+        "flow_control_window_size": DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
+        "headers": {},
+        "initial_max_data": DEFAULT_INITIAL_MAX_DATA,
+        "initial_max_streams_bidi": DEFAULT_INITIAL_MAX_STREAMS_BIDI,
+        "initial_max_streams_uni": DEFAULT_INITIAL_MAX_STREAMS_UNI,
+        "keep_alive": DEFAULT_KEEP_ALIVE,
+        "keyfile": None,
+        "log_level": DEFAULT_LOG_LEVEL,
+        "max_connection_retries": DEFAULT_MAX_CONNECTION_RETRIES,
+        "max_connections": DEFAULT_CLIENT_MAX_CONNECTIONS,
+        "max_datagram_size": DEFAULT_MAX_DATAGRAM_SIZE,
+        "max_event_history_size": DEFAULT_MAX_EVENT_HISTORY_SIZE,
+        "max_event_listeners": DEFAULT_MAX_EVENT_LISTENERS,
+        "max_event_queue_size": DEFAULT_MAX_EVENT_QUEUE_SIZE,
+        "max_message_size": DEFAULT_MAX_MESSAGE_SIZE,
+        "max_pending_events_per_session": DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
+        "max_retry_delay": DEFAULT_MAX_RETRY_DELAY,
+        "max_sessions": DEFAULT_CLIENT_MAX_SESSIONS,
+        "max_stream_read_buffer": DEFAULT_MAX_STREAM_READ_BUFFER,
+        "max_stream_write_buffer": DEFAULT_MAX_STREAM_WRITE_BUFFER,
+        "max_total_pending_events": DEFAULT_MAX_TOTAL_PENDING_EVENTS,
+        "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
+        "read_timeout": DEFAULT_READ_TIMEOUT,
+        "resource_cleanup_interval": DEFAULT_RESOURCE_CLEANUP_INTERVAL,
+        "retry_backoff": DEFAULT_RETRY_BACKOFF,
+        "retry_delay": DEFAULT_RETRY_DELAY,
+        "stream_creation_timeout": DEFAULT_STREAM_CREATION_TIMEOUT,
+        "stream_flow_control_increment_bidi": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
+        "stream_flow_control_increment_uni": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
+        "user_agent": f"PyWebTransport/{__version__}",
+        "verify_mode": DEFAULT_CLIENT_VERIFY_MODE,
+        "write_timeout": DEFAULT_WRITE_TIMEOUT,
+    }
 
 
 def get_default_server_config() -> ServerConfigDefaults:
-    """Return a copy of the default server configuration."""
-    return _DEFAULT_SERVER_CONFIG.copy()
+    """Return a new instance of the default server configuration."""
+    return {
+        "alpn_protocols": list(DEFAULT_ALPN_PROTOCOLS),
+        "bind_host": DEFAULT_BIND_HOST,
+        "bind_port": DEFAULT_DEV_PORT,
+        "ca_certs": None,
+        "certfile": DEFAULT_CERTFILE,
+        "close_timeout": DEFAULT_CLOSE_TIMEOUT,
+        "congestion_control_algorithm": DEFAULT_CONGESTION_CONTROL_ALGORITHM,
+        "connection_idle_timeout": DEFAULT_CONNECTION_IDLE_TIMEOUT,
+        "flow_control_window_auto_scale": DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE,
+        "flow_control_window_size": DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
+        "initial_max_data": DEFAULT_INITIAL_MAX_DATA,
+        "initial_max_streams_bidi": DEFAULT_INITIAL_MAX_STREAMS_BIDI,
+        "initial_max_streams_uni": DEFAULT_INITIAL_MAX_STREAMS_UNI,
+        "keep_alive": DEFAULT_KEEP_ALIVE,
+        "keyfile": DEFAULT_KEYFILE,
+        "log_level": DEFAULT_LOG_LEVEL,
+        "max_connections": DEFAULT_SERVER_MAX_CONNECTIONS,
+        "max_datagram_size": DEFAULT_MAX_DATAGRAM_SIZE,
+        "max_event_history_size": DEFAULT_MAX_EVENT_HISTORY_SIZE,
+        "max_event_listeners": DEFAULT_MAX_EVENT_LISTENERS,
+        "max_event_queue_size": DEFAULT_MAX_EVENT_QUEUE_SIZE,
+        "max_message_size": DEFAULT_MAX_MESSAGE_SIZE,
+        "max_pending_events_per_session": DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
+        "max_sessions": DEFAULT_SERVER_MAX_SESSIONS,
+        "max_stream_read_buffer": DEFAULT_MAX_STREAM_READ_BUFFER,
+        "max_stream_write_buffer": DEFAULT_MAX_STREAM_WRITE_BUFFER,
+        "max_total_pending_events": DEFAULT_MAX_TOTAL_PENDING_EVENTS,
+        "pending_event_ttl": DEFAULT_PENDING_EVENT_TTL,
+        "read_timeout": DEFAULT_READ_TIMEOUT,
+        "resource_cleanup_interval": DEFAULT_RESOURCE_CLEANUP_INTERVAL,
+        "stream_creation_timeout": DEFAULT_STREAM_CREATION_TIMEOUT,
+        "stream_flow_control_increment_bidi": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI,
+        "stream_flow_control_increment_uni": DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI,
+        "verify_mode": DEFAULT_SERVER_VERIFY_MODE,
+        "write_timeout": DEFAULT_WRITE_TIMEOUT,
+    }

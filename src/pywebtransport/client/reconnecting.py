@@ -9,7 +9,7 @@ from typing import Self
 from pywebtransport.client.client import WebTransportClient
 from pywebtransport.events import EventEmitter
 from pywebtransport.exceptions import ClientError, ConnectionError, TimeoutError
-from pywebtransport.session.session import WebTransportSession
+from pywebtransport.session import WebTransportSession
 from pywebtransport.types import URL, EventType, SessionState
 from pywebtransport.utils import get_logger
 
@@ -23,15 +23,20 @@ class ReconnectingClient(EventEmitter):
 
     def __init__(self, *, url: URL, client: WebTransportClient) -> None:
         """Initialize the reconnecting client."""
-        super().__init__()
+        self._config = client.config
+        super().__init__(
+            max_queue_size=self._config.max_event_queue_size,
+            max_listeners=self._config.max_event_listeners,
+            max_history=self._config.max_event_history_size,
+        )
         self._url = url
         self._client = client
-        self._config = client.config
         self._session: WebTransportSession | None = None
         self._reconnect_task: asyncio.Task[None] | None = None
         self._closed = False
         self._is_initialized = False
         self._connected_event: asyncio.Event | None = None
+        self._crashed_exception: BaseException | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -70,7 +75,7 @@ class ReconnectingClient(EventEmitter):
         logger.info("Closing reconnecting client")
         self._closed = True
         if self._connected_event:
-            self._connected_event.clear()
+            self._connected_event.set()
 
         if self._reconnect_task:
             self._reconnect_task.cancel()
@@ -79,30 +84,60 @@ class ReconnectingClient(EventEmitter):
             except asyncio.CancelledError:
                 pass
 
-        if self._session and not self._session.is_closed:
-            await self._session.close()
+        if self._session:
+            try:
+                conn = self._session._connection()
+                if conn:
+                    await conn.close()
+            except Exception as e:
+                logger.warning("Error closing underlying session/connection: %s", e)
+            finally:
+                self._session = None
 
         logger.info("Reconnecting client closed")
 
-    async def get_session(self, *, wait_timeout: float = 5.0) -> WebTransportSession | None:
+    async def get_session(self, *, wait_timeout: float = 5.0) -> WebTransportSession:
         """Get the current session, waiting for a connection if necessary."""
-        if self._closed or self._connected_event is None:
-            return None
-        try:
-            async with asyncio.timeout(delay=wait_timeout):
+        if self._closed:
+            raise ClientError(message="Client is closed")
+
+        if self._crashed_exception:
+            raise ClientError(message="Background reconnection task crashed") from self._crashed_exception
+
+        if self._connected_event is None:
+            raise ClientError(message="Client not initialized. Use 'async with'.")
+
+        async with asyncio.timeout(delay=wait_timeout):
+            while True:
                 await self._connected_event.wait()
-            return self._session
-        except asyncio.TimeoutError:
-            return None
+
+                if self._closed:
+                    raise ClientError(message="Client closed while waiting for session")
+                if self._crashed_exception:
+                    raise ClientError(message="Background task crashed") from self._crashed_exception
+
+                session = self._session
+                if session is not None and not session.is_closed:
+                    return session
+
+                if self._reconnect_task and self._reconnect_task.done():
+                    try:
+                        self._reconnect_task.result()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        raise ClientError(message=f"Reconnection task failed: {e}") from e
+                    raise ClientError(message="Reconnection failed permanently.")
+
+                self._connected_event.clear()
 
     async def _reconnect_loop(self) -> None:
         """Manage the connection lifecycle with an exponential backoff retry strategy."""
         if self._connected_event is None:
-            logger.error("Reconnection loop started before client was properly initialized.")
             return
 
         retry_count = 0
-        max_retries = self._config.max_retries if self._config.max_retries >= 0 else float("inf")
+        max_retries = self._config.max_connection_retries if self._config.max_connection_retries >= 0 else float("inf")
         initial_delay = self._config.retry_delay
         backoff_factor = self._config.retry_backoff
         max_delay = self._config.max_retry_delay
@@ -112,15 +147,17 @@ class ReconnectingClient(EventEmitter):
                 try:
                     self._session = await self._client.connect(url=self._url)
                     logger.info("Successfully connected to %s", self._url)
+
                     self._connected_event.set()
                     await self.emit(
                         event_type=EventType.CONNECTION_ESTABLISHED,
                         data={"session": self._session, "attempt": retry_count + 1},
                     )
                     retry_count = 0
-                    await self._session.events.wait_for(event_type=EventType.SESSION_CLOSED)
 
-                    self._session = None
+                    if self._session.state != SessionState.CLOSED:
+                        await self._session.events.wait_for(event_type=EventType.SESSION_CLOSED)
+
                     self._connected_event.clear()
 
                     if not self._closed:
@@ -147,9 +184,27 @@ class ReconnectingClient(EventEmitter):
                         exc_info=True,
                     )
                     await asyncio.sleep(delay=delay)
+
+                finally:
+                    if self._session:
+                        try:
+                            if hasattr(self._session, "_connection"):
+                                conn = self._session._connection()
+                                if conn:
+                                    await conn.close()
+                        except Exception as e:
+                            logger.debug("Error cleaning up old connection: %s", e)
+                        finally:
+                            self._session = None
+
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            self._crashed_exception = e
+            logger.critical("Reconnection loop crashed: %s", e, exc_info=True)
+            if self._connected_event:
+                self._connected_event.set()
         finally:
             if self._connected_event:
-                self._connected_event.clear()
+                self._connected_event.set()
             logger.info("Reconnection loop finished.")

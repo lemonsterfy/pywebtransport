@@ -2,14 +2,14 @@
 
 import asyncio
 from collections import deque
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 from aioquic._buffer import BufferReadError
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, ProtocolError, ServerConfig, SessionError, constants
+from pywebtransport import ClientConfig, ErrorCodes, ProtocolError, ServerConfig, SessionError, constants, types
 from pywebtransport._protocol.events import (
     CapsuleReceived,
     CloseQuicConnection,
@@ -38,9 +38,7 @@ from pywebtransport._protocol.events import (
 from pywebtransport._protocol.session_processor import SessionProcessor
 from pywebtransport._protocol.state import ProtocolState, SessionStateData
 from pywebtransport._protocol.state import StreamStateData as StreamStateDataInternal
-from pywebtransport.constants import ErrorCodes
 from pywebtransport.exceptions import FlowControlError
-from pywebtransport.types import EventType, SessionState, StreamState
 
 
 @pytest.fixture
@@ -49,15 +47,11 @@ def client_processor(mock_config: MagicMock) -> SessionProcessor:
 
 
 @pytest.fixture
-def mock_buffer_cls(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch("pywebtransport._protocol.session_processor.Buffer", autospec=True)
-
-
-@pytest.fixture
-def mock_buffer_instance(mock_buffer_cls: MagicMock) -> MagicMock:
-    instance: MagicMock = mock_buffer_cls.return_value
+def mock_buffer_instance(mocker: MockerFixture) -> MagicMock:
+    mock_cls = mocker.patch("pywebtransport._protocol.session_processor.QuicBuffer", autospec=True)
+    instance = mock_cls.return_value
     instance.tell.return_value = 0
-    return instance
+    return cast(MagicMock, instance)
 
 
 @pytest.fixture
@@ -66,15 +60,10 @@ def mock_config(mocker: MockerFixture) -> MagicMock:
     config.max_total_pending_events = 100
     config.max_pending_events_per_session = 10
     config.flow_control_window_auto_scale = False
+    config.flow_control_window_size = 1000
+    config.stream_flow_control_increment_uni = 10
+    config.stream_flow_control_increment_bidi = 10
     return config
-
-
-@pytest.fixture
-def mock_ensure_bytes(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch(
-        "pywebtransport._protocol.session_processor.ensure_bytes",
-        side_effect=lambda data: (data if isinstance(data, bytes) else str(data).encode("utf-8")),
-    )
 
 
 @pytest.fixture
@@ -86,10 +75,7 @@ def mock_future(mocker: MockerFixture) -> MagicMock:
 
 @pytest.fixture
 def mock_get_timestamp(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch(
-        "pywebtransport._protocol.session_processor.get_timestamp",
-        return_value=123456.0,
-    )
+    return mocker.patch("pywebtransport._protocol.session_processor.get_timestamp", return_value=123456.0)
 
 
 @pytest.fixture
@@ -106,7 +92,7 @@ def mock_session_data(mocker: MockerFixture, mock_state: MagicMock) -> SessionSt
     session = mocker.create_autospec(SessionStateData, instance=True)
     session.session_id = "sid-1"
     session.control_stream_id = 0
-    session.state = SessionState.CONNECTED
+    session.state = types.SessionState.CONNECTED
     session.peer_max_data = 1000
     session.local_data_sent = 0
     session.local_max_data = 1000
@@ -122,6 +108,8 @@ def mock_session_data(mocker: MockerFixture, mock_state: MagicMock) -> SessionSt
     session.datagram_bytes_received = 0
     session.datagrams_sent = 0
     session.datagram_bytes_sent = 0
+    session.active_streams = set()
+    session.blocked_streams = set()
     mock_state.sessions = {"sid-1": session}
     mock_state.stream_to_session_map = {0: "sid-1"}
     return session
@@ -144,8 +132,9 @@ def mock_stream_data(mocker: MockerFixture, mock_state: MagicMock) -> StreamStat
     stream = mocker.create_autospec(StreamStateDataInternal, instance=True)
     stream.stream_id = 4
     stream.session_id = "sid-1"
-    stream.state = StreamState.OPEN
+    stream.state = types.StreamState.OPEN
     stream.bytes_sent = 0
+    stream.write_buffer_size = 0
     stream.pending_read_requests = deque()
     stream.write_buffer = deque()
     mock_state.streams = {4: stream}
@@ -169,20 +158,14 @@ class TestSessionProcessor:
     ) -> None:
         mock_session_data.peer_max_data = 100
         mock_session_data.local_data_sent = 0
-        mock_stream_data.state = StreamState.HALF_CLOSED_REMOTE
+        mock_session_data.blocked_streams.add(4)
+        mock_stream_data.state = types.StreamState.HALF_CLOSED_REMOTE
         mock_stream_data.write_buffer = deque([(b"hello", mock_future, True)])
 
         effects = client_processor._drain_session_write_buffers(session_id="sid-1", state=mock_state)
 
-        assert mock_stream_data.state == StreamState.CLOSED
-        assert (
-            EmitStreamEvent(
-                stream_id=4,
-                event_type=EventType.STREAM_CLOSED,
-                data={"stream_id": 4},
-            )
-            in effects
-        )
+        assert mock_stream_data.state == types.StreamState.CLOSED
+        assert EmitStreamEvent(stream_id=4, event_type=types.EventType.STREAM_CLOSED, data={"stream_id": 4}) in effects
         assert SendQuicData(stream_id=4, data=b"hello", end_stream=True) in effects
 
     def test_drain_session_write_buffers_end_stream_open(
@@ -195,14 +178,35 @@ class TestSessionProcessor:
     ) -> None:
         mock_session_data.peer_max_data = 100
         mock_session_data.local_data_sent = 0
-        mock_stream_data.state = StreamState.OPEN
+        mock_session_data.blocked_streams.add(4)
+        mock_stream_data.state = types.StreamState.OPEN
         mock_stream_data.write_buffer = deque([(b"hello", mock_future, True)])
 
         effects = client_processor._drain_session_write_buffers(session_id="sid-1", state=mock_state)
 
-        assert mock_stream_data.state == StreamState.HALF_CLOSED_LOCAL
+        assert mock_stream_data.state == types.StreamState.HALF_CLOSED_LOCAL
         assert SendQuicData(stream_id=4, data=b"hello", end_stream=True) in effects
         assert CompleteUserFuture(future=mock_future) in effects
+
+    def test_drain_session_write_buffers_exact_send_no_end(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_stream_data: StreamStateDataInternal,
+        mock_future: MagicMock,
+    ) -> None:
+        mock_session_data.peer_max_data = 5
+        mock_session_data.local_data_sent = 0
+        mock_session_data.blocked_streams.add(4)
+        mock_stream_data.write_buffer = deque([(b"12345", mock_future, False)])
+
+        effects = client_processor._drain_session_write_buffers(session_id="sid-1", state=mock_state)
+
+        assert SendQuicData(stream_id=4, data=b"12345", end_stream=False) in effects
+        assert mock_session_data.local_data_sent == 5
+        assert len(mock_stream_data.write_buffer) == 0
+        assert 4 not in mock_session_data.blocked_streams
 
     def test_drain_session_write_buffers_malformed_buffer(
         self,
@@ -212,6 +216,7 @@ class TestSessionProcessor:
         mock_stream_data: StreamStateDataInternal,
         mocker: MockerFixture,
     ) -> None:
+        mock_session_data.blocked_streams.add(4)
         mock_deque = mocker.MagicMock(spec=deque)
         mock_deque.__len__.return_value = 1
         mock_pop = cast(MagicMock, mock_deque.popleft)
@@ -223,10 +228,7 @@ class TestSessionProcessor:
         assert effects == []
 
     def test_drain_session_write_buffers_no_credit(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         mock_session_data.peer_max_data = 100
         mock_session_data.local_data_sent = 100
@@ -245,16 +247,15 @@ class TestSessionProcessor:
         assert effects == []
 
     def test_drain_session_write_buffers_no_streams(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         mock_state.streams = {}
+        mock_session_data.blocked_streams.add(4)
 
         effects = client_processor._drain_session_write_buffers(session_id="sid-1", state=mock_state)
 
         assert effects == []
+        assert 4 not in mock_session_data.blocked_streams
 
     def test_drain_session_write_buffers_partial_send(
         self,
@@ -266,6 +267,7 @@ class TestSessionProcessor:
     ) -> None:
         mock_session_data.peer_max_data = 10
         mock_session_data.local_data_sent = 5
+        mock_session_data.blocked_streams.add(4)
         available_credit = 5
         mock_stream_data.write_buffer = deque([(b"long data", mock_future, False)])
 
@@ -278,6 +280,53 @@ class TestSessionProcessor:
         assert mock_stream_data.write_buffer[0][0] == b"data"
         assert not any(isinstance(e, CompleteUserFuture) for e in effects)
 
+    def test_drain_session_write_buffers_stream_skipped(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mocker: MockerFixture,
+    ) -> None:
+        mock_session_data.peer_max_data = 2000
+        mock_session_data.local_data_sent = 0
+        mock_session_data.blocked_streams = {1, 2, 3}
+
+        s2 = mocker.create_autospec(StreamStateDataInternal, instance=True)
+        s2.state = types.StreamState.CLOSED
+        s2.write_buffer = deque([(b"data", None, False)])
+
+        s3 = mocker.create_autospec(StreamStateDataInternal, instance=True)
+        s3.state = types.StreamState.OPEN
+        s3.write_buffer = deque()
+
+        mock_state.streams = {2: s2, 3: s3}
+
+        effects = client_processor._drain_session_write_buffers(session_id="sid-1", state=mock_state)
+
+        assert 1 not in mock_session_data.blocked_streams
+        assert 2 not in mock_session_data.blocked_streams
+        assert 3 not in mock_session_data.blocked_streams
+        assert effects == []
+
+    def test_drain_session_write_buffers_value_error(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_stream_data: StreamStateDataInternal,
+        mocker: MockerFixture,
+    ) -> None:
+        mock_session_data.blocked_streams.add(4)
+        mock_deque = mocker.MagicMock(spec=deque)
+        mock_deque.__len__.return_value = 1
+        mock_pop = cast(MagicMock, mock_deque.popleft)
+        mock_pop.side_effect = ValueError("Malformed buffer item")
+        mock_stream_data.write_buffer = mock_deque
+
+        effects = client_processor._drain_session_write_buffers(session_id="sid-1", state=mock_state)
+
+        assert effects == []
+
     def test_drain_session_write_buffers_with_done_future(
         self,
         client_processor: SessionProcessor,
@@ -288,6 +337,7 @@ class TestSessionProcessor:
     ) -> None:
         mock_session_data.peer_max_data = 100
         mock_session_data.local_data_sent = 0
+        mock_session_data.blocked_streams.add(4)
         done_future = mocker.create_autospec(asyncio.Future, instance=True)
         done_future.done.return_value = True
         mock_stream_data.write_buffer = deque([(b"hello", done_future, False)])
@@ -297,10 +347,7 @@ class TestSessionProcessor:
         assert not any(isinstance(e, CompleteUserFuture) for e in effects)
 
     def test_handle_accept_session_client_fails(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         event = UserAcceptSession(future=mock_future, session_id="sid-1")
 
@@ -312,10 +359,7 @@ class TestSessionProcessor:
         assert isinstance(fail_effect.exception, ProtocolError)
 
     def test_handle_accept_session_not_found(
-        self,
-        server_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, server_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         event = UserAcceptSession(future=mock_future, session_id="sid-1")
         mock_state.sessions = {}
@@ -335,18 +379,18 @@ class TestSessionProcessor:
         mock_future: MagicMock,
         mock_get_timestamp: MagicMock,
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTING
+        mock_session_data.state = types.SessionState.CONNECTING
         event = UserAcceptSession(future=mock_future, session_id="sid-1")
 
         effects = server_processor.handle_accept_session(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CONNECTED
+        assert mock_session_data.state == types.SessionState.CONNECTED
         assert mock_session_data.ready_at == 123456.0
         assert effects == [
             SendH3Headers(stream_id=0, status=200, end_stream=False),
             EmitSessionEvent(
                 session_id="sid-1",
-                event_type=EventType.SESSION_READY,
+                event_type=types.EventType.SESSION_READY,
                 data={"session_id": "sid-1", "ready_at": 123456.0},
             ),
             CompleteUserFuture(future=mock_future),
@@ -359,7 +403,7 @@ class TestSessionProcessor:
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTED
+        mock_session_data.state = types.SessionState.CONNECTED
         event = UserAcceptSession(future=mock_future, session_id="sid-1")
 
         effects = server_processor.handle_accept_session(event=event, state=mock_state)
@@ -370,98 +414,78 @@ class TestSessionProcessor:
         assert isinstance(fail_effect.exception, SessionError)
         assert "not in connecting state" in fail_effect.exception.args[0]
 
-    def test_handle_capsule_received_buffer_read_error(
+    def test_handle_capsule_received_cleanup_error(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        mocker: MockerFixture,
     ) -> None:
-        mock_buffer_instance.pull_uint_var.side_effect = BufferReadError("test")
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_DATA_TYPE,
-            capsule_data=b"...",
-        )
+        mock_reset = mocker.patch.object(client_processor, "_reset_all_session_streams")
+        mock_reset.side_effect = RuntimeError("Double fault")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.side_effect = ProtocolError("Initial Error")
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"")
 
-        assert mock_session_data.state == SessionState.CLOSED
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert any(isinstance(e, CloseQuicConnection) for e in effects)
-        assert any(isinstance(e, EmitSessionEvent) and e.event_type == EventType.SESSION_CLOSED for e in effects)
 
     def test_handle_capsule_received_close_session(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         mock_get_timestamp: MagicMock,
     ) -> None:
-        mock_buffer_instance.pull_uint32.return_value = 1001
-        mock_buffer_instance.pull_bytes.return_value = b"Test Close"
-        mock_buffer_instance.tell.return_value = 4
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.CLOSE_WEBTRANSPORT_SESSION_TYPE,
-            capsule_data=b"....Test Close",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_instance = mock_qb.return_value
+            mock_instance.pull_uint32.return_value = 1001
+            mock_instance.pull_bytes.return_value = b"Test Close"
+            mock_instance.tell.return_value = 4
+            event = CapsuleReceived(
+                stream_id=0, capsule_type=constants.CLOSE_WEBTRANSPORT_SESSION_TYPE, capsule_data=b"....Test Close"
+            )
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert mock_session_data.closed_at == 123456.0
         assert mock_session_data.close_code == 1001
         assert mock_session_data.close_reason == "Test Close"
         assert (
             EmitSessionEvent(
                 session_id="sid-1",
-                event_type=EventType.SESSION_CLOSED,
+                event_type=types.EventType.SESSION_CLOSED,
                 data={"session_id": "sid-1", "code": 1001, "reason": "Test Close"},
             )
             in effects
         )
 
     def test_handle_capsule_received_data_blocked_autoscale_off(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         client_processor._config.flow_control_window_auto_scale = False
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_DATA_BLOCKED_TYPE,
-            capsule_data=b"",
-        )
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_DATA_BLOCKED_TYPE, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert effects == [
             EmitSessionEvent(
-                session_id="sid-1",
-                event_type=EventType.SESSION_DATA_BLOCKED,
-                data={"session_id": "sid-1"},
+                session_id="sid-1", event_type=types.EventType.SESSION_DATA_BLOCKED, data={"session_id": "sid-1"}
             )
         ]
 
     def test_handle_capsule_received_data_blocked_autoscale_on(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         client_processor._config.flow_control_window_auto_scale = True
         client_processor._config.flow_control_window_size = 5000
         mock_session_data.local_max_data = 1000
         mock_session_data.peer_data_sent = 0
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_DATA_BLOCKED_TYPE,
-            capsule_data=b"",
-        )
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_DATA_BLOCKED_TYPE, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
@@ -469,89 +493,57 @@ class TestSessionProcessor:
         assert any(isinstance(e, SendH3Capsule) and e.capsule_type == constants.WT_MAX_DATA_TYPE for e in effects)
 
     def test_handle_capsule_received_drain_session(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTED
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.DRAIN_WEBTRANSPORT_SESSION_TYPE,
-            capsule_data=b"",
-        )
+        mock_session_data.state = types.SessionState.CONNECTED
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.DRAIN_WEBTRANSPORT_SESSION_TYPE, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.DRAINING
+        assert mock_session_data.state == types.SessionState.DRAINING
         assert effects == [
             EmitSessionEvent(
-                session_id="sid-1",
-                event_type=EventType.SESSION_DRAINING,
-                data={"session_id": "sid-1"},
+                session_id="sid-1", event_type=types.EventType.SESSION_DRAINING, data={"session_id": "sid-1"}
             )
         ]
 
     def test_handle_capsule_received_drain_session_wrong_state(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
-        mock_session_data.state = SessionState.DRAINING
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.DRAIN_WEBTRANSPORT_SESSION_TYPE,
-            capsule_data=b"",
-        )
+        mock_session_data.state = types.SessionState.DRAINING
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.DRAIN_WEBTRANSPORT_SESSION_TYPE, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert effects == []
 
-    @pytest.mark.parametrize(
-        "capsule_type",
-        [
-            constants.WT_MAX_STREAM_DATA_TYPE,
-            constants.WT_STREAM_DATA_BLOCKED_TYPE,
-        ],
-    )
+    @pytest.mark.parametrize("capsule_type", [constants.WT_MAX_STREAM_DATA_TYPE, constants.WT_STREAM_DATA_BLOCKED_TYPE])
     def test_handle_capsule_received_forbidden_capsule(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         capsule_type: int,
     ) -> None:
         event = CapsuleReceived(stream_id=0, capsule_type=capsule_type, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert any(isinstance(e, ResetQuicStream) and e.error_code == ErrorCodes.H3_FRAME_UNEXPECTED for e in effects)
-        assert any(isinstance(e, EmitSessionEvent) and e.event_type == EventType.SESSION_CLOSED for e in effects)
+        assert any(isinstance(e, EmitSessionEvent) and e.event_type == types.EventType.SESSION_CLOSED for e in effects)
 
     def test_handle_capsule_received_max_data_decrease_fails(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         mock_session_data.peer_max_data = 1000
-        mock_buffer_instance.pull_uint_var.return_value = 500
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_DATA_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 500
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert any(isinstance(e, ResetQuicStream) and e.error_code == ErrorCodes.WT_FLOW_CONTROL_ERROR for e in effects)
 
     def test_handle_capsule_received_max_data_success_and_drain(
@@ -560,26 +552,24 @@ class TestSessionProcessor:
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
         mock_stream_data: StreamStateDataInternal,
-        mock_buffer_instance: MagicMock,
         mock_future: MagicMock,
     ) -> None:
         mock_session_data.peer_max_data = 1000
         mock_session_data.local_data_sent = 1000
+        mock_session_data.blocked_streams.add(4)
         mock_stream_data.write_buffer = deque([(b"hello", mock_future, True)])
-        mock_buffer_instance.pull_uint_var.return_value = 2000
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_DATA_TYPE,
-            capsule_data=b"...",
-        )
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 2000
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"...")
+
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert mock_session_data.peer_max_data == 2000
         assert (
             EmitSessionEvent(
                 session_id="sid-1",
-                event_type=EventType.SESSION_MAX_DATA_UPDATED,
+                event_type=types.EventType.SESSION_MAX_DATA_UPDATED,
                 data={"session_id": "sid-1", "max_data": 2000},
             )
             in effects
@@ -591,51 +581,33 @@ class TestSessionProcessor:
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         mock_future: MagicMock,
     ) -> None:
         mock_session_data.peer_max_streams_bidi = 0
         mock_session_data.local_streams_bidi_opened = 0
         mock_session_data.pending_bidi_stream_futures = deque([mock_future])
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert mock_session_data.peer_max_streams_bidi == 5
         assert mock_session_data.local_streams_bidi_opened == 1
         assert not mock_session_data.pending_bidi_stream_futures
-        assert (
-            CreateQuicStream(
-                session_id="sid-1",
-                is_unidirectional=False,
-                create_future=mock_future,
-            )
-            in effects
-        )
+        assert CreateQuicStream(session_id="sid-1", is_unidirectional=False, create_future=mock_future) in effects
 
     def test_handle_capsule_received_max_streams_bidi_decrease_fails(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         mock_session_data.peer_max_streams_bidi = 10
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert any(isinstance(e, ResetQuicStream) and e.error_code == ErrorCodes.WT_FLOW_CONTROL_ERROR for e in effects)
 
     def test_handle_capsule_received_max_streams_bidi_with_done_future(
@@ -643,7 +615,6 @@ class TestSessionProcessor:
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         mocker: MockerFixture,
     ) -> None:
         done_future = mocker.create_autospec(asyncio.Future, instance=True)
@@ -651,33 +622,23 @@ class TestSessionProcessor:
         mock_session_data.peer_max_streams_bidi = 0
         mock_session_data.local_streams_bidi_opened = 0
         mock_session_data.pending_bidi_stream_futures = deque([done_future])
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert mock_session_data.local_streams_bidi_opened == 0
         assert not any(isinstance(e, CreateQuicStream) for e in effects)
 
     def test_handle_capsule_received_max_streams_protocol_limit(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
-        mock_buffer_instance.pull_uint_var.return_value = constants.MAX_PROTOCOL_STREAMS_LIMIT + 1
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = constants.MAX_PROTOCOL_STREAMS_LIMIT + 1
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert any(
             isinstance(e, CloseQuicConnection) and e.error_code == ErrorCodes.FRAME_ENCODING_ERROR for e in effects
@@ -688,42 +649,31 @@ class TestSessionProcessor:
         server_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         mock_future: MagicMock,
     ) -> None:
         mock_session_data.peer_max_streams_bidi = 0
         mock_session_data.pending_bidi_stream_futures = deque([mock_future])
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_BIDI_TYPE, capsule_data=b"...")
 
-        effects = server_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = server_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert mock_session_data.peer_max_streams_bidi == 5
         assert len(mock_session_data.pending_bidi_stream_futures) == 1
         assert not any(isinstance(e, CreateQuicStream) for e in effects)
 
     def test_handle_capsule_received_max_streams_uni_client_no_pending(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         mock_session_data.peer_max_streams_uni = 0
         mock_session_data.local_streams_uni_opened = 0
         mock_session_data.pending_uni_stream_futures = deque()
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert mock_session_data.peer_max_streams_uni == 5
         assert mock_session_data.local_streams_uni_opened == 0
@@ -734,67 +684,42 @@ class TestSessionProcessor:
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         mock_future: MagicMock,
     ) -> None:
         mock_session_data.peer_max_streams_uni = 0
         mock_session_data.local_streams_uni_opened = 0
         mock_session_data.pending_uni_stream_futures = deque([mock_future])
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert mock_session_data.peer_max_streams_uni == 5
         assert mock_session_data.local_streams_uni_opened == 1
-        assert (
-            CreateQuicStream(
-                session_id="sid-1",
-                is_unidirectional=True,
-                create_future=mock_future,
-            )
-            in effects
-        )
+        assert CreateQuicStream(session_id="sid-1", is_unidirectional=True, create_future=mock_future) in effects
 
     def test_handle_capsule_received_max_streams_uni_decrease_fails(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         mock_session_data.peer_max_streams_uni = 10
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert any(isinstance(e, ResetQuicStream) and e.error_code == ErrorCodes.WT_FLOW_CONTROL_ERROR for e in effects)
 
     def test_handle_capsule_received_max_streams_uni_protocol_limit(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
-        mock_buffer_instance.pull_uint_var.return_value = constants.MAX_PROTOCOL_STREAMS_LIMIT + 1
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = constants.MAX_PROTOCOL_STREAMS_LIMIT + 1
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert any(
             isinstance(e, CloseQuicConnection) and e.error_code == ErrorCodes.FRAME_ENCODING_ERROR for e in effects
@@ -805,7 +730,6 @@ class TestSessionProcessor:
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         mocker: MockerFixture,
     ) -> None:
         done_future = mocker.create_autospec(asyncio.Future, instance=True)
@@ -813,17 +737,87 @@ class TestSessionProcessor:
         mock_session_data.peer_max_streams_uni = 0
         mock_session_data.local_streams_uni_opened = 0
         mock_session_data.pending_uni_stream_futures = deque([done_future])
-        mock_buffer_instance.pull_uint_var.return_value = 5
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE,
-            capsule_data=b"...",
-        )
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.return_value = 5
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_STREAMS_UNI_TYPE, capsule_data=b"...")
 
-        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
         assert mock_session_data.local_streams_uni_opened == 0
         assert not any(isinstance(e, CreateQuicStream) for e in effects)
+
+    @pytest.mark.parametrize(
+        "capsule_type",
+        [constants.WT_MAX_DATA_TYPE, constants.WT_MAX_STREAMS_BIDI_TYPE, constants.WT_MAX_STREAMS_UNI_TYPE],
+    )
+    def test_handle_capsule_received_parsing_errors_pull_var(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        capsule_type: int,
+    ) -> None:
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint_var.side_effect = BufferReadError("test")
+
+            event = CapsuleReceived(stream_id=0, capsule_type=capsule_type, capsule_data=b"malformed")
+
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+
+        assert mock_session_data.state == types.SessionState.CLOSED
+        assert any(isinstance(e, CloseQuicConnection) for e in effects)
+
+    def test_handle_capsule_received_parsing_errors_close_session(
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
+    ) -> None:
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.return_value.pull_uint32.side_effect = BufferReadError("test")
+
+            event = CapsuleReceived(
+                stream_id=0, capsule_type=constants.CLOSE_WEBTRANSPORT_SESSION_TYPE, capsule_data=b"malformed"
+            )
+
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+
+        assert mock_session_data.state == types.SessionState.CLOSED
+        assert any(isinstance(e, CloseQuicConnection) for e in effects)
+
+    def test_handle_capsule_received_protocol_error(
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
+    ) -> None:
+        with patch("pywebtransport._protocol.session_processor.QuicBuffer") as mock_qb:
+            mock_qb.side_effect = ProtocolError("Protocol Violation")
+            event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"...")
+
+            effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+
+        assert mock_session_data.state == types.SessionState.CLOSED
+        assert any(
+            isinstance(e, CloseQuicConnection) and e.error_code == ErrorCodes.PROTOCOL_VIOLATION for e in effects
+        )
+
+    def test_handle_capsule_received_session_closed_raises(
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
+    ) -> None:
+        mock_session_data.state = types.SessionState.CLOSED
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"...")
+
+        with pytest.raises(ProtocolError) as exc_info:
+            client_processor.handle_capsule_received(event=event, state=mock_state)
+
+        assert exc_info.value.error_code == ErrorCodes.H3_MESSAGE_ERROR
+        assert "Data received on closed session" in str(exc_info.value)
+
+    def test_handle_capsule_received_session_in_map_but_missing(
+        self, client_processor: SessionProcessor, mock_state: MagicMock
+    ) -> None:
+        mock_state.stream_to_session_map = {0: "sid-missing"}
+        mock_state.sessions = {}
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"")
+
+        effects = client_processor.handle_capsule_received(event=event, state=mock_state)
+
+        assert effects == []
 
     @pytest.mark.parametrize(
         "capsule_type, is_uni, config_attr, expected_capsule_type",
@@ -847,7 +841,6 @@ class TestSessionProcessor:
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         capsule_type: int,
         is_uni: bool,
         config_attr: str,
@@ -861,7 +854,7 @@ class TestSessionProcessor:
         assert effects == [
             EmitSessionEvent(
                 session_id="sid-1",
-                event_type=EventType.SESSION_STREAMS_BLOCKED,
+                event_type=types.EventType.SESSION_STREAMS_BLOCKED,
                 data={"session_id": "sid-1", "is_unidirectional": is_uni},
             )
         ]
@@ -888,18 +881,13 @@ class TestSessionProcessor:
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
         capsule_type: int,
         is_uni: bool,
         config_attr: str,
         expected_capsule_type: int,
     ) -> None:
         client_processor._config.flow_control_window_auto_scale = True
-        setattr(
-            client_processor._config,
-            config_attr,
-            5,
-        )
+        setattr(client_processor._config, config_attr, 5)
         if is_uni:
             mock_session_data.local_max_streams_uni = 10
             mock_session_data.peer_streams_uni_opened = 10
@@ -918,21 +906,13 @@ class TestSessionProcessor:
         assert any(isinstance(e, SendH3Capsule) and e.capsule_type == expected_capsule_type for e in effects)
 
     def test_handle_capsule_received_streams_blocked_autoscale_on_no_increase_bidi(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         client_processor._config.flow_control_window_auto_scale = True
         client_processor._config.stream_flow_control_increment_bidi = 5
         mock_session_data.local_max_streams_bidi = 20
         mock_session_data.peer_streams_bidi_opened = 10
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_STREAMS_BLOCKED_BIDI_TYPE,
-            capsule_data=b"",
-        )
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_STREAMS_BLOCKED_BIDI_TYPE, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
@@ -940,21 +920,13 @@ class TestSessionProcessor:
         assert not any(isinstance(e, SendH3Capsule) for e in effects)
 
     def test_handle_capsule_received_streams_blocked_autoscale_on_no_increase_uni(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         client_processor._config.flow_control_window_auto_scale = True
         client_processor._config.stream_flow_control_increment_uni = 5
         mock_session_data.local_max_streams_uni = 20
         mock_session_data.peer_streams_uni_opened = 10
-        event = CapsuleReceived(
-            stream_id=0,
-            capsule_type=constants.WT_STREAMS_BLOCKED_UNI_TYPE,
-            capsule_data=b"",
-        )
+        event = CapsuleReceived(stream_id=0, capsule_type=constants.WT_STREAMS_BLOCKED_UNI_TYPE, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
@@ -962,11 +934,7 @@ class TestSessionProcessor:
         assert not any(isinstance(e, SendH3Capsule) for e in effects)
 
     def test_handle_capsule_received_unknown_capsule(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_buffer_instance: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         event = CapsuleReceived(stream_id=0, capsule_type=0xFEEDBEEF, capsule_data=b"")
 
@@ -978,11 +946,7 @@ class TestSessionProcessor:
         self, client_processor: SessionProcessor, mock_state: MagicMock
     ) -> None:
         mock_state.stream_to_session_map = {}
-        event = CapsuleReceived(
-            stream_id=99,
-            capsule_type=constants.WT_MAX_DATA_TYPE,
-            capsule_data=b"",
-        )
+        event = CapsuleReceived(stream_id=99, capsule_type=constants.WT_MAX_DATA_TYPE, capsule_data=b"")
 
         effects = client_processor.handle_capsule_received(event=event, state=mock_state)
 
@@ -995,31 +959,18 @@ class TestSessionProcessor:
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
     ) -> None:
-        mock_session_data.state = SessionState.CLOSED
-        event = UserCloseSession(
-            future=mock_future,
-            session_id="sid-1",
-            error_code=1,
-            reason="Test",
-        )
+        mock_session_data.state = types.SessionState.CLOSED
+        event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1, reason="Test")
 
         effects = client_processor.handle_close_session(event=event, state=mock_state)
 
         assert effects == [CompleteUserFuture(future=mock_future)]
 
     def test_handle_close_session_not_found(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         mock_state.sessions = {}
-        event = UserCloseSession(
-            future=mock_future,
-            session_id="sid-1",
-            error_code=1,
-            reason="Test",
-        )
+        event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1, reason="Test")
 
         effects = client_processor.handle_close_session(event=event, state=mock_state)
 
@@ -1034,12 +985,7 @@ class TestSessionProcessor:
     ) -> None:
         long_reason = "a" * (constants.MAX_CLOSE_REASON_BYTES + 10)
         truncated_reason_bytes = ("a" * constants.MAX_CLOSE_REASON_BYTES).encode("utf-8")
-        event = UserCloseSession(
-            future=mock_future,
-            session_id="sid-1",
-            error_code=1,
-            reason=long_reason,
-        )
+        event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1, reason=long_reason)
 
         effects = client_processor.handle_close_session(event=event, state=mock_state)
 
@@ -1058,44 +1004,29 @@ class TestSessionProcessor:
         mock_future: MagicMock,
         mock_get_timestamp: MagicMock,
     ) -> None:
-        event = UserCloseSession(
-            future=mock_future,
-            session_id="sid-1",
-            error_code=1001,
-            reason="Test",
-        )
+        event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1001, reason="Test")
 
         effects = client_processor.handle_close_session(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert mock_session_data.closed_at == 123456.0
         assert mock_session_data.close_code == 1001
         assert mock_session_data.close_reason == "Test"
         assert (
             EmitSessionEvent(
                 session_id="sid-1",
-                event_type=EventType.SESSION_CLOSED,
+                event_type=types.EventType.SESSION_CLOSED,
                 data={"session_id": "sid-1", "code": 1001, "reason": "Test"},
             )
             in effects
         )
-        assert (
-            SendQuicData(
-                stream_id=mock_session_data.control_stream_id,
-                data=b"",
-                end_stream=True,
-            )
-            in effects
-        )
+        assert SendQuicData(stream_id=mock_session_data.control_stream_id, data=b"", end_stream=True) in effects
         assert CompleteUserFuture(future=mock_future) in effects
 
     def test_handle_connect_stream_closed_already_closed(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
-        mock_session_data.state = SessionState.CLOSED
+        mock_session_data.state = types.SessionState.CLOSED
         event = ConnectStreamClosed(stream_id=0)
 
         effects = client_processor.handle_connect_stream_closed(event=event, state=mock_state)
@@ -1124,7 +1055,7 @@ class TestSessionProcessor:
 
         effects = client_processor.handle_connect_stream_closed(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert mock_session_data.close_reason == "CONNECT stream cleanly closed"
         assert any(isinstance(e, ResetQuicStream) and e.error_code == ErrorCodes.NO_ERROR for e in effects)
 
@@ -1202,10 +1133,7 @@ class TestSessionProcessor:
         assert isinstance(fail_effect.exception, FlowControlError)
 
     def test_handle_create_stream_session_not_found(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         mock_state.sessions = {}
         event = UserCreateStream(future=mock_future, session_id="sid-1", is_unidirectional=False)
@@ -1229,13 +1157,7 @@ class TestSessionProcessor:
         effects = client_processor.handle_create_stream(event=event, state=mock_state)
 
         assert mock_session_data.local_streams_bidi_opened == 1
-        assert effects == [
-            CreateQuicStream(
-                session_id="sid-1",
-                is_unidirectional=False,
-                create_future=mock_future,
-            )
-        ]
+        assert effects == [CreateQuicStream(session_id="sid-1", is_unidirectional=False, create_future=mock_future)]
 
     def test_handle_create_stream_wrong_state(
         self,
@@ -1244,7 +1166,7 @@ class TestSessionProcessor:
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTING
+        mock_session_data.state = types.SessionState.CONNECTING
         event = UserCreateStream(future=mock_future, session_id="sid-1", is_unidirectional=False)
 
         effects = client_processor.handle_create_stream(event=event, state=mock_state)
@@ -1256,10 +1178,7 @@ class TestSessionProcessor:
         assert "not connected or draining" in fail_effect.exception.args[0]
 
     def test_handle_datagram_received_active_session(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
         event = DatagramReceived(stream_id=0, data=b"hello")
 
@@ -1270,7 +1189,7 @@ class TestSessionProcessor:
         assert effects == [
             EmitSessionEvent(
                 session_id="sid-1",
-                event_type=EventType.DATAGRAM_RECEIVED,
+                event_type=types.EventType.DATAGRAM_RECEIVED,
                 data={"session_id": "sid-1", "data": b"hello"},
             )
         ]
@@ -1294,10 +1213,7 @@ class TestSessionProcessor:
         assert mock_state.early_event_buffer == {99: [(123456.0, event)]}
 
     def test_handle_datagram_received_global_buffer_full(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_config: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_config: MagicMock
     ) -> None:
         mock_config.max_total_pending_events = 10
         mock_state.sessions = {}
@@ -1311,12 +1227,9 @@ class TestSessionProcessor:
         assert 99 not in mock_state.early_event_buffer
 
     def test_handle_datagram_received_inactive_session(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_session_data: SessionStateData
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTING
+        mock_session_data.state = types.SessionState.CONNECTING
         event = DatagramReceived(stream_id=0, data=b"hello")
 
         effects = client_processor.handle_datagram_received(event=event, state=mock_state)
@@ -1325,10 +1238,7 @@ class TestSessionProcessor:
         assert mock_session_data.datagrams_received == 0
 
     def test_handle_datagram_received_session_buffer_full(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_config: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_config: MagicMock
     ) -> None:
         mock_config.max_total_pending_events = 10
         mock_config.max_pending_events_per_session = 1
@@ -1345,10 +1255,7 @@ class TestSessionProcessor:
         assert mock_state.early_event_count == 1
 
     def test_handle_get_session_diagnostics_not_found(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         mock_state.sessions = {}
         event = UserGetSessionDiagnostics(future=mock_future, session_id="sid-1")
@@ -1368,37 +1275,31 @@ class TestSessionProcessor:
         mock_future: MagicMock,
     ) -> None:
         mock_session_data.session_id = "sid-1"
-        test_dict = {"id": "sid-1", "state": "connected"}
+        mock_session_data.state = types.SessionState.CONNECTED
+        mock_session_data.active_streams = {1, 2}
+        mock_session_data.blocked_streams = {3}
+
+        test_dict: dict[str, Any] = {"id": "sid-1", "state": "connected"}
         with patch(
-            "pywebtransport._protocol.session_processor.dataclasses.asdict",
-            return_value=test_dict,
+            "pywebtransport._protocol.session_processor.dataclasses.asdict", return_value=test_dict
         ) as mock_asdict:
             event = UserGetSessionDiagnostics(future=mock_future, session_id="sid-1")
             effects = client_processor.handle_get_session_diagnostics(event=event, state=mock_state)
+
             mock_asdict.assert_called_once_with(mock_session_data)
-            assert effects == [CompleteUserFuture(future=mock_future, value=test_dict)]
 
-    def test_handle_grant_data_credit_fails_if_lower(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_future: MagicMock,
-    ) -> None:
-        mock_session_data.local_max_data = 2000
-        event = UserGrantDataCredit(future=mock_future, session_id="sid-1", max_data=1000)
+            expected_value = test_dict.copy()
+            expected_value["active_streams"] = [1, 2]
+            expected_value["blocked_streams"] = [3]
 
-        effects = client_processor.handle_grant_data_credit(event=event, state=mock_state)
-
-        assert mock_session_data.local_max_data == 2000
-        assert effects == [CompleteUserFuture(future=mock_future)]
-        assert not any(isinstance(e, SendH3Capsule) for e in effects)
+            assert isinstance(effects[0], CompleteUserFuture)
+            result_val = effects[0].value
+            assert result_val["id"] == "sid-1"
+            assert set(result_val["active_streams"]) == {1, 2}
+            assert set(result_val["blocked_streams"]) == {3}
 
     def test_handle_grant_data_credit_not_found(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         mock_state.sessions = {}
         event = UserGrantDataCredit(future=mock_future, session_id="sid-1", max_data=1000)
@@ -1410,55 +1311,36 @@ class TestSessionProcessor:
         assert isinstance(fail_effect, FailUserFuture)
         assert isinstance(fail_effect.exception, SessionError)
 
-    def test_handle_grant_data_credit_success(
+    @pytest.mark.parametrize(
+        "grant_kwargs, no_op", [({"max_data": 2000}, False), ({"max_data": 1000}, True), ({"max_data": 500}, True)]
+    )
+    def test_handle_grant_data_credit_variants(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
+        grant_kwargs: dict[str, Any],
+        no_op: bool,
     ) -> None:
         mock_session_data.local_max_data = 1000
-        event = UserGrantDataCredit(future=mock_future, session_id="sid-1", max_data=2000)
+        event = UserGrantDataCredit(future=mock_future, session_id="sid-1", **grant_kwargs)
 
         effects = client_processor.handle_grant_data_credit(event=event, state=mock_state)
 
-        assert mock_session_data.local_max_data == 2000
-        assert any(isinstance(e, SendH3Capsule) and e.capsule_type == constants.WT_MAX_DATA_TYPE for e in effects)
         assert CompleteUserFuture(future=mock_future) in effects
-
-    def test_handle_grant_streams_credit_bidi_fails_if_lower(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_future: MagicMock,
-    ) -> None:
-        mock_session_data.local_max_streams_bidi = 20
-        event = UserGrantStreamsCredit(
-            future=mock_future,
-            session_id="sid-1",
-            max_streams=10,
-            is_unidirectional=False,
-        )
-
-        effects = client_processor.handle_grant_streams_credit(event=event, state=mock_state)
-
-        assert mock_session_data.local_max_streams_bidi == 20
-        assert effects == [CompleteUserFuture(future=mock_future)]
+        if no_op:
+            assert mock_session_data.local_max_data == 1000
+            assert not any(isinstance(e, SendH3Capsule) for e in effects)
+        else:
+            assert mock_session_data.local_max_data == grant_kwargs["max_data"]
+            assert any(isinstance(e, SendH3Capsule) and e.capsule_type == constants.WT_MAX_DATA_TYPE for e in effects)
 
     def test_handle_grant_streams_credit_not_found(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         mock_state.sessions = {}
-        event = UserGrantStreamsCredit(
-            future=mock_future,
-            session_id="sid-1",
-            max_streams=10,
-            is_unidirectional=False,
-        )
+        event = UserGrantStreamsCredit(future=mock_future, session_id="sid-1", max_streams=10, is_unidirectional=False)
 
         effects = client_processor.handle_grant_streams_credit(event=event, state=mock_state)
 
@@ -1467,54 +1349,53 @@ class TestSessionProcessor:
         assert isinstance(fail_effect, FailUserFuture)
         assert isinstance(fail_effect.exception, SessionError)
 
-    def test_handle_grant_streams_credit_uni_fails_if_lower(
+    @pytest.mark.parametrize(
+        "is_unidirectional, max_streams, current_limit, no_op",
+        [
+            (False, 20, 10, False),
+            (False, 10, 10, True),
+            (False, 5, 10, True),
+            (True, 20, 10, False),
+            (True, 10, 10, True),
+            (True, 5, 10, True),
+        ],
+    )
+    def test_handle_grant_streams_credit_variants(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
+        is_unidirectional: bool,
+        max_streams: int,
+        current_limit: int,
+        no_op: bool,
     ) -> None:
-        mock_session_data.local_max_streams_uni = 20
+        if is_unidirectional:
+            mock_session_data.local_max_streams_uni = current_limit
+        else:
+            mock_session_data.local_max_streams_bidi = current_limit
+
         event = UserGrantStreamsCredit(
-            future=mock_future,
-            session_id="sid-1",
-            max_streams=10,
-            is_unidirectional=True,
+            future=mock_future, session_id="sid-1", max_streams=max_streams, is_unidirectional=is_unidirectional
         )
 
         effects = client_processor.handle_grant_streams_credit(event=event, state=mock_state)
 
-        assert mock_session_data.local_max_streams_uni == 20
-        assert effects == [CompleteUserFuture(future=mock_future)]
-
-    def test_handle_grant_streams_credit_uni_success(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_session_data: SessionStateData,
-        mock_future: MagicMock,
-    ) -> None:
-        mock_session_data.local_max_streams_uni = 10
-        event = UserGrantStreamsCredit(
-            future=mock_future,
-            session_id="sid-1",
-            max_streams=20,
-            is_unidirectional=True,
-        )
-
-        effects = client_processor.handle_grant_streams_credit(event=event, state=mock_state)
-
-        assert mock_session_data.local_max_streams_uni == 20
-        assert any(
-            isinstance(e, SendH3Capsule) and e.capsule_type == constants.WT_MAX_STREAMS_UNI_TYPE for e in effects
-        )
         assert CompleteUserFuture(future=mock_future) in effects
 
+        target_field = "local_max_streams_uni" if is_unidirectional else "local_max_streams_bidi"
+        target_capsule = constants.WT_MAX_STREAMS_UNI_TYPE if is_unidirectional else constants.WT_MAX_STREAMS_BIDI_TYPE
+
+        if no_op:
+            assert getattr(mock_session_data, target_field) == current_limit
+            assert not any(isinstance(e, SendH3Capsule) for e in effects)
+        else:
+            assert getattr(mock_session_data, target_field) == max_streams
+            assert any(isinstance(e, SendH3Capsule) and e.capsule_type == target_capsule for e in effects)
+
     def test_handle_reject_session_client_fails(
-        self,
-        client_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         event = UserRejectSession(future=mock_future, session_id="sid-1", status_code=404)
 
@@ -1526,10 +1407,7 @@ class TestSessionProcessor:
         assert isinstance(fail_effect.exception, ProtocolError)
 
     def test_handle_reject_session_not_found(
-        self,
-        server_processor: SessionProcessor,
-        mock_state: MagicMock,
-        mock_future: MagicMock,
+        self, server_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         mock_state.sessions = {}
         event = UserRejectSession(future=mock_future, session_id="sid-1", status_code=404)
@@ -1549,27 +1427,19 @@ class TestSessionProcessor:
         mock_future: MagicMock,
         mock_get_timestamp: MagicMock,
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTING
+        mock_session_data.state = types.SessionState.CONNECTING
         event = UserRejectSession(future=mock_future, session_id="sid-1", status_code=404)
 
         effects = server_processor.handle_reject_session(event=event, state=mock_state)
 
-        assert mock_session_data.state == SessionState.CLOSED
+        assert mock_session_data.state == types.SessionState.CLOSED
         assert mock_session_data.closed_at == 123456.0
         assert effects == [
-            SendH3Headers(
-                stream_id=mock_session_data.control_stream_id,
-                status=404,
-                end_stream=True,
-            ),
+            SendH3Headers(stream_id=mock_session_data.control_stream_id, status=404, end_stream=True),
             EmitSessionEvent(
                 session_id="sid-1",
-                event_type=EventType.SESSION_CLOSED,
-                data={
-                    "session_id": "sid-1",
-                    "code": 404,
-                    "reason": "Rejected by application",
-                },
+                event_type=types.EventType.SESSION_CLOSED,
+                data={"session_id": "sid-1", "code": 404, "reason": "Rejected by application"},
             ),
             CompleteUserFuture(future=mock_future),
         ]
@@ -1581,7 +1451,7 @@ class TestSessionProcessor:
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTED
+        mock_session_data.state = types.SessionState.CONNECTED
         event = UserRejectSession(future=mock_future, session_id="sid-1", status_code=404)
 
         effects = server_processor.handle_reject_session(event=event, state=mock_state)
@@ -1591,15 +1461,32 @@ class TestSessionProcessor:
         assert isinstance(fail_effect, FailUserFuture)
         assert isinstance(fail_effect.exception, SessionError)
 
+    def test_handle_send_datagram_datagram_boundary(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+    ) -> None:
+        mock_state.max_datagram_size = 10
+        event = UserSendDatagram(future=mock_future, session_id="sid-1", data=b"a" * 10)
+
+        effects = client_processor.handle_send_datagram(event=event, state=mock_state)
+
+        assert mock_session_data.datagrams_sent == 1
+        assert effects != []
+        assert isinstance(effects[0], SendH3Datagram)
+
     def test_handle_send_datagram_datagram_too_large(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
-        mock_ensure_bytes: MagicMock,
     ) -> None:
-        mock_state.max_datagram_size = 10
+        mock_state.max_datagram_size = int(10)
+        assert isinstance(mock_state.max_datagram_size, int)
+
         event = UserSendDatagram(future=mock_future, session_id="sid-1", data=b"a" * 11)
 
         effects = client_processor.handle_send_datagram(event=event, state=mock_state)
@@ -1610,11 +1497,26 @@ class TestSessionProcessor:
         assert isinstance(fail_effect.exception, ValueError)
         assert "exceeds maximum 10" in fail_effect.exception.args[0]
 
-    def test_handle_send_datagram_not_found(
+    def test_handle_send_datagram_list_success(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
+        mock_session_data: SessionStateData,
         mock_future: MagicMock,
+    ) -> None:
+        event = UserSendDatagram(future=mock_future, session_id="sid-1", data=[b"hello", b" world"])
+
+        effects = client_processor.handle_send_datagram(event=event, state=mock_state)
+
+        assert mock_session_data.datagrams_sent == 1
+        assert mock_session_data.datagram_bytes_sent == 11
+        assert effects == [
+            SendH3Datagram(stream_id=mock_session_data.control_stream_id, data=[b"hello", b" world"]),
+            CompleteUserFuture(future=mock_future),
+        ]
+
+    def test_handle_send_datagram_not_found(
+        self, client_processor: SessionProcessor, mock_state: MagicMock, mock_future: MagicMock
     ) -> None:
         mock_state.sessions = {}
         event = UserSendDatagram(future=mock_future, session_id="sid-1", data=b"hello")
@@ -1632,7 +1534,6 @@ class TestSessionProcessor:
         mock_state: MagicMock,
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
-        mock_ensure_bytes: MagicMock,
     ) -> None:
         event = UserSendDatagram(future=mock_future, session_id="sid-1", data=b"hello")
 
@@ -1652,7 +1553,7 @@ class TestSessionProcessor:
         mock_session_data: SessionStateData,
         mock_future: MagicMock,
     ) -> None:
-        mock_session_data.state = SessionState.CONNECTING
+        mock_session_data.state = types.SessionState.CONNECTING
         event = UserSendDatagram(future=mock_future, session_id="sid-1", data=b"hello")
 
         effects = client_processor.handle_send_datagram(event=event, state=mock_state)
@@ -1679,11 +1580,12 @@ class TestSessionProcessor:
         fut_write.done.return_value = False
 
         mock_session_data.pending_bidi_stream_futures = deque([fut_pending_bidi])
+        mock_session_data.active_streams = {4}
 
         stream_1 = mocker.create_autospec(StreamStateDataInternal, instance=True)
         stream_1.stream_id = 4
         stream_1.session_id = "sid-1"
-        stream_1.state = StreamState.OPEN
+        stream_1.state = types.StreamState.OPEN
         stream_1.pending_read_requests = deque([fut_read])
         stream_1.write_buffer = deque([(b"data", fut_write, False)])
 
@@ -1697,17 +1599,10 @@ class TestSessionProcessor:
 
         assert ResetQuicStream(stream_id=4, error_code=ErrorCodes.WT_SESSION_GONE) in effects
         assert StopQuicStream(stream_id=4, error_code=ErrorCodes.WT_SESSION_GONE) in effects
-        assert (
-            EmitStreamEvent(
-                stream_id=4,
-                event_type=EventType.STREAM_CLOSED,
-                data={"stream_id": 4},
-            )
-            in effects
-        )
-        assert stream_1.state == StreamState.CLOSED
+        assert EmitStreamEvent(stream_id=4, event_type=types.EventType.STREAM_CLOSED, data={"stream_id": 4}) in effects
+        assert stream_1.state == types.StreamState.CLOSED
 
-    def test_reset_all_session_streams_edge_cases(
+    def test_reset_all_session_streams_complex_states(
         self,
         client_processor: SessionProcessor,
         mock_state: MagicMock,
@@ -1717,25 +1612,22 @@ class TestSessionProcessor:
     ) -> None:
         done_fut = mocker.create_autospec(asyncio.Future, instance=True)
         done_fut.done.return_value = True
-        done_read_fut = mocker.create_autospec(asyncio.Future, instance=True)
-        done_read_fut.done.return_value = True
-        done_write_fut = mocker.create_autospec(asyncio.Future, instance=True)
-        done_write_fut.done.return_value = True
 
         mock_session_data.pending_bidi_stream_futures = deque([done_fut])
         mock_session_data.pending_uni_stream_futures = deque([done_fut])
+        mock_session_data.active_streams = {4, 8}
 
         stream_1 = mocker.create_autospec(StreamStateDataInternal, instance=True)
         stream_1.stream_id = 4
         stream_1.session_id = "sid-1"
-        stream_1.state = StreamState.RESET_SENT
-        stream_1.pending_read_requests = deque([done_read_fut])
-        stream_1.write_buffer = deque([(b"data", done_write_fut, False)])
+        stream_1.state = types.StreamState.RESET_SENT
+        stream_1.pending_read_requests = deque()
+        stream_1.write_buffer = deque()
 
         stream_2 = mocker.create_autospec(StreamStateDataInternal, instance=True)
         stream_2.stream_id = 8
         stream_2.session_id = "sid-1"
-        stream_2.state = StreamState.RESET_RECEIVED
+        stream_2.state = types.StreamState.RESET_RECEIVED
         stream_2.pending_read_requests = deque()
         stream_2.write_buffer = deque()
 
@@ -1744,11 +1636,78 @@ class TestSessionProcessor:
         event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1, reason="Test")
         effects = client_processor.handle_close_session(event=event, state=mock_state)
 
-        assert not any(isinstance(e, FailUserFuture) and e.future is not mock_future for e in effects)
         assert not any(isinstance(e, ResetQuicStream) and e.stream_id == 4 for e in effects)
         assert StopQuicStream(stream_id=4, error_code=ErrorCodes.WT_SESSION_GONE) in effects
+
         assert ResetQuicStream(stream_id=8, error_code=ErrorCodes.WT_SESSION_GONE) in effects
         assert not any(isinstance(e, StopQuicStream) and e.stream_id == 8 for e in effects)
+
+    def test_reset_all_session_streams_futures_done(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+        mocker: MockerFixture,
+    ) -> None:
+        mock_session_data.active_streams.add(10)
+
+        stream = mocker.create_autospec(StreamStateDataInternal, instance=True)
+        stream.stream_id = 10
+        stream.state = types.StreamState.OPEN
+
+        done_fut = mocker.create_autospec(asyncio.Future, instance=True)
+        done_fut.done.return_value = True
+
+        stream.pending_read_requests = deque([done_fut])
+        stream.write_buffer = deque([(b"data", done_fut, False)])
+
+        mock_state.streams = {10: stream}
+
+        event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1, reason="Test")
+        effects = client_processor.handle_close_session(event=event, state=mock_state)
+
+        assert not any(isinstance(e, FailUserFuture) and e.future == done_fut for e in effects)
+
+    def test_reset_all_session_streams_missing_or_closed(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+        mocker: MockerFixture,
+    ) -> None:
+        mock_session_data.active_streams = {1, 2}
+
+        s2 = mocker.create_autospec(StreamStateDataInternal, instance=True)
+        s2.state = types.StreamState.CLOSED
+        mock_state.streams = {2: s2}
+
+        event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1, reason="Test")
+        effects = client_processor.handle_close_session(event=event, state=mock_state)
+
+        assert not any(isinstance(e, ResetQuicStream) for e in effects)
+        assert mock_session_data.active_streams == set()
+
+    def test_reset_all_session_streams_pending_uni(
+        self,
+        client_processor: SessionProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+        mocker: MockerFixture,
+    ) -> None:
+        fut_pending_uni = mocker.create_autospec(asyncio.Future, instance=True)
+        fut_pending_uni.done.return_value = False
+
+        mock_session_data.pending_uni_stream_futures = deque([fut_pending_uni])
+        mock_session_data.active_streams = set()
+
+        event = UserCloseSession(future=mock_future, session_id="sid-1", error_code=1, reason="Test")
+        effects = client_processor.handle_close_session(event=event, state=mock_state)
+
+        failed_futures = {e.future for e in effects if isinstance(e, FailUserFuture) and e.future is not mock_future}
+        assert fut_pending_uni in failed_futures
 
     def test_reset_all_session_streams_with_pending_io(
         self,
@@ -1763,10 +1722,12 @@ class TestSessionProcessor:
         pending_write_fut = mocker.create_autospec(asyncio.Future, instance=True)
         pending_write_fut.done.return_value = False
 
+        mock_session_data.active_streams.add(10)
+
         stream = mocker.create_autospec(StreamStateDataInternal, instance=True)
         stream.stream_id = 10
         stream.session_id = "sid-1"
-        stream.state = StreamState.OPEN
+        stream.state = types.StreamState.OPEN
         stream.pending_read_requests = deque([pending_read_fut])
         stream.write_buffer = deque([(b"data", pending_write_fut, False)])
 

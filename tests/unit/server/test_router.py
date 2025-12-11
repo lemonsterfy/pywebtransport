@@ -12,6 +12,7 @@ from pywebtransport.server import RequestRouter
 
 
 class TestRequestRouter:
+
     @pytest.fixture
     def mock_handler(self, mocker: MockerFixture) -> Any:
         return mocker.AsyncMock()
@@ -50,6 +51,20 @@ class TestRequestRouter:
 
         assert stats["pattern_routes"] == 1
 
+    def test_add_route_duplicate_raises_error(self, router: RequestRouter, mock_handler: Any) -> None:
+        router.add_route(path="/home", handler=mock_handler)
+
+        with pytest.raises(ValueError, match="Route for path '/home' already exists"):
+            router.add_route(path="/home", handler=mock_handler)
+
+    def test_add_route_override(self, router: RequestRouter, mock_handler: Any, mocker: MockerFixture) -> None:
+        router.add_route(path="/home", handler=mock_handler)
+        new_handler = mocker.AsyncMock()
+
+        router.add_route(path="/home", handler=new_handler, override=True)
+
+        assert router.get_route_handler(path="/home") is new_handler
+
     def test_init(self, router: RequestRouter) -> None:
         stats = router.get_route_stats()
 
@@ -58,6 +73,16 @@ class TestRequestRouter:
         assert stats["pattern_routes"] == 0
         assert stats["has_default_handler"] is False
 
+    def test_remove_pattern_route(self, router: RequestRouter, mock_handler: Any) -> None:
+        pattern = r"/users/(\d+)"
+        router.add_pattern_route(pattern=pattern, handler=mock_handler)
+
+        router.remove_pattern_route(pattern=pattern)
+
+        assert router.get_route_stats()["pattern_routes"] == 0
+
+        router.remove_pattern_route(pattern=r"/not/found")
+
     def test_remove_route(self, router: RequestRouter, mock_handler: Any) -> None:
         router.add_route(path="/temp", handler=mock_handler)
         assert router.get_route_handler(path="/temp") is not None
@@ -65,15 +90,16 @@ class TestRequestRouter:
         router.remove_route(path="/temp")
 
         assert router.get_route_handler(path="/temp") is None
+
         router.remove_route(path="/non-existent")
 
     def test_route_request_no_match(self, router: RequestRouter, mock_session: Any, mocker: MockerFixture) -> None:
         router.add_route(path="/home", handler=mocker.AsyncMock())
         mock_session.path = "/about"
 
-        found_handler = router.route_request(session=mock_session)
+        result = router.route_request(session=mock_session)
 
-        assert found_handler is None
+        assert result is None
 
     def test_route_request_precedence(self, router: RequestRouter, mock_session: Any, mocker: MockerFixture) -> None:
         exact_handler = mocker.AsyncMock()
@@ -82,9 +108,12 @@ class TestRequestRouter:
         router.add_pattern_route(pattern=r"/users/(\w+)", handler=pattern_handler)
         mock_session.path = "/users/profile"
 
-        found_handler = router.route_request(session=mock_session)
+        result = router.route_request(session=mock_session)
 
-        assert found_handler is exact_handler
+        assert result is not None
+        handler, params = result
+        assert handler is exact_handler
+        assert params == {}
 
     @pytest.mark.parametrize(
         "path, should_find",
@@ -110,12 +139,9 @@ class TestRequestRouter:
         router.set_default_handler(handler=handlers["default_handler"])
         mock_session.path = path
 
-        found_handler = router.route_request(session=mock_session)
+        result = router.route_request(session=mock_session)
 
-        assert found_handler is handlers[should_find]
-
-    def test_set_default_handler(self, router: RequestRouter, mock_handler: Any) -> None:
-        router.set_default_handler(handler=mock_handler)
-
-        assert router._default_handler is mock_handler
-        assert router.get_route_stats()["has_default_handler"] is True
+        assert result is not None
+        handler, params = result
+        assert handler is handlers[should_find]
+        assert params == {}

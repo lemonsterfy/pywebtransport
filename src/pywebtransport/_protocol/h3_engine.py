@@ -9,7 +9,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, TypeAlias
 
 import pylsqpack
-from aioquic._buffer import Buffer, BufferReadError
+from aioquic._buffer import Buffer as QuicBuffer
+from aioquic._buffer import BufferReadError
 from aioquic.buffer import UINT_VAR_MAX_SIZE, encode_uint_var
 
 from pywebtransport import constants
@@ -33,11 +34,11 @@ from pywebtransport._protocol.utils import (
     is_bidirectional_stream,
     is_request_response_stream,
     is_unidirectional_stream,
-    validate_h3_session_id,
+    validate_control_stream_id,
 )
 from pywebtransport.constants import ErrorCodes
 from pywebtransport.exceptions import ProtocolError
-from pywebtransport.types import Headers, StreamId
+from pywebtransport.types import Buffer, Headers, StreamId
 from pywebtransport.utils import get_logger
 
 if TYPE_CHECKING:
@@ -96,31 +97,37 @@ class WebTransportH3Engine:
                 message="Capsules can only be encoded for client-initiated bidirectional streams.",
                 error_code=ErrorCodes.H3_STREAM_CREATION_ERROR,
             )
-        buf = Buffer(capacity=len(capsule_data) + 2 * UINT_VAR_MAX_SIZE)
+        buf = QuicBuffer(capacity=len(capsule_data) + 2 * UINT_VAR_MAX_SIZE)
         buf.push_uint_var(capsule_type)
         buf.push_uint_var(len(capsule_data))
         buf.push_bytes(capsule_data)
         return buf.data
 
-    def encode_datagram(self, *, stream_id: StreamId, data: bytes) -> bytes:
+    def encode_datagram(self, *, stream_id: StreamId, data: Buffer | list[Buffer]) -> list[Buffer]:
         """Encode a datagram payload."""
         if not is_request_response_stream(stream_id=stream_id):
             raise ProtocolError(
                 message="Datagrams can only be encoded for client-initiated bidirectional streams",
                 error_code=ErrorCodes.H3_STREAM_CREATION_ERROR,
             )
-        return encode_uint_var(stream_id // 4) + data
+
+        header = encode_uint_var(stream_id // 4)
+
+        if isinstance(data, list):
+            return [header, *data]
+        return [header, data]
 
     def encode_goaway_frame(self, *, last_stream_id: int = 0) -> bytes:
         """Encode an H3 GOAWAY frame."""
-        buf = Buffer(capacity=UINT_VAR_MAX_SIZE)
+        buf = QuicBuffer(capacity=UINT_VAR_MAX_SIZE)
         buf.push_uint_var(last_stream_id)
         return _encode_frame(frame_type=constants.H3_FRAME_TYPE_GOAWAY, frame_data=buf.data)
 
     def encode_headers(self, *, stream_id: StreamId, headers: Headers, end_stream: bool = False) -> list[Effect]:
         """Encode headers and return effects to send them."""
         effects: list[Effect] = []
-        raw_headers: _RawHeaders = [(k.encode("utf-8"), v.encode("utf-8")) for k, v in headers.items()]
+        raw_items = headers.items() if isinstance(headers, dict) else headers
+        raw_headers: _RawHeaders = [(k.encode("utf-8"), v.encode("utf-8")) for k, v in raw_items]
 
         encoder_instructions, frame_payload = self._encoder.encode(stream_id, raw_headers)
         if self._local_encoder_stream_id is not None and encoder_instructions:
@@ -246,7 +253,15 @@ class WebTransportH3Engine:
                 SendQuicData(stream_id=self._local_decoder_stream_id, data=decoder_instructions, end_stream=False)
             )
 
-        app_headers: Headers = {k.decode("utf-8", "ignore"): v.decode("utf-8", "ignore") for k, v in raw_headers}
+        app_headers: list[tuple[str, str]] = []
+        try:
+            for k, v in raw_headers:
+                app_headers.append((k.decode("utf-8", "strict"), v.decode("utf-8", "strict")))
+        except UnicodeDecodeError as exc:
+            raise ProtocolError(
+                message=f"Header decoding error: {exc}", error_code=ErrorCodes.H3_MESSAGE_ERROR
+            ) from exc
+
         return raw_headers, app_headers, effects
 
     @functools.cache
@@ -329,10 +344,7 @@ class WebTransportH3Engine:
         match frame_type:
             case constants.H3_FRAME_TYPE_DATA:
                 if not stream_state_info:
-                    raise ProtocolError(
-                        message=f"Received DATA on bidi stream {stream_id} before it was associated with a session",
-                        error_code=ErrorCodes.H3_FRAME_UNEXPECTED,
-                    )
+                    return [], []
 
                 session_id = state.stream_to_session_map.get(stream_id)
                 session_data = state.sessions.get(session_id) if session_id is not None else None
@@ -417,7 +429,7 @@ class WebTransportH3Engine:
         return h3_events, effects
 
     def _parse_stream_data(
-        self, *, stream_id: int, data_buffer: deque[bytes], stream_ended: bool, state: ProtocolState
+        self, *, stream_id: int, data_buffer: deque[Buffer], stream_ended: bool, state: ProtocolState
     ) -> tuple[list[H3Event], list[Effect]]:
         """Parse buffered data for a stream, returning events and effects."""
         h3_events: list[H3Event] = []
@@ -437,9 +449,9 @@ class WebTransportH3Engine:
             partial_info.blocked = False
             partial_info.blocked_frame_size = None
 
-        temp_data = b"".join(data_buffer)
+        temp_data = b"".join(bytes(chunk) for chunk in data_buffer)
         consumed = 0
-        buf = Buffer(data=temp_data)
+        buf = QuicBuffer(data=temp_data)
 
         while consumed < len(temp_data) or (stream_ended and consumed == len(temp_data)):
             original_consumed = consumed
@@ -466,7 +478,7 @@ class WebTransportH3Engine:
                     frame_type_check = buf.pull_uint_var()
                     if frame_type_check == constants.H3_FRAME_TYPE_WEBTRANSPORT_STREAM:
                         control_stream_id = buf.pull_uint_var()
-                        validate_h3_session_id(session_id=control_stream_id)
+                        validate_control_stream_id(stream_id=control_stream_id)
                         partial_info.stream_type = constants.H3_STREAM_TYPE_WEBTRANSPORT
                         partial_info.control_stream_id = control_stream_id
                         effects.append(
@@ -614,9 +626,9 @@ class WebTransportH3Engine:
 
         return h3_events, effects
 
-    def _receive_datagram(self, *, data: bytes) -> list[H3Event]:
+    def _receive_datagram(self, *, data: Buffer) -> list[H3Event]:
         """Parse an incoming datagram."""
-        buf = Buffer(data=data)
+        buf = QuicBuffer(data=bytes(data))
         try:
             quarter_stream_id = buf.pull_uint_var()
         except BufferReadError:
@@ -633,7 +645,7 @@ class WebTransportH3Engine:
         return [DatagramReceived(data=data[buf.tell() :], stream_id=stream_id)]
 
     def _receive_request_data(
-        self, *, stream_id: int, data: bytes, stream_ended: bool, state: ProtocolState
+        self, *, stream_id: int, data: Buffer, stream_ended: bool, state: ProtocolState
     ) -> tuple[list[H3Event], list[Effect]]:
         """Handle incoming data on a bidirectional request stream."""
         partial_info = self._get_or_create_partial_frame_info(stream_id=stream_id)
@@ -661,7 +673,7 @@ class WebTransportH3Engine:
         return h3_events, effects
 
     def _receive_stream_data_uni(
-        self, *, stream_id: int, data: bytes, stream_ended: bool, state: ProtocolState
+        self, *, stream_id: int, data: Buffer, stream_ended: bool, state: ProtocolState
     ) -> tuple[list[H3Event], list[Effect]]:
         """Handle incoming data on a unidirectional stream."""
         partial_info = self._get_or_create_partial_frame_info(stream_id=stream_id)
@@ -675,9 +687,9 @@ class WebTransportH3Engine:
 
         h3_events: list[H3Event] = []
         effects: list[Effect] = []
-        temp_data = b"".join(partial_info.buffer)
+        temp_data = b"".join(bytes(chunk) for chunk in partial_info.buffer)
         consumed = 0
-        buf = Buffer(data=temp_data)
+        buf = QuicBuffer(data=temp_data)
 
         if partial_info.stream_type is None:
             try:
@@ -731,7 +743,7 @@ class WebTransportH3Engine:
                 if partial_info.control_stream_id is None:
                     try:
                         control_stream_id = buf.pull_uint_var()
-                        validate_h3_session_id(session_id=control_stream_id)
+                        validate_control_stream_id(stream_id=control_stream_id)
                         partial_info.control_stream_id = control_stream_id
                         consumed = buf.tell()
                     except BufferReadError:
@@ -762,21 +774,40 @@ class WebTransportH3Engine:
                     raise ProtocolError(
                         message="Closing control stream is not allowed", error_code=ErrorCodes.H3_CLOSED_CRITICAL_STREAM
                     )
-                buf = Buffer(data=temp_data[consumed:])
-                initial_consumed = consumed
+                buf = QuicBuffer(data=temp_data[consumed:])
+                start_pos = buf.tell()
+
                 while not buf.eof():
-                    try:
-                        frame_type = buf.pull_uint_var()
-                        frame_length = buf.pull_uint_var()
-                        frame_data = buf.pull_bytes(frame_length)
-                    except BufferReadError:
+                    if partial_info.frame_type is None:
+                        try:
+                            partial_info.frame_type = buf.pull_uint_var()
+                            partial_info.frame_size = buf.pull_uint_var()
+                        except BufferReadError:
+                            buf.seek(start_pos)
+                            break
+
+                    needed = partial_info.frame_size
+                    if needed is None:
                         break
-                    consumed = initial_consumed + buf.tell()
+
+                    if buf.capacity - buf.tell() < needed:
+                        buf.seek(start_pos)
+                        break
+
+                    frame_data = buf.pull_bytes(needed)
+                    frame_type = partial_info.frame_type
+
                     new_h3_events, new_effects = self._handle_control_frame(
                         frame_type=frame_type, frame_data=frame_data, state=state
                     )
                     h3_events.extend(new_h3_events)
                     effects.extend(new_effects)
+
+                    partial_info.frame_type = None
+                    partial_info.frame_size = None
+                    start_pos = buf.tell()
+
+                consumed += start_pos
                 partial_info.buffer.clear()
                 if consumed < len(temp_data):
                     partial_info.buffer.append(temp_data[consumed:])
@@ -857,12 +888,12 @@ class _HeadersState(Enum):
     AFTER_HEADERS = 1
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class _PartialFrameInfo:
     """Stores state for partially received H3 frames or stream data."""
 
     stream_id: int
-    buffer: deque[bytes] = field(default_factory=deque)
+    buffer: deque[Buffer] = field(default_factory=deque)
     ended: bool = False
     blocked: bool = False
     blocked_frame_size: int | None = None
@@ -876,7 +907,7 @@ class _PartialFrameInfo:
 def _encode_frame(*, frame_type: int, frame_data: bytes) -> bytes:
     """Encode an HTTP/3 frame."""
     frame_length = len(frame_data)
-    buf = Buffer(capacity=frame_length + 2 * UINT_VAR_MAX_SIZE)
+    buf = QuicBuffer(capacity=frame_length + 2 * UINT_VAR_MAX_SIZE)
 
     buf.push_uint_var(frame_type)
     buf.push_uint_var(frame_length)
@@ -887,7 +918,7 @@ def _encode_frame(*, frame_type: int, frame_data: bytes) -> bytes:
 
 def _encode_settings(*, settings: dict[int, int]) -> bytes:
     """Encode an HTTP/3 SETTINGS frame."""
-    buf = Buffer(capacity=1024)
+    buf = QuicBuffer(capacity=1024)
     for setting, value in settings.items():
         buf.push_uint_var(setting)
         buf.push_uint_var(value)
@@ -896,7 +927,7 @@ def _encode_settings(*, settings: dict[int, int]) -> bytes:
 
 def _parse_settings(*, data: bytes) -> dict[int, int]:
     """Parse an HTTP/3 SETTINGS frame."""
-    buf = Buffer(data=data)
+    buf = QuicBuffer(data=data)
     settings: dict[int, int] = {}
     try:
         while not buf.eof():
@@ -925,34 +956,17 @@ def _validate_header_name(*, key: bytes) -> None:
         )
 
     for i, c_byte in enumerate(key):
-        c = chr(c_byte)
-        is_tchar = (
-            c == "!"
-            or c == "#"
-            or c == "$"
-            or c == "%"
-            or c == "&"
-            or c == "'"
-            or c == "*"
-            or c == "+"
-            or c == "-"
-            or c == "."
-            or c == "^"
-            or c == "_"
-            or c == "`"
-            or c == "|"
-            or c == "~"
-            or c.isdigit()
-            or c.isalpha()
-            or c_byte == COLON
-        )
+        if c_byte == COLON:
+            if i == 0:
+                continue
+            raise ProtocolError(
+                message=f"Header name {key!r} contains a non-initial colon", error_code=ErrorCodes.H3_MESSAGE_ERROR
+            )
+
+        is_tchar = (0x61 <= c_byte <= 0x7A) or (0x30 <= c_byte <= 0x39) or c_byte in b"!#$%&'*+-.^_`|~"
         if not is_tchar:
             raise ProtocolError(
                 message=f"Header name {key!r} contains invalid characters", error_code=ErrorCodes.H3_MESSAGE_ERROR
-            )
-        if c_byte == COLON and i != 0:
-            raise ProtocolError(
-                message=f"Header name {key!r} contains a non-initial colon", error_code=ErrorCodes.H3_MESSAGE_ERROR
             )
 
 
@@ -1028,7 +1042,7 @@ def _validate_request_headers(*, headers: _RawHeaders) -> None:
     _validate_headers(
         headers=headers,
         allowed_pseudo_headers=frozenset((b":method", b":scheme", b":authority", b":path", b":protocol")),
-        required_pseudo_headers=frozenset((b":method", b":scheme", b":authority", b":path", b":protocol")),
+        required_pseudo_headers=frozenset((b":method", b":scheme", b":authority", b":path")),
     )
 
 

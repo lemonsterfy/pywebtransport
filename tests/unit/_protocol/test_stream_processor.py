@@ -7,11 +7,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, ServerConfig, StreamError, constants
+from pywebtransport import ClientConfig, ErrorCodes, ServerConfig, SessionError, StreamError, constants
 from pywebtransport._protocol.events import (
     CompleteUserFuture,
     EmitStreamEvent,
     FailUserFuture,
+    InternalBindQuicStream,
+    InternalFailQuicStream,
+    InternalReturnStreamData,
     ResetQuicStream,
     SendH3Capsule,
     SendQuicData,
@@ -26,135 +29,134 @@ from pywebtransport._protocol.events import (
 )
 from pywebtransport._protocol.state import ProtocolState, SessionStateData, StreamStateData
 from pywebtransport._protocol.stream_processor import StreamProcessor
-from pywebtransport.constants import ErrorCodes
 from pywebtransport.types import EventType, SessionState, StreamDirection, StreamState
 
 
-@pytest.fixture
-def client_processor(mock_client_config: MagicMock) -> StreamProcessor:
-    return StreamProcessor(is_client=True, config=mock_client_config)
-
-
-@pytest.fixture
-def mock_buffer_cls(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch("pywebtransport._protocol.stream_processor.Buffer", autospec=True)
-
-
-@pytest.fixture
-def mock_client_config(mocker: MockerFixture) -> MagicMock:
-    config = mocker.create_autospec(ClientConfig, instance=True)
-    config.max_stream_write_buffer = 1000
-    config.max_total_pending_events = 100
-    config.max_pending_events_per_session = 10
-    config.flow_control_window_auto_scale = True
-    config.flow_control_window_size = 100
-    config.stream_flow_control_increment_uni = 5
-    config.stream_flow_control_increment_bidi = 5
-    return config
-
-
-@pytest.fixture
-def mock_ensure_bytes(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch(
-        "pywebtransport._protocol.stream_processor.ensure_bytes",
-        side_effect=lambda data: (data if isinstance(data, bytes) else str(data).encode("utf-8")),
-    )
-
-
-@pytest.fixture
-def mock_future(mocker: MockerFixture) -> MagicMock:
-    fut = mocker.create_autospec(asyncio.Future, instance=True)
-    fut.done.return_value = False
-    return fut
-
-
-@pytest.fixture
-def mock_get_timestamp(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch("pywebtransport._protocol.stream_processor.get_timestamp", return_value=123456.0)
-
-
-@pytest.fixture
-def mock_http_to_wt_code(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch("pywebtransport._protocol.stream_processor.http_code_to_webtransport_code", return_value=1234)
-
-
-@pytest.fixture
-def mock_server_config(mocker: MockerFixture) -> MagicMock:
-    config = mocker.create_autospec(ServerConfig, instance=True)
-    config.max_stream_write_buffer = 1000
-    config.max_total_pending_events = 100
-    config.max_pending_events_per_session = 10
-    config.flow_control_window_auto_scale = True
-    config.flow_control_window_size = 100
-    config.stream_flow_control_increment_uni = 5
-    config.stream_flow_control_increment_bidi = 5
-    return config
-
-
-@pytest.fixture
-def mock_session_data(mocker: MockerFixture, mock_state: MagicMock) -> SessionStateData:
-    session = mocker.create_autospec(SessionStateData, instance=True)
-    session.session_id = "sid-1"
-    session.control_stream_id = 0
-    session.state = SessionState.CONNECTED
-    session.peer_max_data = 1000
-    session.local_data_sent = 0
-    session.local_max_data = 100
-    session.peer_data_sent = 51
-    session.peer_streams_uni_opened = 0
-    session.local_max_streams_uni = 10
-    session.peer_streams_bidi_opened = 8
-    session.local_max_streams_bidi = 10
-    mock_state.sessions = {"sid-1": session}
-    return session
-
-
-@pytest.fixture
-def mock_state(mocker: MockerFixture) -> MagicMock:
-    state = mocker.create_autospec(ProtocolState, instance=True)
-    state.sessions = {}
-    state.streams = {}
-    state.stream_to_session_map = {}
-    state.early_event_buffer = {}
-    state.early_event_count = 0
-    return state
-
-
-@pytest.fixture
-def mock_stream_data(
-    mocker: MockerFixture, mock_state: MagicMock, mock_session_data: SessionStateData
-) -> StreamStateData:
-    stream = mocker.create_autospec(StreamStateData, instance=True)
-    stream.stream_id = 4
-    stream.session_id = "sid-1"
-    stream.state = StreamState.OPEN
-    stream.bytes_sent = 0
-    stream.bytes_received = 0
-    stream.read_buffer = deque()
-    stream.read_buffer_size = 0
-    stream.pending_read_requests = deque()
-    stream.write_buffer = deque()
-    mock_state.streams = {4: stream}
-    mock_state.stream_to_session_map = {4: "sid-1"}
-    return stream
-
-
-@pytest.fixture
-def mock_wt_to_http_code(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch("pywebtransport._protocol.stream_processor.webtransport_code_to_http_code", return_value=0x52E0)
-
-
-@pytest.fixture
-def server_processor(mock_server_config: MagicMock) -> StreamProcessor:
-    return StreamProcessor(is_client=False, config=mock_server_config)
-
-
 class TestStreamProcessor:
+
+    @pytest.fixture
+    def client_processor(self, mock_client_config: MagicMock) -> StreamProcessor:
+        return StreamProcessor(is_client=True, config=mock_client_config)
+
+    @pytest.fixture
+    def mock_buffer_cls(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("pywebtransport._protocol.stream_processor.QuicBuffer", autospec=True)
+
+    @pytest.fixture
+    def mock_client_config(self, mocker: MockerFixture) -> MagicMock:
+        config = mocker.create_autospec(ClientConfig, instance=True)
+        config.max_stream_write_buffer = 1000
+        config.max_total_pending_events = 100
+        config.max_pending_events_per_session = 10
+        config.flow_control_window_auto_scale = True
+        config.flow_control_window_size = 100
+        config.stream_flow_control_increment_uni = 5
+        config.stream_flow_control_increment_bidi = 5
+        return config
+
+    @pytest.fixture
+    def mock_ensure_buffer(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch(
+            "pywebtransport._protocol.stream_processor.ensure_buffer",
+            side_effect=lambda data: (
+                data if isinstance(data, (bytes, bytearray, memoryview)) else memoryview(b"mock")
+            ),
+        )
+
+    @pytest.fixture
+    def mock_future(self, mocker: MockerFixture) -> MagicMock:
+        fut = mocker.create_autospec(asyncio.Future, instance=True)
+        fut.done.return_value = False
+        return fut
+
+    @pytest.fixture
+    def mock_get_timestamp(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch("pywebtransport._protocol.stream_processor.get_timestamp", return_value=123456.0)
+
+    @pytest.fixture
+    def mock_http_to_wt_code(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch(
+            "pywebtransport._protocol.stream_processor.http_code_to_webtransport_code", return_value=1234
+        )
+
+    @pytest.fixture
+    def mock_server_config(self, mocker: MockerFixture) -> MagicMock:
+        config = mocker.create_autospec(ServerConfig, instance=True)
+        config.max_stream_write_buffer = 1000
+        config.max_total_pending_events = 100
+        config.max_pending_events_per_session = 10
+        config.flow_control_window_auto_scale = True
+        config.flow_control_window_size = 100
+        config.stream_flow_control_increment_uni = 5
+        config.stream_flow_control_increment_bidi = 5
+        return config
+
+    @pytest.fixture
+    def mock_session_data(self, mocker: MockerFixture, mock_state: MagicMock) -> SessionStateData:
+        session = mocker.create_autospec(SessionStateData, instance=True)
+        session.session_id = "sid-1"
+        session.control_stream_id = 0
+        session.state = SessionState.CONNECTED
+        session.peer_max_data = 1000
+        session.local_data_sent = 0
+        session.local_max_data = 100
+        session.peer_data_sent = 51
+        session.peer_streams_uni_opened = 0
+        session.local_max_streams_uni = 10
+        session.peer_streams_bidi_opened = 8
+        session.local_max_streams_bidi = 10
+        session.active_streams = set()
+        session.blocked_streams = set()
+        mock_state.sessions = {"sid-1": session}
+        return session
+
+    @pytest.fixture
+    def mock_state(self, mocker: MockerFixture) -> MagicMock:
+        state = mocker.create_autospec(ProtocolState, instance=True)
+        state.sessions = {}
+        state.streams = {}
+        state.stream_to_session_map = {}
+        state.early_event_buffer = {}
+        state.early_event_count = 0
+        return state
+
+    @pytest.fixture
+    def mock_stream_data(
+        self, mocker: MockerFixture, mock_state: MagicMock, mock_session_data: SessionStateData
+    ) -> StreamStateData:
+        stream = mocker.create_autospec(StreamStateData, instance=True)
+        stream.stream_id = 4
+        stream.session_id = "sid-1"
+        stream.state = StreamState.OPEN
+        stream.bytes_sent = 0
+        stream.bytes_received = 0
+        stream.read_buffer = deque()
+        stream.read_buffer_size = 0
+        stream.pending_read_requests = deque()
+        stream.write_buffer = deque()
+        stream.write_buffer_size = 0
+        mock_state.streams = {4: stream}
+        mock_state.stream_to_session_map = {4: "sid-1"}
+        mock_session_data.active_streams.add(4)
+        return stream
+
+    @pytest.fixture
+    def mock_wt_to_http_code(self, mocker: MockerFixture) -> MagicMock:
+        return mocker.patch(
+            "pywebtransport._protocol.stream_processor.webtransport_code_to_http_code", return_value=0x52E0
+        )
+
+    @pytest.fixture
+    def server_processor(self, mock_server_config: MagicMock) -> StreamProcessor:
+        return StreamProcessor(is_client=False, config=mock_server_config)
+
     def test_check_and_send_data_credit_autocredit_disabled(
         self, client_processor: StreamProcessor, mock_session_data: SessionStateData, mock_client_config: MagicMock
     ) -> None:
         mock_client_config.flow_control_window_auto_scale = False
+
         effect = client_processor._check_and_send_data_credit(session_data=mock_session_data)
+
         assert effect is None
 
     def test_check_and_send_data_credit_no_increase(
@@ -164,7 +166,9 @@ class TestStreamProcessor:
         mock_client_config.flow_control_window_size = 100
         mock_session_data.local_max_data = 100
         mock_session_data.peer_data_sent = 49
+
         effect = client_processor._check_and_send_data_credit(session_data=mock_session_data)
+
         assert effect is None
         assert mock_session_data.local_max_data == 100
 
@@ -173,7 +177,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_client_config.flow_control_window_auto_scale = True
         mock_client_config.flow_control_window_size = 0
+
         effect = client_processor._check_and_send_data_credit(session_data=mock_session_data)
+
         assert effect is None
 
     @pytest.mark.parametrize("is_uni", [True, False])
@@ -185,9 +191,11 @@ class TestStreamProcessor:
         is_uni: bool,
     ) -> None:
         mock_client_config.flow_control_window_auto_scale = False
+
         effect = client_processor._check_and_send_stream_credit(
             session_data=mock_session_data, is_unidirectional=is_uni
         )
+
         assert effect is None
 
     def test_check_and_send_stream_credit_uni_increase(
@@ -213,7 +221,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_client_config.flow_control_window_auto_scale = True
         mock_client_config.stream_flow_control_increment_uni = 0
+
         effect = client_processor._check_and_send_stream_credit(session_data=mock_session_data, is_unidirectional=True)
+
         assert effect is None
 
     @pytest.mark.parametrize("is_uni", [True, False])
@@ -229,9 +239,11 @@ class TestStreamProcessor:
             mock_client_config.stream_flow_control_increment_uni = 0
         else:
             mock_client_config.stream_flow_control_increment_bidi = 0
+
         effect = client_processor._check_and_send_stream_credit(
             session_data=mock_session_data, is_unidirectional=is_uni
         )
+
         assert effect is None
 
     def test_handle_get_stream_diagnostics_not_found(
@@ -239,7 +251,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_state.streams = {}
         event = UserGetStreamDiagnostics(future=mock_future, stream_id=4)
+
         effects = client_processor.handle_get_stream_diagnostics(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -274,6 +288,110 @@ class TestStreamProcessor:
             assert result_value["read_buffer"] == b""
             assert result_value["read_buffer_size"] == 13
 
+    def test_handle_internal_bind_quic_stream_session_not_found(
+        self, client_processor: StreamProcessor, mock_state: MagicMock, mock_future: MagicMock
+    ) -> None:
+        event = InternalBindQuicStream(future=mock_future, session_id="unknown", stream_id=1, is_unidirectional=False)
+
+        effects = client_processor.handle_internal_bind_quic_stream(event=event, state=mock_state)
+
+        assert len(effects) == 1
+        assert isinstance(effects[0], FailUserFuture)
+        assert isinstance(effects[0].exception, SessionError)
+
+    def test_handle_internal_bind_quic_stream_success(
+        self,
+        client_processor: StreamProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+        mock_get_timestamp: MagicMock,
+    ) -> None:
+        event = InternalBindQuicStream(future=mock_future, session_id="sid-1", stream_id=5, is_unidirectional=False)
+
+        effects = client_processor.handle_internal_bind_quic_stream(event=event, state=mock_state)
+
+        assert 5 in mock_state.streams
+        assert 5 in mock_session_data.active_streams
+        assert mock_state.streams[5].direction == StreamDirection.BIDIRECTIONAL
+        assert mock_state.streams[5].state == StreamState.OPEN
+        assert len(effects) == 2
+        assert isinstance(effects[0], CompleteUserFuture)
+        assert effects[0].value == 5
+        assert isinstance(effects[1], EmitStreamEvent)
+        assert effects[1].event_type == EventType.STREAM_OPENED
+
+    def test_handle_internal_fail_quic_stream_decrements_bidi(
+        self,
+        client_processor: StreamProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+    ) -> None:
+        mock_session_data.local_streams_bidi_opened = 5
+        event = InternalFailQuicStream(
+            future=mock_future, session_id="sid-1", exception=ValueError("fail"), is_unidirectional=False
+        )
+
+        effects = client_processor.handle_internal_fail_quic_stream(event=event, state=mock_state)
+
+        assert mock_session_data.local_streams_bidi_opened == 4
+        assert len(effects) == 1
+        assert isinstance(effects[0], FailUserFuture)
+        assert effects[0].exception == event.exception
+
+    def test_handle_internal_fail_quic_stream_decrements_uni(
+        self,
+        client_processor: StreamProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+    ) -> None:
+        mock_session_data.local_streams_uni_opened = 5
+        event = InternalFailQuicStream(
+            future=mock_future, session_id="sid-1", exception=ValueError("fail"), is_unidirectional=True
+        )
+
+        effects = client_processor.handle_internal_fail_quic_stream(event=event, state=mock_state)
+
+        assert mock_session_data.local_streams_uni_opened == 4
+        assert len(effects) == 1
+        assert isinstance(effects[0], FailUserFuture)
+
+    def test_handle_internal_fail_quic_stream_session_not_found(
+        self, client_processor: StreamProcessor, mock_state: MagicMock, mock_future: MagicMock
+    ) -> None:
+        mock_state.sessions = {}
+        event = InternalFailQuicStream(
+            future=mock_future, session_id="unknown", exception=ValueError("fail"), is_unidirectional=False
+        )
+
+        effects = client_processor.handle_internal_fail_quic_stream(event=event, state=mock_state)
+
+        assert len(effects) == 1
+
+    def test_handle_internal_fail_quic_stream_zero_counters(
+        self,
+        client_processor: StreamProcessor,
+        mock_state: MagicMock,
+        mock_session_data: SessionStateData,
+        mock_future: MagicMock,
+    ) -> None:
+        mock_session_data.local_streams_bidi_opened = 0
+        mock_session_data.local_streams_uni_opened = 0
+
+        event_bidi = InternalFailQuicStream(
+            future=mock_future, session_id="sid-1", exception=ValueError(), is_unidirectional=False
+        )
+        client_processor.handle_internal_fail_quic_stream(event=event_bidi, state=mock_state)
+        assert mock_session_data.local_streams_bidi_opened == 0
+
+        event_uni = InternalFailQuicStream(
+            future=mock_future, session_id="sid-1", exception=ValueError(), is_unidirectional=True
+        )
+        client_processor.handle_internal_fail_quic_stream(event=event_uni, state=mock_state)
+        assert mock_session_data.local_streams_uni_opened == 0
+
     def test_handle_reset_stream_empty_buffer(
         self,
         client_processor: StreamProcessor,
@@ -305,9 +423,13 @@ class TestStreamProcessor:
         write_future = mocker.create_autospec(asyncio.Future, instance=True)
         write_future.done.return_value = False
         mock_stream_data.write_buffer = deque([(b"data", write_future, False)])
+        mock_stream_data.write_buffer_size = 4
         event = UserResetStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_reset_stream(event=event, state=mock_state)
+
         assert len(mock_stream_data.write_buffer) == 0
+        assert mock_stream_data.write_buffer_size == 0
         fail_effect = next(e for e in effects if isinstance(e, FailUserFuture) and e.future is not mock_future)
         assert fail_effect.future is write_future
         assert isinstance(fail_effect.exception, StreamError)
@@ -318,11 +440,29 @@ class TestStreamProcessor:
     ) -> None:
         mock_state.streams = {}
         event = UserResetStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_reset_stream(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
         assert isinstance(fail_effect.exception, StreamError)
+
+    def test_handle_reset_stream_session_missing(
+        self,
+        client_processor: StreamProcessor,
+        mock_state: MagicMock,
+        mock_stream_data: StreamStateData,
+        mock_future: MagicMock,
+    ) -> None:
+        mock_state.sessions = {}
+        mock_stream_data.state = StreamState.HALF_CLOSED_REMOTE
+
+        event = UserResetStream(future=mock_future, stream_id=4, error_code=0)
+        effects = client_processor.handle_reset_stream(event=event, state=mock_state)
+
+        assert mock_stream_data.state == StreamState.CLOSED
+        assert CompleteUserFuture(future=mock_future) in effects
 
     @pytest.mark.parametrize(
         "state_from, state_to",
@@ -336,6 +476,7 @@ class TestStreamProcessor:
         self,
         client_processor: StreamProcessor,
         mock_state: MagicMock,
+        mock_session_data: SessionStateData,
         mock_stream_data: StreamStateData,
         mock_future: MagicMock,
         mock_wt_to_http_code: MagicMock,
@@ -344,15 +485,20 @@ class TestStreamProcessor:
         state_to: StreamState,
     ) -> None:
         mock_stream_data.state = state_from
+        mock_session_data.blocked_streams.add(4)
         event = UserResetStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_reset_stream(event=event, state=mock_state)
+
         mock_wt_to_http_code.assert_called_once_with(app_error_code=100)
         assert mock_stream_data.state == state_to
         assert mock_stream_data.closed_at == 123456.0
         assert mock_stream_data.close_code == 100
         assert ResetQuicStream(stream_id=4, error_code=0x52E0) in effects
         assert CompleteUserFuture(future=mock_future) in effects
+        assert 4 not in mock_session_data.blocked_streams
         if state_to == StreamState.CLOSED:
+            assert 4 not in mock_session_data.active_streams
             assert EmitStreamEvent(stream_id=4, event_type=EventType.STREAM_CLOSED, data={"stream_id": 4}) in effects
 
     @pytest.mark.parametrize("state", [StreamState.HALF_CLOSED_LOCAL, StreamState.CLOSED, StreamState.RESET_SENT])
@@ -366,8 +512,30 @@ class TestStreamProcessor:
     ) -> None:
         mock_stream_data.state = state
         event = UserResetStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_reset_stream(event=event, state=mock_state)
+
         assert effects == [CompleteUserFuture(future=mock_future)]
+
+    def test_handle_return_stream_data(
+        self, client_processor: StreamProcessor, mock_state: MagicMock, mock_stream_data: StreamStateData
+    ) -> None:
+        mock_stream_data.read_buffer = deque([b"existing"])
+        mock_stream_data.read_buffer_size = 8
+        event = InternalReturnStreamData(stream_id=4, data=b"returned")
+
+        client_processor.handle_return_stream_data(event=event, state=mock_state)
+
+        assert list(mock_stream_data.read_buffer) == [b"returned", b"existing"]
+        assert mock_stream_data.read_buffer_size == 16
+
+    def test_handle_return_stream_data_not_found(
+        self, client_processor: StreamProcessor, mock_state: MagicMock
+    ) -> None:
+        mock_state.streams = {}
+        event = InternalReturnStreamData(stream_id=999, data=b"data")
+
+        client_processor.handle_return_stream_data(event=event, state=mock_state)
 
     def test_handle_send_stream_data_appends_to_write_buffer(
         self,
@@ -380,11 +548,16 @@ class TestStreamProcessor:
     ) -> None:
         existing_future = mocker.create_autospec(asyncio.Future, instance=True)
         mock_stream_data.write_buffer = deque([(b"first", existing_future, False)])
+        mock_stream_data.write_buffer_size = 5
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"second", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert effects == []
         assert len(mock_stream_data.write_buffer) == 2
         assert mock_stream_data.write_buffer[1] == (b"second", mock_future, False)
+        assert mock_stream_data.write_buffer_size == 11
+        assert 4 in mock_session_data.blocked_streams
 
     def test_handle_send_stream_data_buffer_full(
         self,
@@ -399,8 +572,11 @@ class TestStreamProcessor:
         mock_client_config.max_stream_write_buffer = 100
         existing_future = mocker.create_autospec(asyncio.Future, instance=True)
         mock_stream_data.write_buffer = deque([(b"a" * 90, existing_future, False)])
+        mock_stream_data.write_buffer_size = 90
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"a" * 11, end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -437,8 +613,12 @@ class TestStreamProcessor:
         mock_session_data.peer_max_data = 100
         mock_session_data.local_data_sent = 100
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert len(mock_stream_data.write_buffer) == 1
+        assert mock_stream_data.write_buffer_size == 5
+        assert 4 in mock_session_data.blocked_streams
         assert any(isinstance(e, SendH3Capsule) and e.capsule_type == constants.WT_DATA_BLOCKED_TYPE for e in effects)
 
     def test_handle_send_stream_data_invalid_data_type(
@@ -448,11 +628,13 @@ class TestStreamProcessor:
         mock_session_data: SessionStateData,
         mock_stream_data: StreamStateData,
         mock_future: MagicMock,
-        mock_ensure_bytes: MagicMock,
+        mock_ensure_buffer: MagicMock,
     ) -> None:
-        mock_ensure_bytes.side_effect = TypeError("test error")
+        mock_ensure_buffer.side_effect = TypeError("test error")
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"test", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -463,7 +645,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_state.streams = {}
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -482,13 +666,17 @@ class TestStreamProcessor:
         mock_session_data.local_data_sent = 98
         available_credit = 2
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert SendQuicData(stream_id=4, data=b"he", end_stream=False) in effects
         assert any(isinstance(e, SendH3Capsule) and e.capsule_type == constants.WT_DATA_BLOCKED_TYPE for e in effects)
         assert mock_session_data.local_data_sent == 100
         assert mock_stream_data.bytes_sent == available_credit
         assert len(mock_stream_data.write_buffer) == 1
+        assert mock_stream_data.write_buffer_size == 3
         assert mock_stream_data.write_buffer[0] == (b"llo", mock_future, False)
+        assert 4 in mock_session_data.blocked_streams
 
     def test_handle_send_stream_data_session_not_found(
         self,
@@ -499,7 +687,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_state.sessions = {}
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -515,11 +705,16 @@ class TestStreamProcessor:
         mock_future: MagicMock,
     ) -> None:
         mock_stream_data.state = StreamState.HALF_CLOSED_REMOTE
+        mock_session_data.blocked_streams.add(4)
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=True)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert mock_stream_data.state == StreamState.CLOSED
         assert EmitStreamEvent(stream_id=4, event_type=EventType.STREAM_CLOSED, data={"stream_id": 4}) in effects
         assert CompleteUserFuture(future=mock_future) in effects
+        assert 4 not in mock_session_data.active_streams
+        assert 4 not in mock_session_data.blocked_streams
 
     def test_handle_send_stream_data_success_end_stream_open(
         self,
@@ -531,7 +726,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_stream_data.state = StreamState.OPEN
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=True)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert mock_stream_data.state == StreamState.HALF_CLOSED_LOCAL
         assert not any(isinstance(e, EmitStreamEvent) for e in effects)
 
@@ -546,7 +743,9 @@ class TestStreamProcessor:
         mock_session_data.peer_max_data = 1000
         mock_session_data.local_data_sent = 0
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert effects == [
             SendQuicData(stream_id=4, data=b"hello", end_stream=False),
             CompleteUserFuture(future=mock_future),
@@ -554,6 +753,7 @@ class TestStreamProcessor:
         assert mock_session_data.local_data_sent == 5
         assert mock_stream_data.bytes_sent == 5
         assert len(mock_stream_data.write_buffer) == 0
+        assert mock_stream_data.write_buffer_size == 0
 
     @pytest.mark.parametrize("state", [StreamState.HALF_CLOSED_LOCAL, StreamState.CLOSED, StreamState.RESET_SENT])
     def test_handle_send_stream_data_wrong_state(
@@ -566,7 +766,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_stream_data.state = state
         event = UserSendStreamData(future=mock_future, stream_id=4, data=b"hello", end_stream=False)
+
         effects = client_processor.handle_send_stream_data(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -586,7 +788,9 @@ class TestStreamProcessor:
         read_future.done.return_value = False
         mock_stream_data.pending_read_requests = deque([read_future])
         event = UserStopStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_stop_stream(event=event, state=mock_state)
+
         assert len(mock_stream_data.pending_read_requests) == 0
         fail_effect = next(e for e in effects if isinstance(e, FailUserFuture) and e.future is not mock_future)
         assert fail_effect.future is read_future
@@ -616,11 +820,28 @@ class TestStreamProcessor:
     ) -> None:
         mock_state.streams = {}
         event = UserStopStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_stop_stream(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
         assert isinstance(fail_effect.exception, StreamError)
+
+    def test_handle_stop_stream_session_missing(
+        self,
+        client_processor: StreamProcessor,
+        mock_state: MagicMock,
+        mock_stream_data: StreamStateData,
+        mock_future: MagicMock,
+    ) -> None:
+        mock_state.sessions = {}
+        mock_stream_data.state = StreamState.HALF_CLOSED_LOCAL
+
+        event = UserStopStream(future=mock_future, stream_id=4, error_code=0)
+        client_processor.handle_stop_stream(event=event, state=mock_state)
+
+        assert mock_stream_data.state == StreamState.CLOSED
 
     @pytest.mark.parametrize(
         "state_from, state_to",
@@ -634,6 +855,7 @@ class TestStreamProcessor:
         self,
         client_processor: StreamProcessor,
         mock_state: MagicMock,
+        mock_session_data: SessionStateData,
         mock_stream_data: StreamStateData,
         mock_future: MagicMock,
         mock_wt_to_http_code: MagicMock,
@@ -642,8 +864,11 @@ class TestStreamProcessor:
         state_to: StreamState,
     ) -> None:
         mock_stream_data.state = state_from
+        mock_session_data.blocked_streams.add(4)
         event = UserStopStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_stop_stream(event=event, state=mock_state)
+
         mock_wt_to_http_code.assert_called_once_with(app_error_code=100)
         assert mock_stream_data.state == state_to
         assert mock_stream_data.closed_at == 123456.0
@@ -651,6 +876,8 @@ class TestStreamProcessor:
         assert StopQuicStream(stream_id=4, error_code=0x52E0) in effects
         assert CompleteUserFuture(future=mock_future) in effects
         if state_to == StreamState.CLOSED:
+            assert 4 not in mock_session_data.active_streams
+            assert 4 not in mock_session_data.blocked_streams
             assert EmitStreamEvent(stream_id=4, event_type=EventType.STREAM_CLOSED, data={"stream_id": 4}) in effects
 
     @pytest.mark.parametrize("state", [StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED, StreamState.RESET_RECEIVED])
@@ -664,7 +891,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_stream_data.state = state
         event = UserStopStream(future=mock_future, stream_id=4, error_code=100)
+
         effects = client_processor.handle_stop_stream(event=event, state=mock_state)
+
         assert effects == [CompleteUserFuture(future=mock_future)]
 
     def test_handle_stream_read_appends_pending_request(
@@ -678,7 +907,9 @@ class TestStreamProcessor:
         mock_stream_data.read_buffer_size = 0
         mock_stream_data.state = StreamState.OPEN
         event = UserStreamRead(future=mock_future, stream_id=4, max_bytes=100)
+
         effects = client_processor.handle_stream_read(event=event, state=mock_state)
+
         assert effects == []
         assert len(mock_stream_data.pending_read_requests) == 1
         assert mock_stream_data.pending_read_requests[0] is mock_future
@@ -694,7 +925,9 @@ class TestStreamProcessor:
         mock_stream_data.read_buffer_size = 0
         mock_stream_data.state = StreamState.HALF_CLOSED_REMOTE
         event = UserStreamRead(future=mock_future, stream_id=4, max_bytes=100)
+
         effects = client_processor.handle_stream_read(event=event, state=mock_state)
+
         assert effects == [CompleteUserFuture(future=mock_future, value=b"")]
 
     def test_handle_stream_read_fails_on_reset(
@@ -708,7 +941,9 @@ class TestStreamProcessor:
         mock_stream_data.read_buffer_size = 0
         mock_stream_data.state = StreamState.RESET_RECEIVED
         event = UserStreamRead(future=mock_future, stream_id=4, max_bytes=100)
+
         effects = client_processor.handle_stream_read(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -720,7 +955,9 @@ class TestStreamProcessor:
     ) -> None:
         mock_state.streams = {}
         event = UserStreamRead(future=mock_future, stream_id=4, max_bytes=100)
+
         effects = client_processor.handle_stream_read(event=event, state=mock_state)
+
         assert len(effects) == 1
         fail_effect = effects[0]
         assert isinstance(fail_effect, FailUserFuture)
@@ -736,7 +973,9 @@ class TestStreamProcessor:
         mock_stream_data.read_buffer = deque([b"hello", b" world"])
         mock_stream_data.read_buffer_size = 11
         event = UserStreamRead(future=mock_future, stream_id=4, max_bytes=5)
+
         effects = client_processor.handle_stream_read(event=event, state=mock_state)
+
         assert effects == [CompleteUserFuture(future=mock_future, value=b"hello")]
         assert list(mock_stream_data.read_buffer) == [b" world"]
         assert mock_stream_data.read_buffer_size == 6
@@ -751,7 +990,9 @@ class TestStreamProcessor:
         mock_stream_data.read_buffer = deque([b"hello", b" world"])
         mock_stream_data.read_buffer_size = 11
         event = UserStreamRead(future=mock_future, stream_id=4, max_bytes=0)
+
         effects = client_processor.handle_stream_read(event=event, state=mock_state)
+
         assert effects == [CompleteUserFuture(future=mock_future, value=b"hello world")]
         assert len(mock_stream_data.read_buffer) == 0
         assert mock_stream_data.read_buffer_size == 0
@@ -770,6 +1011,7 @@ class TestStreamProcessor:
         write_future.done.return_value = False
         mock_stream_data.pending_read_requests = deque([read_future])
         mock_stream_data.write_buffer = deque([(b"data", write_future, False)])
+        mock_stream_data.write_buffer_size = 4
         event = TransportStreamReset(stream_id=4, error_code=ErrorCodes.H3_NO_ERROR)
 
         effects = client_processor.handle_transport_stream_reset(event=event, state=mock_state)
@@ -778,6 +1020,7 @@ class TestStreamProcessor:
         assert mock_stream_data.close_code == ErrorCodes.H3_NO_ERROR
         assert len(mock_stream_data.pending_read_requests) == 0
         assert len(mock_stream_data.write_buffer) == 0
+        assert mock_stream_data.write_buffer_size == 0
         failed_futures = {e.future for e in effects if isinstance(e, FailUserFuture)}
         assert failed_futures == {read_future, write_future}
         assert all(isinstance(e.exception, StreamError) for e in effects if isinstance(e, FailUserFuture))
@@ -788,7 +1031,9 @@ class TestStreamProcessor:
         mock_state: MagicMock,
         mock_stream_data: StreamStateData,
         mock_http_to_wt_code: MagicMock,
+        mock_session_data: SessionStateData,
     ) -> None:
+        mock_session_data.blocked_streams.add(4)
         event = TransportStreamReset(stream_id=4, error_code=ErrorCodes.WT_APPLICATION_ERROR_FIRST)
 
         effects = client_processor.handle_transport_stream_reset(event=event, state=mock_state)
@@ -797,6 +1042,8 @@ class TestStreamProcessor:
         assert mock_stream_data.close_code == 1234
         assert mock_stream_data.state == StreamState.CLOSED
         assert EmitStreamEvent(stream_id=4, event_type=EventType.STREAM_CLOSED, data={"stream_id": 4}) in effects
+        assert 4 not in mock_session_data.active_streams
+        assert 4 not in mock_session_data.blocked_streams
 
     def test_handle_transport_stream_reset_maps_http_error_value_error(
         self,
@@ -808,7 +1055,7 @@ class TestStreamProcessor:
         mock_http_to_wt_code.side_effect = ValueError("Invalid code")
         event = TransportStreamReset(stream_id=4, error_code=ErrorCodes.WT_APPLICATION_ERROR_FIRST)
 
-        _ = client_processor.handle_transport_stream_reset(event=event, state=mock_state)
+        client_processor.handle_transport_stream_reset(event=event, state=mock_state)
 
         assert mock_stream_data.close_code == ErrorCodes.WT_APPLICATION_ERROR_FIRST
 
@@ -822,7 +1069,7 @@ class TestStreamProcessor:
         mock_http_to_wt_code.side_effect = ValueError("test")
         event = TransportStreamReset(stream_id=4, error_code=ErrorCodes.WT_APPLICATION_ERROR_FIRST)
 
-        _ = client_processor.handle_transport_stream_reset(event=event, state=mock_state)
+        client_processor.handle_transport_stream_reset(event=event, state=mock_state)
 
         assert mock_stream_data.close_code == ErrorCodes.WT_APPLICATION_ERROR_FIRST
 
@@ -835,6 +1082,17 @@ class TestStreamProcessor:
         effects = client_processor.handle_transport_stream_reset(event=event, state=mock_state)
 
         assert effects == []
+
+    def test_handle_transport_stream_reset_session_missing(
+        self, client_processor: StreamProcessor, mock_state: MagicMock, mock_stream_data: StreamStateData
+    ) -> None:
+        mock_state.sessions = {}
+        mock_stream_data.state = StreamState.OPEN
+
+        event = TransportStreamReset(stream_id=4, error_code=0)
+        client_processor.handle_transport_stream_reset(event=event, state=mock_state)
+
+        assert mock_stream_data.state == StreamState.CLOSED
 
     def test_handle_transport_stream_reset_with_done_futures(
         self,
@@ -849,6 +1107,7 @@ class TestStreamProcessor:
         write_future.done.return_value = True
         mock_stream_data.pending_read_requests = deque([read_future])
         mock_stream_data.write_buffer = deque([(b"data", write_future, False)])
+        mock_stream_data.write_buffer_size = 4
         event = TransportStreamReset(stream_id=4, error_code=ErrorCodes.H3_NO_ERROR)
 
         effects = client_processor.handle_transport_stream_reset(event=event, state=mock_state)
@@ -943,12 +1202,15 @@ class TestStreamProcessor:
         mock_stream_data.state = StreamState.HALF_CLOSED_LOCAL
         mock_stream_data.read_buffer = deque()
         mock_stream_data.read_buffer_size = 0
+        mock_session_data.blocked_streams.add(4)
         event = WebTransportStreamDataReceived(stream_id=4, control_stream_id=0, data=b"", stream_ended=True)
 
         effects = client_processor.handle_webtransport_stream_data(event=event, state=mock_state)
 
         assert mock_stream_data.state == StreamState.CLOSED
         assert mock_stream_data.closed_at == 123456.0
+        assert 4 not in mock_session_data.active_streams
+        assert 4 not in mock_session_data.blocked_streams
         assert EmitStreamEvent(stream_id=4, event_type=EventType.STREAM_CLOSED, data={"stream_id": 4}) in effects
 
     def test_handle_webtransport_stream_data_end_stream_data_pending(
@@ -978,7 +1240,7 @@ class TestStreamProcessor:
         mock_stream_data.state = StreamState.OPEN
         event = WebTransportStreamDataReceived(stream_id=4, control_stream_id=0, data=b"", stream_ended=True)
 
-        _ = client_processor.handle_webtransport_stream_data(event=event, state=mock_state)
+        client_processor.handle_webtransport_stream_data(event=event, state=mock_state)
 
         assert mock_stream_data.state == StreamState.HALF_CLOSED_REMOTE
 
@@ -1027,6 +1289,17 @@ class TestStreamProcessor:
 
         assert effects == []
 
+    def test_handle_webtransport_stream_data_internal_state_error(
+        self, client_processor: StreamProcessor, mock_state: MagicMock, mock_stream_data: StreamStateData
+    ) -> None:
+        mock_state.sessions = {}
+        event = WebTransportStreamDataReceived(stream_id=4, control_stream_id=0, data=b"data", stream_ended=False)
+
+        effects = client_processor.handle_webtransport_stream_data(event=event, state=mock_state)
+
+        assert effects == []
+        assert mock_stream_data.bytes_received == 0
+
     def test_handle_webtransport_stream_data_no_pending_reads(
         self,
         client_processor: StreamProcessor,
@@ -1039,7 +1312,7 @@ class TestStreamProcessor:
         mock_stream_data.read_buffer_size = 8
         event = WebTransportStreamDataReceived(stream_id=4, control_stream_id=0, data=b"hello", stream_ended=False)
 
-        _ = client_processor.handle_webtransport_stream_data(event=event, state=mock_state)
+        client_processor.handle_webtransport_stream_data(event=event, state=mock_state)
 
         assert len(mock_stream_data.read_buffer) == 2
         assert mock_stream_data.read_buffer_size == 13
@@ -1114,6 +1387,7 @@ class TestStreamProcessor:
         assert list(new_stream.read_buffer) == [b"hello"]
         assert new_stream.read_buffer_size == 5
         assert mock_session_data.peer_streams_bidi_opened == 9
+        assert 8 in mock_session_data.active_streams
         assert (
             EmitStreamEvent(
                 stream_id=8,
@@ -1149,6 +1423,7 @@ class TestStreamProcessor:
         assert list(new_stream.read_buffer) == [b"hello"]
         assert new_stream.read_buffer_size == 5
         assert mock_session_data.peer_streams_uni_opened == 1
+        assert 10 in mock_session_data.active_streams
         assert (
             EmitStreamEvent(
                 stream_id=10,

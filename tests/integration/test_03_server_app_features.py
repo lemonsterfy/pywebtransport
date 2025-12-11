@@ -1,6 +1,8 @@
 """Integration tests for high-level ServerApp features."""
 
 import asyncio
+import http
+from typing import Any
 
 import pytest
 
@@ -13,7 +15,9 @@ from pywebtransport import (
     WebTransportSession,
     WebTransportStream,
 )
-from pywebtransport.types import EventType
+from pywebtransport.server import MiddlewareRejected
+from pywebtransport.types import EventType, SessionProtocol
+from pywebtransport.utils import get_header
 
 pytestmark = pytest.mark.asyncio
 
@@ -24,13 +28,15 @@ async def test_middleware_accepts_session(
     host, port = server
     handler_was_reached = asyncio.Event()
 
-    async def auth_middleware(session: WebTransportSession) -> bool:
-        return session.headers.get("x-auth-token") == "valid-token"
+    async def auth_middleware(session: SessionProtocol) -> None:
+        token = get_header(headers=session.headers, key="x-auth-token")
+        if token != "valid-token":
+            raise MiddlewareRejected(status_code=http.HTTPStatus.FORBIDDEN)
 
     server_app.add_middleware(middleware=auth_middleware)
 
     @server_app.route(path="/protected")
-    async def protected_handler(session: WebTransportSession) -> None:
+    async def protected_handler(session: WebTransportSession, **kwargs: Any) -> None:
         handler_was_reached.set()
         try:
             await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
@@ -48,13 +54,15 @@ async def test_middleware_rejects_session(
 ) -> None:
     host, port = server
 
-    async def auth_middleware(session: WebTransportSession) -> bool:
-        return session.headers.get("x-auth-token") == "valid-token"
+    async def auth_middleware(session: SessionProtocol) -> None:
+        token = get_header(headers=session.headers, key="x-auth-token")
+        if token != "valid-token":
+            raise MiddlewareRejected(status_code=http.HTTPStatus.FORBIDDEN)
 
     server_app.add_middleware(middleware=auth_middleware)
 
     @server_app.route(path="/protected")
-    async def protected_handler(session: WebTransportSession) -> None:
+    async def protected_handler(session: WebTransportSession, **kwargs: Any) -> None:
         pytest.fail("Rejected session reached the route handler.")
 
     headers: Headers = {"x-auth-token": "invalid-token"}
@@ -70,16 +78,13 @@ async def test_pattern_routing_with_params(
 ) -> None:
     host, port = server
 
-    @server_app.pattern_route(pattern=r"/items/([a-zA-Z0-9-]+)")
-    async def item_handler(session: WebTransportSession) -> None:
+    @server_app.pattern_route(pattern=r"/items/(?P<item_id>[a-zA-Z0-9-]+)")
+    async def item_handler(session: WebTransportSession, item_id: str, **kwargs: Any) -> None:
         async def on_stream(event: Event) -> None:
             if isinstance(event.data, dict):
                 s = event.data.get("stream")
                 if isinstance(s, WebTransportStream):
                     _ = await s.read()
-                    item_id = "not-found"
-                    if session.path.startswith("/items/"):
-                        item_id = session.path.split("/")[-1]
                     response_message = f"Accessed item: {item_id}".encode()
                     await s.write(data=response_message)
                     await s.close()
@@ -104,7 +109,7 @@ async def test_routing_to_path_one(server: tuple[str, int], client: WebTransport
     handler_two_called = asyncio.Event()
 
     @server_app.route(path="/path_one")
-    async def handler_one(session: WebTransportSession) -> None:
+    async def handler_one(session: WebTransportSession, **kwargs: Any) -> None:
         handler_one_called.set()
         try:
             await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
@@ -112,7 +117,7 @@ async def test_routing_to_path_one(server: tuple[str, int], client: WebTransport
             pass
 
     @server_app.route(path="/path_two")
-    async def handler_two(session: WebTransportSession) -> None:
+    async def handler_two(session: WebTransportSession, **kwargs: Any) -> None:
         handler_two_called.set()
         try:
             await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
@@ -133,7 +138,7 @@ async def test_routing_to_path_two(server: tuple[str, int], client: WebTransport
     handler_two_called = asyncio.Event()
 
     @server_app.route(path="/path_one")
-    async def handler_one(session: WebTransportSession) -> None:
+    async def handler_one(session: WebTransportSession, **kwargs: Any) -> None:
         handler_one_called.set()
         try:
             await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
@@ -141,7 +146,7 @@ async def test_routing_to_path_two(server: tuple[str, int], client: WebTransport
             pass
 
     @server_app.route(path="/path_two")
-    async def handler_two(session: WebTransportSession) -> None:
+    async def handler_two(session: WebTransportSession, **kwargs: Any) -> None:
         handler_two_called.set()
         try:
             await session.events.wait_for(event_type=EventType.SESSION_CLOSED)

@@ -7,15 +7,13 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from types import TracebackType
-from typing import Any, ClassVar, Generic, Protocol, Self, TypeVar, runtime_checkable
+from typing import Any, ClassVar, Protocol, Self, runtime_checkable
 
 from pywebtransport.events import Event, EventEmitter
 from pywebtransport.types import EventType
 from pywebtransport.utils import get_logger
 
 __all__: list[str] = []
-
-ResourceId = TypeVar("ResourceId")
 
 
 @runtime_checkable
@@ -24,14 +22,16 @@ class ManageableResource(Protocol):
 
     events: EventEmitter
 
-
-ResourceType = TypeVar("ResourceType", bound=ManageableResource)
+    @property
+    def is_closed(self) -> bool:
+        """Check if the resource is currently closed."""
+        ...
 
 
 logger = get_logger(name=__name__)
 
 
-class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
+class BaseResourceManager[ResourceId, ResourceType: ManageableResource](ABC):
     """Manage the lifecycle of concurrent resources abstractly via events."""
 
     _log: ClassVar[logging.Logger] = logger
@@ -45,13 +45,11 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
         self._resources: dict[ResourceId, ResourceType] = {}
         self._stats = {"total_created": 0, "total_closed": 0, "current_count": 0, "max_concurrent": 0}
         self._is_shutting_down = False
-        self._background_tasks_to_cancel: list[asyncio.Task[None] | None] = []
         self._event_handlers: dict[ResourceId, tuple[EventEmitter, Callable[[Event], Awaitable[None]]]] = {}
 
     async def __aenter__(self) -> Self:
         """Enter async context and initialize resources."""
         self._lock = asyncio.Lock()
-        self._start_background_tasks()
         return self
 
     async def __aexit__(
@@ -61,14 +59,13 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
         await self.shutdown()
 
     async def shutdown(self) -> None:
-        """Shut down the manager and all associated tasks and resources."""
+        """Shut down the manager and all associated resources."""
         if self._is_shutting_down:
             return
 
         self._is_shutting_down = True
         self._log.info("Shutting down %s manager", self._resource_name)
 
-        await self._cancel_background_tasks()
         await self._close_all_resources()
         self._log.info("%s manager shutdown complete", self._resource_name)
 
@@ -76,19 +73,27 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
         """Add a new resource and subscribe to its closure event."""
         if self._lock is None:
             raise RuntimeError(f"{self.__class__.__name__} is not activated. Use 'async with'.")
-        if self._is_shutting_down:
-            self._log.warning("Attempted to add resource to shutting down %s manager.", self._resource_name)
-            await self._close_resource(resource=resource)
-            raise RuntimeError(f"{self.__class__.__name__} is shutting down.")
 
-        resource_id = self._get_resource_id(resource)
+        if resource.is_closed:
+            raise RuntimeError(f"Cannot add closed {self._resource_name}")
+
+        resource_id = self._get_resource_id(resource=resource)
         emitter = resource.events
 
         async with self._lock:
+            if self._is_shutting_down:
+                self._log.warning("Attempted to add resource %s during shutdown.", resource_id)
+                await self._close_resource(resource=resource)
+                raise RuntimeError(f"{self.__class__.__name__} is shutting down")
+
+            if resource.is_closed:
+                raise RuntimeError(f"Cannot add closed {self._resource_name}")
+
             if resource_id in self._resources:
                 self._log.debug("Resource %s already managed.", resource_id)
                 return
-            if len(self._resources) >= self._max_resources > 0:
+
+            if 0 < self._max_resources <= len(self._resources):
                 self._log.error(
                     "Maximum %s limit (%d) reached. Cannot add %s.",
                     self._resource_name,
@@ -98,26 +103,36 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
                 await self._close_resource(resource=resource)
                 raise RuntimeError(f"Maximum {self._resource_name} limit reached")
 
-            self._resources[resource_id] = resource
-            self._stats["total_created"] += 1
-            self._update_stats_unsafe()
-
             async def closed_handler_wrapper(event: Event) -> None:
+                """Handle resource closure event."""
                 event_resource_id: ResourceId | None = None
                 if isinstance(event.data, dict):
                     event_resource_id = event.data.get(f"{self._resource_name}_id")
 
-                if event_resource_id == resource_id:
-                    await self._handle_resource_closed(resource_id=resource_id)
-                else:
-                    self._log.warning(
-                        "Received close event without expected resource ID in data for %s (Expected %s, Data: %s)",
+                if event_resource_id is not None and event_resource_id != resource_id:
+                    self._log.error(
+                        "Resource ID mismatch in close event for %s (Expected %s, Got: %s).",
                         self._resource_name,
                         resource_id,
-                        event.data,
+                        event_resource_id,
                     )
 
+                await self._handle_resource_closed(resource_id=resource_id)
+
             emitter.once(event_type=self._resource_closed_event_type, handler=closed_handler_wrapper)
+            self._event_handlers[resource_id] = (emitter, closed_handler_wrapper)
+
+            if self._check_is_closed(resource=resource):
+                try:
+                    emitter.off(event_type=self._resource_closed_event_type, handler=closed_handler_wrapper)
+                except (ValueError, KeyError):
+                    pass
+                del self._event_handlers[resource_id]
+                raise RuntimeError(f"Cannot add {self._resource_name}: closed during registration")
+
+            self._resources[resource_id] = resource
+            self._stats["total_created"] += 1
+            self._update_stats_unsafe()
 
             self._log.debug("Added %s %s (total: %d)", self._resource_name, resource_id, self._stats["current_count"])
 
@@ -146,17 +161,9 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
             stats[f"max_{self._resource_name}s"] = self._max_resources
             return stats
 
-    async def _cancel_background_tasks(self) -> None:
-        """Cancel all running background tasks."""
-        tasks_to_cancel = self._background_tasks_to_cancel
-
-        active_tasks = [task for task in tasks_to_cancel if task and not task.done()]
-        if not active_tasks:
-            return
-
-        for task in active_tasks:
-            task.cancel()
-        await asyncio.gather(*active_tasks, return_exceptions=True)
+    def _check_is_closed(self, *, resource: ResourceType) -> bool:
+        """Check if the resource is currently closed."""
+        return resource.is_closed
 
     async def _close_all_resources(self) -> None:
         """Close all currently managed resources."""
@@ -169,6 +176,13 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
                 return
             resources_to_close = list(self._resources.values())
             self._log.info("Closing %d managed %ss", len(resources_to_close), self._resource_name)
+
+            for _, (emitter, handler) in self._event_handlers.items():
+                try:
+                    emitter.off(event_type=self._resource_closed_event_type, handler=handler)
+                except (ValueError, KeyError):
+                    pass
+            self._event_handlers.clear()
             self._resources.clear()
 
         try:
@@ -187,13 +201,13 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
         self._log.info("All managed %ss processed for closure.", self._resource_name)
 
     @abstractmethod
-    async def _close_resource(self, resource: ResourceType) -> None:
-        """Close a single resource (must be implemented by subclasses)."""
+    async def _close_resource(self, *, resource: ResourceType) -> None:
+        """Close a single resource."""
         raise NotImplementedError
 
     @abstractmethod
-    def _get_resource_id(self, resource: ResourceType) -> ResourceId:
-        """Get the unique ID from a resource object (must be implemented by subclasses)."""
+    def _get_resource_id(self, *, resource: ResourceType) -> ResourceId:
+        """Get the unique ID from a resource object."""
         raise NotImplementedError
 
     async def _handle_resource_closed(self, *, resource_id: ResourceId) -> None:
@@ -201,8 +215,10 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
         if self._lock is None:
             return
 
-        removed_resource: ResourceType | None = None
         async with self._lock:
+            if resource_id in self._event_handlers:
+                self._event_handlers.pop(resource_id)
+
             removed_resource = self._resources.pop(resource_id, None)
             if removed_resource:
                 self._stats["total_closed"] += 1
@@ -211,33 +227,8 @@ class _BaseResourceManager(ABC, Generic[ResourceId, ResourceType]):
                     "Removed closed %s %s (total: %d)", self._resource_name, resource_id, self._stats["current_count"]
                 )
 
-        if removed_resource:
-            self._on_resource_removed(resource_id=resource_id)
-
-    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
-        """Handle the completion of a background task added by subclasses."""
-        if self._is_shutting_down:
-            return
-
-        if task.cancelled():
-            return
-
-        if exc := task.exception():
-            self._log.error(
-                "%s background task finished unexpectedly: %s.", self._resource_name.capitalize(), exc, exc_info=exc
-            )
-            asyncio.create_task(coro=self.shutdown())
-
-    def _on_resource_removed(self, *, resource_id: ResourceId) -> None:
-        """Hook for subclasses after a resource is removed."""
-        pass
-
-    def _start_background_tasks(self) -> None:
-        """Start all periodic background tasks (hook for subclasses)."""
-        pass
-
     def _update_stats_unsafe(self) -> None:
-        """Update internal statistics (must be called within a lock)."""
+        """Update internal statistics."""
         current_count = len(self._resources)
         self._stats["current_count"] = current_count
         self._stats["max_concurrent"] = max(self._stats["max_concurrent"], current_count)

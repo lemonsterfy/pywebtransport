@@ -7,8 +7,13 @@ import uuid
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Self
+from typing import Any
 
+from pywebtransport.constants import (
+    DEFAULT_MAX_EVENT_HISTORY_SIZE,
+    DEFAULT_MAX_EVENT_LISTENERS,
+    DEFAULT_MAX_EVENT_QUEUE_SIZE,
+)
 from pywebtransport.types import EventData, EventType, Future, Timeout
 from pywebtransport.utils import get_logger, get_timestamp
 
@@ -17,7 +22,7 @@ __all__: list[str] = ["Event", "EventEmitter", "EventHandler"]
 logger = get_logger(name=__name__)
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, frozen=True, slots=True)
 class Event:
     """A versatile base class for all system events."""
 
@@ -31,66 +36,9 @@ class Event:
         """Handle string-based event types after initialization."""
         if isinstance(self.type, str):
             try:
-                self.type = EventType(self.type)
+                object.__setattr__(self, "type", EventType(self.type))
             except ValueError:
                 logger.warning("Unknown event type string: '%s'", self.type)
-
-    @classmethod
-    def for_connection(cls, *, event_type: EventType, connection_info: dict[str, Any]) -> Self:
-        """Factory method to create a new connection event."""
-        return cls(type=event_type, data=connection_info)
-
-    @classmethod
-    def for_datagram(cls, *, event_type: EventType, datagram_info: dict[str, Any]) -> Self:
-        """Factory method to create a new datagram event."""
-        return cls(type=event_type, data=datagram_info)
-
-    @classmethod
-    def for_error(cls, *, error: Exception, source: Any = None) -> Self:
-        """Factory method to create a new error event from an exception."""
-        to_dict_method: Callable[[], dict[str, Any]] = getattr(error, "to_dict", lambda: {})
-        details = to_dict_method() if callable(to_dict_method) else {}
-
-        return cls(
-            type=EventType.PROTOCOL_ERROR,
-            data={"error_type": type(error).__name__, "error_message": str(error), "error_details": details},
-            source=source,
-        )
-
-    @classmethod
-    def for_session(cls, *, event_type: EventType, session_info: dict[str, Any]) -> Self:
-        """Factory method to create a new session event."""
-        return cls(type=event_type, data=session_info)
-
-    @classmethod
-    def for_stream(cls, *, event_type: EventType, stream_info: dict[str, Any]) -> Self:
-        """Factory method to create a new stream event."""
-        return cls(type=event_type, data=stream_info)
-
-    @property
-    def is_connection_event(self) -> bool:
-        """Check if this event is connection-related."""
-        return self.type.startswith("connection_")
-
-    @property
-    def is_datagram_event(self) -> bool:
-        """Check if this event is datagram-related."""
-        return self.type.startswith("datagram_")
-
-    @property
-    def is_error_event(self) -> bool:
-        """Check if this event is error-related."""
-        return "error" in self.type.lower()
-
-    @property
-    def is_session_event(self) -> bool:
-        """Check if this event is session-related."""
-        return self.type.startswith("session_")
-
-    @property
-    def is_stream_event(self) -> bool:
-        """Check if this event is stream-related."""
-        return self.type.startswith("stream_")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the event to a dictionary."""
@@ -117,7 +65,13 @@ EventHandler = Callable[[Event], Awaitable[None] | None]
 class EventEmitter:
     """An emitter for handling and dispatching events asynchronously."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        max_listeners: int = DEFAULT_MAX_EVENT_LISTENERS,
+        max_history: int = DEFAULT_MAX_EVENT_HISTORY_SIZE,
+        max_queue_size: int = DEFAULT_MAX_EVENT_QUEUE_SIZE,
+    ) -> None:
         """Initialize the event emitter."""
         if getattr(self, "_emitter_initialized", False):
             return
@@ -125,12 +79,13 @@ class EventEmitter:
         self._handlers: dict[EventType | str, list[EventHandler]] = defaultdict(list)
         self._once_handlers: dict[EventType | str, list[EventHandler]] = defaultdict(list)
         self._wildcard_handlers: list[EventHandler] = []
-        self._event_queue: deque[Event] = deque()
-        self._event_history: list[Event] = []
+        self._event_queue: deque[Event] = deque(maxlen=max_queue_size)
+        self._event_history: deque[Event] = deque(maxlen=max_history) if max_history > 0 else deque()
         self._processing_task: asyncio.Task[None] | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._paused = False
-        self._max_listeners = kwargs.get("max_listeners", 100)
-        self._max_history = 1000
+        self._max_listeners = max_listeners
+        self._max_history = max_history
         self._emitter_initialized = True
 
     async def close(self) -> None:
@@ -142,8 +97,12 @@ class EventEmitter:
             except asyncio.CancelledError:
                 pass
 
+        for task in self._background_tasks:
+            if not task.done():
+                task.cancel()
+
         self.remove_all_listeners()
-        logger.debug("EventEmitter closed and listeners cleared.")
+        logger.debug("EventEmitter closed and listeners cleared")
 
     async def emit(self, *, event_type: EventType | str, data: EventData | None = None, source: Any = None) -> None:
         """Emit an event to all corresponding listeners."""
@@ -151,7 +110,7 @@ class EventEmitter:
         self._add_to_history(event=event)
 
         if self._paused:
-            self._event_queue.append(event)
+            self._enqueue_event(event)
             return
 
         await self._process_event(event=event)
@@ -162,12 +121,13 @@ class EventEmitter:
         self._add_to_history(event=event)
 
         if self._paused:
-            self._event_queue.append(event)
+            self._enqueue_event(event)
             return
 
         try:
-            loop = asyncio.get_running_loop()
-            loop.call_soon(asyncio.create_task, self._process_event(event=event))
+            task = asyncio.create_task(self._process_event(event=event))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
         except RuntimeError:
             logger.warning("No running event loop, cannot schedule emit for %s", event_type)
 
@@ -235,12 +195,13 @@ class EventEmitter:
     async def wait_for(
         self,
         *,
-        event_type: EventType | str,
+        event_type: EventType | str | list[EventType | str],
         timeout: Timeout | None = None,
         condition: Callable[[Event], bool] | None = None,
     ) -> Event:
-        """Wait for a specific event to be emitted."""
+        """Wait for a specific event or any of a list of events to be emitted."""
         future: Future[Event] = asyncio.Future()
+        event_types = [event_type] if isinstance(event_type, (str, EventType)) else event_type
 
         async def handler(event: Event) -> None:
             try:
@@ -251,16 +212,19 @@ class EventEmitter:
                 if not future.done():
                     future.set_exception(e)
 
-        self.on(event_type=event_type, handler=handler)
+        for et in event_types:
+            self.on(event_type=et, handler=handler)
+
         try:
             try:
                 async with asyncio.timeout(delay=timeout):
                     return await future
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 future.cancel()
                 raise
         finally:
-            self.off(event_type=event_type, handler=handler)
+            for et in event_types:
+                self.off(event_type=et, handler=handler)
 
     def clear_history(self) -> None:
         """Clear the entire event history."""
@@ -270,7 +234,7 @@ class EventEmitter:
     def get_event_history(self, *, event_type: EventType | str | None = None, limit: int = 100) -> list[Event]:
         """Get the recorded history of events."""
         if event_type is None:
-            return self._event_history[-limit:]
+            return list(self._event_history)[-limit:]
 
         filtered_events = [event for event in self._event_history if event.type == event_type]
         return filtered_events[-limit:]
@@ -318,9 +282,14 @@ class EventEmitter:
 
     def _add_to_history(self, *, event: Event) -> None:
         """Add an event to the history buffer."""
-        self._event_history.append(event)
-        if len(self._event_history) > self._max_history:
-            self._event_history.pop(0)
+        if self._max_history > 0:
+            self._event_history.append(event)
+
+    def _enqueue_event(self, event: Event) -> None:
+        """Enqueue an event safely, dropping oldest if full."""
+        if self._event_queue.maxlen and len(self._event_queue) >= self._event_queue.maxlen:
+            logger.warning("Event queue full, dropping oldest event to make room")
+        self._event_queue.append(event)
 
     async def _process_event(self, *, event: Event) -> None:
         """Process a single event by invoking all relevant handlers."""

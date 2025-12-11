@@ -6,12 +6,12 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any, Pattern
 
-from pywebtransport.session.session import WebTransportSession
+from pywebtransport.session import WebTransportSession
 from pywebtransport.utils import get_logger
 
 __all__: list[str] = ["RequestRouter", "SessionHandler"]
 
-SessionHandler = Callable[[WebTransportSession], Awaitable[None]]
+type SessionHandler = Callable[..., Awaitable[None]]
 
 logger = get_logger(name=__name__)
 
@@ -25,21 +25,22 @@ class RequestRouter:
         self._pattern_routes: list[tuple[Pattern[str], SessionHandler]] = []
         self._default_handler: SessionHandler | None = None
 
-    def route_request(self, *, session: WebTransportSession) -> SessionHandler | None:
+    def route_request(self, *, session: WebTransportSession) -> tuple[SessionHandler, dict[str, Any]] | None:
         """Route a request to the appropriate handler based on the session's path."""
         path = session.path
-        handler: SessionHandler | None = None
 
         if path in self._routes:
-            handler = self._routes[path]
-        else:
-            for pattern, pattern_handler in self._pattern_routes:
-                match = pattern.match(path)
-                if match:
-                    handler = pattern_handler
-                    break
+            return (self._routes[path], {})
 
-        return handler or self._default_handler
+        for pattern, pattern_handler in self._pattern_routes:
+            match = pattern.fullmatch(path)
+            if match:
+                return (pattern_handler, match.groupdict())
+
+        if self._default_handler:
+            return (self._default_handler, {})
+
+        return None
 
     def add_pattern_route(self, *, pattern: str, handler: SessionHandler) -> None:
         """Add a route for a regular expression pattern."""
@@ -51,10 +52,19 @@ class RequestRouter:
             logger.error("Invalid regex pattern '%s': %s", pattern, e, exc_info=True)
             raise
 
-    def add_route(self, *, path: str, handler: SessionHandler) -> None:
+    def add_route(self, *, path: str, handler: SessionHandler, override: bool = False) -> None:
         """Add a route for an exact path match."""
+        if path in self._routes and not override:
+            raise ValueError(f"Route for path '{path}' already exists.")
         self._routes[path] = handler
         logger.debug("Added route: %s", path)
+
+    def remove_pattern_route(self, *, pattern: str) -> None:
+        """Remove a route for a regular expression pattern."""
+        original_len = len(self._pattern_routes)
+        self._pattern_routes = [(p, h) for p, h in self._pattern_routes if p.pattern != pattern]
+        if len(self._pattern_routes) < original_len:
+            logger.debug("Removed pattern route: %s", pattern)
 
     def remove_route(self, *, path: str) -> None:
         """Remove a route for an exact path match."""

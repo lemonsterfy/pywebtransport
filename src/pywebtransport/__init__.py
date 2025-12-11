@@ -2,8 +2,8 @@
 
 from .client import WebTransportClient
 from .config import ClientConfig, ServerConfig
-from .datagram import StructuredDatagramTransport
-from .events import Event, EventEmitter
+from .constants import ErrorCodes
+from .events import Event
 from .exceptions import (
     ClientError,
     ConfigurationError,
@@ -16,10 +16,11 @@ from .exceptions import (
     TimeoutError,
     WebTransportError,
 )
+from .messaging import StructuredDatagramTransport, StructuredStream
 from .server import ServerApp
 from .session import WebTransportSession
-from .stream import StructuredStream, WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
-from .types import URL, Address, Headers, Serializer
+from .stream import WebTransportReceiveStream, WebTransportSendStream, WebTransportStream
+from .types import URL, Address, Headers
 from .version import __version__
 
 __all__: list[str] = [
@@ -29,11 +30,10 @@ __all__: list[str] = [
     "ConfigurationError",
     "ConnectionError",
     "DatagramError",
+    "ErrorCodes",
     "Event",
-    "EventEmitter",
     "Headers",
     "ProtocolError",
-    "Serializer",
     "ServerApp",
     "ServerConfig",
     "ServerError",

@@ -1,6 +1,7 @@
 """Unit tests for the pywebtransport._protocol.events module."""
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -25,8 +26,13 @@ from pywebtransport._protocol.events import (
     GoawayReceived,
     H3Event,
     HeadersReceived,
+    InternalBindH3Session,
+    InternalBindQuicStream,
     InternalCleanupEarlyEvents,
     InternalCleanupResources,
+    InternalFailH3Session,
+    InternalFailQuicStream,
+    InternalReturnStreamData,
     LogH3Frame,
     ProtocolEvent,
     RescheduleQuicTimer,
@@ -150,7 +156,7 @@ def mock_future(mocker: MockerFixture) -> MagicMock:
     ],
 )
 def test_effects(
-    effect_class: type[Effect],
+    effect_class: Callable[..., Effect],
     kwargs: dict[str, Any],
     expected_attrs: dict[str, Any],
     mock_future: MagicMock,
@@ -211,7 +217,7 @@ def test_effects(
         ),
     ],
 )
-def test_h3_events(event_class: type[H3Event], kwargs: dict[str, Any], expected_attrs: dict[str, Any]) -> None:
+def test_h3_events(event_class: Callable[..., H3Event], kwargs: dict[str, Any], expected_attrs: dict[str, Any]) -> None:
     event = event_class(**kwargs)
 
     assert isinstance(event, H3Event)
@@ -222,8 +228,39 @@ def test_h3_events(event_class: type[H3Event], kwargs: dict[str, Any], expected_
 @pytest.mark.parametrize(
     "event_class, kwargs, expected_attrs",
     [
+        (
+            InternalBindH3Session,
+            {"session_id": 1, "control_stream_id": 2, "future": "mock_future_placeholder"},
+            {"session_id": 1, "control_stream_id": 2, "future": "mock_future_placeholder"},
+        ),
+        (
+            InternalBindQuicStream,
+            {"stream_id": 1, "session_id": 1, "is_unidirectional": True, "future": "mock_future_placeholder"},
+            {"stream_id": 1, "session_id": 1, "is_unidirectional": True, "future": "mock_future_placeholder"},
+        ),
         (InternalCleanupEarlyEvents, {}, {}),
         (InternalCleanupResources, {}, {}),
+        (
+            InternalFailH3Session,
+            {"session_id": 1, "exception": "mock_exception_placeholder", "future": "mock_future_placeholder"},
+            {"session_id": 1, "exception": "mock_exception_placeholder", "future": "mock_future_placeholder"},
+        ),
+        (
+            InternalFailQuicStream,
+            {
+                "session_id": 1,
+                "is_unidirectional": True,
+                "exception": "mock_exception_placeholder",
+                "future": "mock_future_placeholder",
+            },
+            {
+                "session_id": 1,
+                "is_unidirectional": True,
+                "exception": "mock_exception_placeholder",
+                "future": "mock_future_placeholder",
+            },
+        ),
+        (InternalReturnStreamData, {"stream_id": 1, "data": b"returned"}, {"stream_id": 1, "data": b"returned"}),
         (
             TransportConnectionTerminated,
             {"error_code": 100, "reason_phrase": "test reason"},
@@ -246,12 +283,34 @@ def test_h3_events(event_class: type[H3Event], kwargs: dict[str, Any], expected_
     ],
 )
 def test_internal_protocol_events(
-    event_class: type[ProtocolEvent], kwargs: dict[str, Any], expected_attrs: dict[str, Any]
+    event_class: Callable[..., ProtocolEvent],
+    kwargs: dict[str, Any],
+    expected_attrs: dict[str, Any],
+    mock_future: MagicMock,
+    mock_exception: Exception,
 ) -> None:
-    event = event_class(**kwargs)
+    processed_kwargs: dict[str, Any] = {}
+    for key, value in kwargs.items():
+        if value == "mock_future_placeholder":
+            processed_kwargs[key] = mock_future
+        elif value == "mock_exception_placeholder":
+            processed_kwargs[key] = mock_exception
+        else:
+            processed_kwargs[key] = value
+
+    processed_expected: dict[str, Any] = {}
+    for key, value in expected_attrs.items():
+        if value == "mock_future_placeholder":
+            processed_expected[key] = mock_future
+        elif value == "mock_exception_placeholder":
+            processed_expected[key] = mock_exception
+        else:
+            processed_expected[key] = value
+
+    event = event_class(**processed_kwargs)
 
     assert isinstance(event, ProtocolEvent)
-    for attr, expected_value in expected_attrs.items():
+    for attr, expected_value in processed_expected.items():
         assert getattr(event, attr) == expected_value
 
 
@@ -294,7 +353,10 @@ def test_internal_protocol_events(
     ],
 )
 def test_user_events(
-    event_class: type[UserEvent], kwargs: dict[str, Any], expected_attrs: dict[str, Any], mock_future: MagicMock
+    event_class: Callable[..., UserEvent[Any]],
+    kwargs: dict[str, Any],
+    expected_attrs: dict[str, Any],
+    mock_future: MagicMock,
 ) -> None:
     kwargs_with_future = {"future": mock_future, **kwargs}
     expected_with_future = {"future": mock_future, **expected_attrs}

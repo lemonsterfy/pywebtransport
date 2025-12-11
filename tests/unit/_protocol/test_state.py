@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from pytest_mock import MockerFixture
 
-from pywebtransport._protocol.state import ProtocolState, SessionStateData, StreamStateData
+from pywebtransport._protocol.state import ProtocolState, SessionInitData, SessionStateData, StreamStateData
 from pywebtransport.types import ConnectionState, SessionState, StreamDirection, StreamState
 
 
@@ -47,6 +47,7 @@ def test_protocol_state_instantiation(mock_connection_state: MagicMock) -> None:
     assert state.remote_max_datagram_frame_size == 0
     assert state.handshake_complete is False
     assert state.peer_settings_received is False
+    assert state.local_goaway_sent is False
     assert state.early_event_count == 0
     assert state.peer_initial_max_data == 0
     assert state.closed_at is None
@@ -55,7 +56,19 @@ def test_protocol_state_instantiation(mock_connection_state: MagicMock) -> None:
     assert state.streams == {}
     assert state.stream_to_session_map == {}
     assert state.pending_create_session_futures == {}
+    assert state.pending_session_configs == {}
     assert state.early_event_buffer == {}
+
+
+def test_session_init_data_instantiation() -> None:
+    start_time = time.monotonic()
+    headers = {":path": "/test"}
+
+    init_data = SessionInitData(path="/test", headers=headers, created_at=start_time)
+
+    assert init_data.path == "/test"
+    assert init_data.headers is headers
+    assert init_data.created_at == start_time
 
 
 def test_session_state_data_instantiation(mock_session_state: MagicMock) -> None:
@@ -95,6 +108,8 @@ def test_session_state_data_instantiation(mock_session_state: MagicMock) -> None
 
     assert session.pending_bidi_stream_futures == deque()
     assert session.pending_uni_stream_futures == deque()
+    assert session.active_streams == set()
+    assert session.blocked_streams == set()
 
 
 def test_state_mutable_defaults_are_unique(
@@ -134,10 +149,13 @@ def test_state_mutable_defaults_are_unique(
     assert p1.streams is not p2.streams
     assert p1.stream_to_session_map is not p2.stream_to_session_map
     assert p1.pending_create_session_futures is not p2.pending_create_session_futures
+    assert p1.pending_session_configs is not p2.pending_session_configs
     assert p1.early_event_buffer is not p2.early_event_buffer
 
     assert s1.pending_bidi_stream_futures is not s2.pending_bidi_stream_futures
     assert s1.pending_uni_stream_futures is not s2.pending_uni_stream_futures
+    assert s1.active_streams is not s2.active_streams
+    assert s1.blocked_streams is not s2.blocked_streams
 
     assert st1.read_buffer is not st2.read_buffer
     assert st1.pending_read_requests is not st2.pending_read_requests
@@ -174,3 +192,4 @@ def test_stream_state_data_instantiation(mock_stream_state: MagicMock, mock_stre
     assert stream.read_buffer_size == 0
     assert stream.pending_read_requests == deque()
     assert stream.write_buffer == deque()
+    assert stream.write_buffer_size == 0

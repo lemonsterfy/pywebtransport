@@ -5,11 +5,9 @@ from enum import IntEnum
 
 import pytest
 
-from pywebtransport import __version__
+from pywebtransport import ErrorCodes, __version__
 from pywebtransport.constants import (
-    DEFAULT_ACCESS_LOG,
     DEFAULT_ALPN_PROTOCOLS,
-    DEFAULT_AUTO_RECONNECT,
     DEFAULT_BIND_HOST,
     DEFAULT_CERTFILE,
     DEFAULT_CLIENT_MAX_CONNECTIONS,
@@ -19,8 +17,6 @@ from pywebtransport.constants import (
     DEFAULT_CONGESTION_CONTROL_ALGORITHM,
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_CONNECTION_IDLE_TIMEOUT,
-    DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT,
-    DEFAULT_DEBUG,
     DEFAULT_DEV_PORT,
     DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE,
     DEFAULT_FLOW_CONTROL_WINDOW_SIZE,
@@ -30,22 +26,22 @@ from pywebtransport.constants import (
     DEFAULT_KEEP_ALIVE,
     DEFAULT_KEYFILE,
     DEFAULT_LOG_LEVEL,
+    DEFAULT_MAX_CONNECTION_RETRIES,
     DEFAULT_MAX_DATAGRAM_SIZE,
+    DEFAULT_MAX_EVENT_HISTORY_SIZE,
+    DEFAULT_MAX_EVENT_LISTENERS,
+    DEFAULT_MAX_EVENT_QUEUE_SIZE,
     DEFAULT_MAX_MESSAGE_SIZE,
     DEFAULT_MAX_PENDING_EVENTS_PER_SESSION,
-    DEFAULT_MAX_RETRIES,
     DEFAULT_MAX_RETRY_DELAY,
     DEFAULT_MAX_STREAM_READ_BUFFER,
     DEFAULT_MAX_STREAM_WRITE_BUFFER,
     DEFAULT_MAX_TOTAL_PENDING_EVENTS,
     DEFAULT_PENDING_EVENT_TTL,
-    DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE,
     DEFAULT_READ_TIMEOUT,
     DEFAULT_RESOURCE_CLEANUP_INTERVAL,
     DEFAULT_RETRY_BACKOFF,
     DEFAULT_RETRY_DELAY,
-    DEFAULT_RPC_CONCURRENCY_LIMIT,
-    DEFAULT_SECURE_PORT,
     DEFAULT_SERVER_MAX_CONNECTIONS,
     DEFAULT_SERVER_MAX_SESSIONS,
     DEFAULT_SERVER_VERIFY_MODE,
@@ -62,6 +58,7 @@ from pywebtransport.constants import (
     SETTINGS_WT_INITIAL_MAX_STREAMS_UNI,
     SUPPORTED_CONGESTION_CONTROL_ALGORITHMS,
     USER_AGENT_HEADER,
+    WEBTRANSPORT_DEFAULT_PORT,
     WEBTRANSPORT_SCHEME,
     WT_DATA_BLOCKED_TYPE,
     WT_MAX_DATA_TYPE,
@@ -71,7 +68,6 @@ from pywebtransport.constants import (
     WT_STREAM_DATA_BLOCKED_TYPE,
     WT_STREAMS_BLOCKED_BIDI_TYPE,
     WT_STREAMS_BLOCKED_UNI_TYPE,
-    ErrorCodes,
     get_default_client_config,
     get_default_server_config,
 )
@@ -100,20 +96,18 @@ class TestConstantsValues:
         assert WT_STREAM_DATA_BLOCKED_TYPE == 0x190B4D42
         assert WT_STREAMS_BLOCKED_BIDI_TYPE == 0x190B4D43
         assert WT_STREAMS_BLOCKED_UNI_TYPE == 0x190B4D44
-        assert DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE == 16
-        assert DEFAULT_DEBUG is False
         assert DEFAULT_BIND_HOST == "localhost"
-        assert DEFAULT_SECURE_PORT == 443
+        assert WEBTRANSPORT_DEFAULT_PORT == 443
         assert DEFAULT_CLIENT_VERIFY_MODE == ssl.CERT_REQUIRED
-        assert DEFAULT_SERVER_VERIFY_MODE == ssl.CERT_OPTIONAL
+        assert DEFAULT_SERVER_VERIFY_MODE == ssl.CERT_NONE
         assert DEFAULT_CLIENT_MAX_SESSIONS == 100
         assert DEFAULT_SERVER_MAX_SESSIONS == 10000
         assert DEFAULT_MAX_STREAM_READ_BUFFER == 65536
         assert DEFAULT_MAX_STREAM_WRITE_BUFFER == 1024 * 1024
         assert DEFAULT_RESOURCE_CLEANUP_INTERVAL == 15.0
         assert DEFAULT_CLOSE_TIMEOUT == 5.0
-        assert DEFAULT_CERTFILE == ""
-        assert DEFAULT_KEYFILE == ""
+        assert DEFAULT_CERTFILE is None
+        assert DEFAULT_KEYFILE is None
 
 
 class TestDefaultConfigs:
@@ -122,15 +116,12 @@ class TestDefaultConfigs:
         config = get_default_client_config()
 
         assert config["alpn_protocols"] == list(DEFAULT_ALPN_PROTOCOLS)
-        assert config["auto_reconnect"] == DEFAULT_AUTO_RECONNECT
         assert config["ca_certs"] is None
         assert config["certfile"] is None
         assert config["close_timeout"] == DEFAULT_CLOSE_TIMEOUT
         assert config["congestion_control_algorithm"] == "cubic"
         assert config["connect_timeout"] == DEFAULT_CONNECT_TIMEOUT
         assert config["connection_idle_timeout"] == DEFAULT_CONNECTION_IDLE_TIMEOUT
-        assert config["connection_keepalive_timeout"] == DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
-        assert config["debug"] == DEFAULT_DEBUG
         assert config["flow_control_window_auto_scale"] == DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE
         assert config["flow_control_window_size"] == DEFAULT_FLOW_CONTROL_WINDOW_SIZE
         assert config["headers"] == {}
@@ -139,11 +130,15 @@ class TestDefaultConfigs:
         assert config["initial_max_streams_uni"] == DEFAULT_INITIAL_MAX_STREAMS_UNI
         assert config["keep_alive"] == DEFAULT_KEEP_ALIVE
         assert config["keyfile"] is None
+        assert config["log_level"] == DEFAULT_LOG_LEVEL
+        assert config["max_connection_retries"] == DEFAULT_MAX_CONNECTION_RETRIES
         assert config["max_connections"] == DEFAULT_CLIENT_MAX_CONNECTIONS
         assert config["max_datagram_size"] == DEFAULT_MAX_DATAGRAM_SIZE
+        assert config["max_event_history_size"] == DEFAULT_MAX_EVENT_HISTORY_SIZE
+        assert config["max_event_listeners"] == DEFAULT_MAX_EVENT_LISTENERS
+        assert config["max_event_queue_size"] == DEFAULT_MAX_EVENT_QUEUE_SIZE
         assert config["max_message_size"] == DEFAULT_MAX_MESSAGE_SIZE
         assert config["max_pending_events_per_session"] == DEFAULT_MAX_PENDING_EVENTS_PER_SESSION
-        assert config["max_retries"] == DEFAULT_MAX_RETRIES
         assert config["max_retry_delay"] == DEFAULT_MAX_RETRY_DELAY
         assert config["max_sessions"] == DEFAULT_CLIENT_MAX_SESSIONS
         assert config["max_stream_read_buffer"] == DEFAULT_MAX_STREAM_READ_BUFFER
@@ -154,11 +149,10 @@ class TestDefaultConfigs:
         assert config["resource_cleanup_interval"] == DEFAULT_RESOURCE_CLEANUP_INTERVAL
         assert config["retry_backoff"] == DEFAULT_RETRY_BACKOFF
         assert config["retry_delay"] == DEFAULT_RETRY_DELAY
-        assert config["rpc_concurrency_limit"] == DEFAULT_RPC_CONCURRENCY_LIMIT
         assert config["stream_creation_timeout"] == DEFAULT_STREAM_CREATION_TIMEOUT
         assert config["stream_flow_control_increment_bidi"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
         assert config["stream_flow_control_increment_uni"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI
-        assert config["user_agent"] == f"pywebtransport/{__version__}"
+        assert config["user_agent"] == f"PyWebTransport/{__version__}"
         assert config["verify_mode"] == DEFAULT_CLIENT_VERIFY_MODE
         assert config["write_timeout"] == DEFAULT_WRITE_TIMEOUT
 
@@ -175,16 +169,14 @@ class TestDefaultConfigs:
     def test_get_server_config(self) -> None:
         config = get_default_server_config()
 
-        assert config["access_log"] == DEFAULT_ACCESS_LOG
         assert config["alpn_protocols"] == list(DEFAULT_ALPN_PROTOCOLS)
         assert config["bind_host"] == DEFAULT_BIND_HOST
         assert config["bind_port"] == DEFAULT_DEV_PORT
         assert config["ca_certs"] is None
         assert config["certfile"] == DEFAULT_CERTFILE
+        assert config["close_timeout"] == DEFAULT_CLOSE_TIMEOUT
         assert config["congestion_control_algorithm"] == "cubic"
         assert config["connection_idle_timeout"] == DEFAULT_CONNECTION_IDLE_TIMEOUT
-        assert config["connection_keepalive_timeout"] == DEFAULT_CONNECTION_KEEPALIVE_TIMEOUT
-        assert config["debug"] == DEFAULT_DEBUG
         assert config["flow_control_window_auto_scale"] == DEFAULT_FLOW_CONTROL_WINDOW_AUTO_SCALE
         assert config["flow_control_window_size"] == DEFAULT_FLOW_CONTROL_WINDOW_SIZE
         assert config["initial_max_data"] == DEFAULT_INITIAL_MAX_DATA
@@ -195,18 +187,18 @@ class TestDefaultConfigs:
         assert config["log_level"] == DEFAULT_LOG_LEVEL
         assert config["max_connections"] == DEFAULT_SERVER_MAX_CONNECTIONS
         assert config["max_datagram_size"] == DEFAULT_MAX_DATAGRAM_SIZE
+        assert config["max_event_history_size"] == DEFAULT_MAX_EVENT_HISTORY_SIZE
+        assert config["max_event_listeners"] == DEFAULT_MAX_EVENT_LISTENERS
+        assert config["max_event_queue_size"] == DEFAULT_MAX_EVENT_QUEUE_SIZE
         assert config["max_message_size"] == DEFAULT_MAX_MESSAGE_SIZE
         assert config["max_pending_events_per_session"] == DEFAULT_MAX_PENDING_EVENTS_PER_SESSION
         assert config["max_sessions"] == DEFAULT_SERVER_MAX_SESSIONS
         assert config["max_stream_read_buffer"] == DEFAULT_MAX_STREAM_READ_BUFFER
         assert config["max_stream_write_buffer"] == DEFAULT_MAX_STREAM_WRITE_BUFFER
         assert config["max_total_pending_events"] == DEFAULT_MAX_TOTAL_PENDING_EVENTS
-        assert config["middleware"] == []
         assert config["pending_event_ttl"] == DEFAULT_PENDING_EVENT_TTL
-        assert config["pubsub_subscription_queue_size"] == DEFAULT_PUBSUB_SUBSCRIPTION_QUEUE_SIZE
         assert config["read_timeout"] == DEFAULT_READ_TIMEOUT
         assert config["resource_cleanup_interval"] == DEFAULT_RESOURCE_CLEANUP_INTERVAL
-        assert config["rpc_concurrency_limit"] == DEFAULT_RPC_CONCURRENCY_LIMIT
         assert config["stream_creation_timeout"] == DEFAULT_STREAM_CREATION_TIMEOUT
         assert config["stream_flow_control_increment_bidi"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_BIDI
         assert config["stream_flow_control_increment_uni"] == DEFAULT_STREAM_FLOW_CONTROL_INCREMENT_UNI

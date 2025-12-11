@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import asdict, is_dataclass
+from datetime import datetime
+from enum import Enum
 from typing import Any, cast
 
 from pywebtransport.exceptions import ConfigurationError, SerializationError
-from pywebtransport.serializer._base import _BaseDataclassSerializer
-from pywebtransport.types import Serializer
+from pywebtransport.serializer._base import BaseDataclassSerializer
+from pywebtransport.types import Buffer, Serializer
 
 try:
     import msgpack
@@ -18,7 +21,7 @@ except ImportError:
 __all__: list[str] = ["MsgPackSerializer"]
 
 
-class MsgPackSerializer(_BaseDataclassSerializer, Serializer):
+class MsgPackSerializer(BaseDataclassSerializer, Serializer):
     """Serializer for encoding and decoding using the MsgPack format."""
 
     def __init__(
@@ -32,10 +35,11 @@ class MsgPackSerializer(_BaseDataclassSerializer, Serializer):
                 details={"installation_guide": "Please install it with: pip install pywebtransport[msgpack]"},
             )
 
-        self._pack_kwargs = pack_kwargs or {}
-        self._unpack_kwargs = unpack_kwargs or {}
+        self._pack_kwargs = pack_kwargs.copy() if pack_kwargs else {}
+        self._unpack_kwargs = unpack_kwargs.copy() if unpack_kwargs else {}
+        self._user_default = self._pack_kwargs.pop("default", None)
 
-    def deserialize(self, *, data: bytes, obj_type: Any = None) -> Any:
+    def deserialize(self, *, data: Buffer, obj_type: Any = None) -> Any:
         """Deserialize a MsgPack byte string into a Python object."""
         try:
             unpack_kwargs = {"raw": False, **self._unpack_kwargs}
@@ -43,7 +47,7 @@ class MsgPackSerializer(_BaseDataclassSerializer, Serializer):
 
             if not obj_type:
                 return decoded_obj
-            return self._convert_to_type(data=decoded_obj, target_type=obj_type)
+            return self.convert_to_type(data=decoded_obj, target_type=obj_type)
         except (msgpack.UnpackException, TypeError, ValueError) as e:
             raise SerializationError(
                 message="Data is not valid MsgPack or cannot be unpacked.", original_exception=e
@@ -51,15 +55,27 @@ class MsgPackSerializer(_BaseDataclassSerializer, Serializer):
 
     def serialize(self, *, obj: Any) -> bytes:
         """Serialize a Python object into a MsgPack byte string."""
-
-        def default_handler(o: Any) -> Any:
-            if not isinstance(o, type) and is_dataclass(o):
-                return asdict(obj=o)
-            raise TypeError(f"Object of type {o.__class__.__name__} is not MsgPack serializable")
-
         try:
-            return cast(bytes, msgpack.packb(o=obj, default=default_handler, **self._pack_kwargs))
+            return cast(bytes, msgpack.packb(o=obj, default=self._default_handler, **self._pack_kwargs))
         except TypeError as e:
             raise SerializationError(
                 message=f"Object of type {type(obj).__name__} is not MsgPack serializable.", original_exception=e
             ) from e
+
+    def _default_handler(self, o: Any) -> Any:
+        """Handle types not natively supported by MsgPack."""
+        match o:
+            case uuid.UUID():
+                return str(o)
+            case Enum():
+                return o.value
+            case set() | frozenset():
+                return list(o)
+            case datetime():
+                return o.isoformat()
+            case _ if is_dataclass(o) and not isinstance(o, type):
+                return asdict(obj=o)
+            case _:
+                if self._user_default:
+                    return self._user_default(o)
+                raise TypeError(f"Object of type {type(o).__name__} is not MsgPack serializable")

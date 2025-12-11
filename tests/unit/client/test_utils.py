@@ -2,11 +2,11 @@
 
 import pytest
 
-from pywebtransport import ConfigurationError
 from pywebtransport.client.utils import parse_webtransport_url, validate_url
 
 
 class TestUrlUtils:
+
     @pytest.mark.parametrize(
         "url, error_msg",
         [
@@ -16,7 +16,7 @@ class TestUrlUtils:
         ],
     )
     def test_parse_webtransport_url_raises_error(self, url: str, error_msg: str) -> None:
-        with pytest.raises(ConfigurationError, match=error_msg):
+        with pytest.raises(ValueError, match=error_msg):
             parse_webtransport_url(url=url)
 
     @pytest.mark.parametrize(
@@ -24,7 +24,7 @@ class TestUrlUtils:
         [
             ("https://example.com", ("example.com", 443, "/")),
             ("https://localhost:8080/path", ("localhost", 8080, "/path")),
-            ("https://[::1]:9090/q?a=1#f", ("::1", 9090, "/q?a=1#f")),
+            ("https://[::1]:9090/q?a=1#f", ("::1", 9090, "/q?a=1")),
         ],
     )
     def test_parse_webtransport_url_success(self, url: str, expected: tuple[str, int, str]) -> None:

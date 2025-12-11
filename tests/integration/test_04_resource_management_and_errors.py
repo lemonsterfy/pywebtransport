@@ -1,6 +1,7 @@
 """Integration tests for resource management and error handling."""
 
 import asyncio
+from typing import Any
 
 import pytest
 
@@ -19,7 +20,7 @@ from pywebtransport.types import EventType, SessionState
 pytestmark = pytest.mark.asyncio
 
 
-async def idle_handler(session: WebTransportSession) -> None:
+async def idle_handler(session: WebTransportSession, **kwargs: Any) -> None:
     try:
         await session.events.wait_for(event_type=EventType.SESSION_CLOSED)
     except asyncio.CancelledError:

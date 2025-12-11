@@ -83,7 +83,7 @@ async def test_connection_info() -> bool:
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            connection = session._connection
+            connection = session._connection()
             if not connection:
                 logger.error("FAILURE: No connection object available on session.")
                 return False
@@ -155,7 +155,10 @@ async def test_stream_management_diagnostics() -> bool:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
             logger.info("Connected, session: %s", session.session_id)
-            connection = session._connection
+            connection = session._connection()
+            if not connection:
+                logger.error("FAILURE: Connection lost.")
+                return False
 
             streams = [await session.create_bidirectional_stream() for _ in range(5)]
             logger.info("Created %d streams.", len(streams))

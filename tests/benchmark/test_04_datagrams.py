@@ -11,12 +11,14 @@ import uvloop
 from pytest_benchmark.fixture import BenchmarkFixture
 
 from pywebtransport import ClientConfig, WebTransportClient
+from pywebtransport.types import Buffer
 
 SERVER_URL_BASE: Final[str] = "https://127.0.0.1:4433"
 WARMUP_ROUNDS: Final[int] = 5
 BURST_COUNT: Final[int] = 10000
 PAYLOAD_SIZE: Final[int] = 64
-STATIC_PAYLOAD: Final[bytes] = b"x" * PAYLOAD_SIZE
+STATIC_VIEW_HEADER: Final[memoryview] = memoryview(b"H" * 4)
+STATIC_VIEW_BODY: Final[memoryview] = memoryview(b"x" * (PAYLOAD_SIZE - 4))
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -29,6 +31,7 @@ def client_config() -> ClientConfig:
         initial_max_data=1048576,
         initial_max_streams_bidi=100,
         initial_max_streams_uni=100,
+        max_event_queue_size=20000,
     )
 
 
@@ -37,10 +40,12 @@ class TestDatagramPerformance:
     def test_datagram_send_rate(self, *, benchmark: BenchmarkFixture, client_config: ClientConfig) -> None:
         url = f"{SERVER_URL_BASE}/discard"
 
+        payload_scatter: list[Buffer] = [STATIC_VIEW_HEADER, STATIC_VIEW_BODY]
+
         async def run_burst() -> None:
             async with WebTransportClient(config=client_config) as client:
                 session = await client.connect(url=url)
-                tasks = [session.send_datagram(data=STATIC_PAYLOAD) for _ in range(BURST_COUNT)]
+                tasks = [session.send_datagram(data=payload_scatter) for _ in range(BURST_COUNT)]
                 await asyncio.gather(*tasks)
                 await session.close()
 

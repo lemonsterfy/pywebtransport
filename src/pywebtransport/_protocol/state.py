@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
 
+from pywebtransport._protocol.events import ProtocolEvent
 from pywebtransport.types import (
+    Buffer,
     ConnectionState,
     Future,
     Headers,
@@ -20,7 +21,7 @@ from pywebtransport.types import (
 __all__: list[str] = []
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class StreamStateData:
     """Represent the complete state of a single WebTransport stream."""
 
@@ -33,18 +34,28 @@ class StreamStateData:
     bytes_sent: int = 0
     bytes_received: int = 0
 
-    read_buffer: deque[bytes] = field(default_factory=deque)
+    read_buffer: deque[Buffer] = field(default_factory=deque)
     read_buffer_size: int = 0
 
-    pending_read_requests: deque[Future[Any]] = field(default_factory=deque)
-    write_buffer: deque[tuple[bytes, Future[Any], bool]] = field(default_factory=deque)
+    pending_read_requests: deque[Future[Buffer]] = field(default_factory=deque)
+    write_buffer: deque[tuple[Buffer, Future[None], bool]] = field(default_factory=deque)
+    write_buffer_size: int = 0
 
     close_code: int | None = None
     close_reason: str | None = None
     closed_at: float | None = None
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
+class SessionInitData:
+    """Temporary storage for session configuration during creation."""
+
+    path: str
+    headers: Headers
+    created_at: float
+
+
+@dataclass(kw_only=True, slots=True)
 class SessionStateData:
     """Represent the complete state of a single WebTransport session."""
 
@@ -70,13 +81,16 @@ class SessionStateData:
     peer_max_streams_uni: int
     peer_streams_uni_opened: int = 0
 
-    pending_bidi_stream_futures: deque[Future[Any]] = field(default_factory=deque)
-    pending_uni_stream_futures: deque[Future[Any]] = field(default_factory=deque)
+    pending_bidi_stream_futures: deque[Future[StreamId]] = field(default_factory=deque)
+    pending_uni_stream_futures: deque[Future[StreamId]] = field(default_factory=deque)
 
     datagrams_sent: int = 0
     datagram_bytes_sent: int = 0
     datagrams_received: int = 0
     datagram_bytes_received: int = 0
+
+    active_streams: set[StreamId] = field(default_factory=set)
+    blocked_streams: set[StreamId] = field(default_factory=set)
 
     close_code: int | None = None
     close_reason: str | None = None
@@ -84,7 +98,7 @@ class SessionStateData:
     ready_at: float | None = None
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class ProtocolState:
     """Represent the single source of truth for an entire connection."""
 
@@ -95,14 +109,16 @@ class ProtocolState:
 
     handshake_complete: bool = False
     peer_settings_received: bool = False
+    local_goaway_sent: bool = False
 
     sessions: dict[SessionId, SessionStateData] = field(default_factory=dict)
     streams: dict[StreamId, StreamStateData] = field(default_factory=dict)
 
     stream_to_session_map: dict[StreamId, SessionId] = field(default_factory=dict)
-    pending_create_session_futures: dict[StreamId, Future[Any]] = field(default_factory=dict)
+    pending_create_session_futures: dict[StreamId, Future[SessionId]] = field(default_factory=dict)
+    pending_session_configs: dict[SessionId, SessionInitData] = field(default_factory=dict)
 
-    early_event_buffer: dict[StreamId, list[tuple[float, Any]]] = field(default_factory=dict)
+    early_event_buffer: dict[StreamId, list[tuple[float, ProtocolEvent]]] = field(default_factory=dict)
     early_event_count: int = 0
 
     peer_initial_max_data: int = 0

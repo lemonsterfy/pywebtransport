@@ -1,16 +1,20 @@
 """Unit tests for the pywebtransport.manager._base module."""
 
 import asyncio
+import logging
+from typing import cast
 
 import pytest
+from _pytest.logging import LogCaptureFixture
 from pytest_mock import MockerFixture
 
 from pywebtransport.events import Event, EventEmitter
-from pywebtransport.manager._base import _BaseResourceManager
+from pywebtransport.manager._base import BaseResourceManager
 from pywebtransport.types import EventType
 
 
 class MockResource:
+
     def __init__(self, resource_id: str) -> None:
         self.resource_id = resource_id
         self.events = EventEmitter()
@@ -19,22 +23,48 @@ class MockResource:
     async def close(self) -> None:
         self.closed = True
 
+    @property
+    def is_closed(self) -> bool:
+        return self.closed
 
-class ConcreteResourceManager(_BaseResourceManager[str, MockResource]):
+
+class ConcreteResourceManager(BaseResourceManager[str, MockResource]):
+
     _resource_closed_event_type = EventType.CONNECTION_CLOSED
 
-    async def _close_resource(self, resource: MockResource) -> None:
+    async def _close_resource(self, *, resource: MockResource) -> None:
         await resource.close()
 
-    def _get_resource_id(self, resource: MockResource) -> str:
+    def _get_resource_id(self, *, resource: MockResource) -> str:
         return resource.resource_id
 
 
 @pytest.mark.asyncio
 class TestBaseResourceManager:
+
     @pytest.fixture
     def manager(self) -> ConcreteResourceManager:
         return ConcreteResourceManager(resource_name="test_item", max_resources=5)
+
+    async def test_abstract_methods_raise(self) -> None:
+        resource = MockResource("r1")
+
+        class PartialManager(BaseResourceManager[str, MockResource]):
+            _resource_closed_event_type = EventType.CONNECTION_CLOSED
+
+            async def _close_resource(self, *, resource: MockResource) -> None:
+                await getattr(BaseResourceManager, "_close_resource")(self, resource=resource)
+
+            def _get_resource_id(self, *, resource: MockResource) -> str:
+                return cast(str, getattr(BaseResourceManager, "_get_resource_id")(self, resource=resource))
+
+        manager = PartialManager(resource_name="test", max_resources=1)
+
+        with pytest.raises(NotImplementedError):
+            await manager._close_resource(resource=resource)
+
+        with pytest.raises(NotImplementedError):
+            manager._get_resource_id(resource=resource)
 
     async def test_add_resource(self, manager: ConcreteResourceManager) -> None:
         resource = MockResource("r1")
@@ -49,10 +79,23 @@ class TestBaseResourceManager:
             retrieved = await manager.get_resource(resource_id="r1")
             assert retrieved is resource
 
+    async def test_add_resource_closed_during_registration(
+        self, manager: ConcreteResourceManager, mocker: MockerFixture
+    ) -> None:
+        resource = MockResource("r1")
+        mocker.patch.object(manager, "_check_is_closed", return_value=True)
+        mock_off = mocker.patch.object(resource.events, "off", side_effect=ValueError("Handler not found"))
+
+        async with manager:
+            with pytest.raises(RuntimeError, match="closed during registration"):
+                await manager.add_resource(resource=resource)
+
+        mock_off.assert_called_once()
+        assert len(manager) == 0
+
     async def test_add_resource_closed_handler_invalid_data(
         self, manager: ConcreteResourceManager, mocker: MockerFixture
     ) -> None:
-        spy_logger = mocker.patch.object(ConcreteResourceManager, "_log")
         resource = MockResource("r1")
 
         async with manager:
@@ -62,10 +105,39 @@ class TestBaseResourceManager:
             resource.events.emit_nowait(event_type=EventType.CONNECTION_CLOSED, data=event.data)
             await asyncio.sleep(0.01)
 
-            spy_logger.warning.assert_called()
-            assert len(manager) == 1
+            assert len(manager) == 0
 
-    async def test_add_resource_duplicate(self, manager: ConcreteResourceManager) -> None:
+    async def test_add_resource_closed_handler_mismatch_id(
+        self, manager: ConcreteResourceManager, caplog: LogCaptureFixture
+    ) -> None:
+        resource = MockResource("r1")
+
+        async with manager:
+            await manager.add_resource(resource=resource)
+
+            event = Event(type=EventType.CONNECTION_CLOSED, data={"test_item_id": "other"})
+            resource.events.emit_nowait(event_type=EventType.CONNECTION_CLOSED, data=event.data)
+            await asyncio.sleep(0.01)
+
+            assert len(manager) == 0
+            assert "Resource ID mismatch in close event" in caplog.text
+            assert "test_item" in caplog.text
+            assert "other" in caplog.text
+
+    async def test_add_resource_closed_inside_lock(
+        self, manager: ConcreteResourceManager, mocker: MockerFixture
+    ) -> None:
+        resource = MockResource("r1")
+        mocker.patch.object(MockResource, "is_closed", new_callable=mocker.PropertyMock).side_effect = [False, True]
+
+        async with manager:
+            with pytest.raises(RuntimeError, match="Cannot add closed test_item"):
+                await manager.add_resource(resource=resource)
+
+        assert len(manager) == 0
+
+    async def test_add_resource_duplicate(self, manager: ConcreteResourceManager, caplog: LogCaptureFixture) -> None:
+        caplog.set_level(logging.DEBUG)
         resource = MockResource("r1")
 
         async with manager:
@@ -75,6 +147,8 @@ class TestBaseResourceManager:
             assert len(manager) == 1
             stats = await manager.get_stats()
             assert stats["total_created"] == 1
+
+            assert "Resource r1 already managed." in caplog.text
 
     async def test_add_resource_limit_reached(self, manager: ConcreteResourceManager) -> None:
         manager._max_resources = 1
@@ -105,66 +179,17 @@ class TestBaseResourceManager:
                 await manager.add_resource(resource=resource)
             assert resource.closed is True
 
-    async def test_background_task_cancellation(self, manager: ConcreteResourceManager) -> None:
-        async def dummy_task() -> None:
-            try:
-                await asyncio.sleep(10)
-            except asyncio.CancelledError:
-                pass
-
-        async with manager:
-            task = asyncio.create_task(dummy_task())
-            manager._background_tasks_to_cancel.append(task)
-
-        assert task.cancelled() or task.done()
-
-    async def test_background_task_cancelled_ignored(
+    async def test_close_all_resources_event_off_error(
         self, manager: ConcreteResourceManager, mocker: MockerFixture
     ) -> None:
-        spy_logger = mocker.patch.object(ConcreteResourceManager, "_log")
-
-        async def dummy_task() -> None:
-            await asyncio.sleep(0.1)
-
-        task = asyncio.create_task(dummy_task())
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
-        manager._on_background_task_done(task)
-
-        spy_logger.error.assert_not_called()
-
-    async def test_background_task_done_callback_error(
-        self, manager: ConcreteResourceManager, mocker: MockerFixture
-    ) -> None:
-        spy_shutdown = mocker.spy(manager, "shutdown")
-        spy_logger = mocker.patch.object(ConcreteResourceManager, "_log")
-
-        async def failing_task() -> None:
-            raise ValueError("Background failure")
+        resource = MockResource("r1")
+        mocker.patch.object(resource.events, "off", side_effect=ValueError("Cleanup error"))
 
         async with manager:
-            task = asyncio.create_task(failing_task())
-            try:
-                await task
-            except ValueError:
-                pass
+            await manager.add_resource(resource=resource)
+            await manager.shutdown()
 
-            manager._on_background_task_done(task)
-
-        assert spy_logger.error.called
-        call_args = spy_logger.error.call_args
-        assert call_args[0][0] == "%s background task finished unexpectedly: %s."
-        assert call_args[0][1] == "Test_item"
-
-        await asyncio.sleep(0)
-        spy_shutdown.assert_called()
-
-    async def test_cancel_background_tasks_none(self, manager: ConcreteResourceManager) -> None:
-        await manager._cancel_background_tasks()
+        assert len(manager) == 0
 
     async def test_close_all_resources_no_lock(self, manager: ConcreteResourceManager) -> None:
         await manager._close_all_resources()
@@ -230,29 +255,6 @@ class TestBaseResourceManager:
 
         assert manager._stats["total_closed"] == 0
 
-    async def test_on_background_task_done_shutting_down(
-        self, manager: ConcreteResourceManager, mocker: MockerFixture
-    ) -> None:
-        manager._is_shutting_down = True
-        spy_logger = mocker.patch.object(ConcreteResourceManager, "_log")
-        mock_task = mocker.Mock(spec=asyncio.Task)
-
-        manager._on_background_task_done(mock_task)
-
-        spy_logger.error.assert_not_called()
-
-    async def test_on_background_task_done_success(
-        self, manager: ConcreteResourceManager, mocker: MockerFixture
-    ) -> None:
-        spy_logger = mocker.patch.object(ConcreteResourceManager, "_log")
-        mock_task = mocker.Mock(spec=asyncio.Task)
-        mock_task.cancelled.return_value = False
-        mock_task.exception.return_value = None
-
-        manager._on_background_task_done(mock_task)
-
-        spy_logger.error.assert_not_called()
-
     async def test_resource_closed_event_handling(self, manager: ConcreteResourceManager) -> None:
         resource = MockResource("r1")
 
@@ -269,26 +271,6 @@ class TestBaseResourceManager:
             stats = await manager.get_stats()
             assert stats["total_closed"] == 1
 
-    async def test_resource_closed_event_mismatch_id(
-        self, manager: ConcreteResourceManager, mocker: MockerFixture
-    ) -> None:
-        resource = MockResource("r1")
-        spy_logger = mocker.patch.object(ConcreteResourceManager, "_log")
-
-        async with manager:
-            await manager.add_resource(resource=resource)
-
-            event = Event(type=EventType.CONNECTION_CLOSED, data={"test_item_id": "wrong_id"})
-            resource.events.emit_nowait(event_type=EventType.CONNECTION_CLOSED, data=event.data)
-
-            await asyncio.sleep(0.01)
-
-            assert len(manager) == 1
-            assert spy_logger.warning.called
-            args = spy_logger.warning.call_args[0]
-            assert "Received close event without expected resource ID" in args[0]
-            assert args[2] == "r1"
-
     async def test_shutdown_closes_resources(self, manager: ConcreteResourceManager) -> None:
         r1 = MockResource("r1")
         r2 = MockResource("r2")
@@ -302,18 +284,20 @@ class TestBaseResourceManager:
         assert len(manager) == 0
         assert manager._stats["total_closed"] == 2
 
-    async def test_shutdown_handles_close_errors(self, manager: ConcreteResourceManager, mocker: MockerFixture) -> None:
+    async def test_shutdown_handles_multiple_close_errors(
+        self, manager: ConcreteResourceManager, mocker: MockerFixture, caplog: LogCaptureFixture
+    ) -> None:
         r1 = MockResource("r1")
-        mocker.patch.object(r1, "close", side_effect=ValueError("Close failed"))
-        spy_logger = mocker.patch.object(ConcreteResourceManager, "_log")
+        r2 = MockResource("r2")
+        mocker.patch.object(r1, "close", side_effect=ValueError("Fail 1"))
+        mocker.patch.object(r2, "close", side_effect=RuntimeError("Fail 2"))
 
         async with manager:
             await manager.add_resource(resource=r1)
+            await manager.add_resource(resource=r2)
 
-        assert spy_logger.error.called
-        args = spy_logger.error.call_args[0]
-        assert "Errors occurred while closing managed %ss: %s" in args[0]
-        assert args[1] == "test_item"
+        assert "Errors occurred while closing managed test_items" in caplog.text
+        assert "Fail 1" in caplog.text or "Fail 2" in caplog.text
         assert len(manager) == 0
 
     async def test_shutdown_idempotent(self, manager: ConcreteResourceManager) -> None:

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from aioquic._buffer import Buffer
+from aioquic._buffer import Buffer as QuicBuffer
 
 from pywebtransport import constants
 from pywebtransport._protocol.events import (
@@ -13,6 +13,9 @@ from pywebtransport._protocol.events import (
     Effect,
     EmitStreamEvent,
     FailUserFuture,
+    InternalBindQuicStream,
+    InternalFailQuicStream,
+    InternalReturnStreamData,
     ResetQuicStream,
     SendH3Capsule,
     SendQuicData,
@@ -32,9 +35,9 @@ from pywebtransport._protocol.utils import (
     webtransport_code_to_http_code,
 )
 from pywebtransport.constants import ErrorCodes
-from pywebtransport.exceptions import StreamError
-from pywebtransport.types import EventType, SessionState, StreamDirection, StreamState
-from pywebtransport.utils import ensure_bytes, get_logger, get_timestamp
+from pywebtransport.exceptions import SessionError, StreamError
+from pywebtransport.types import Buffer, EventType, Future, SessionState, StreamDirection, StreamState
+from pywebtransport.utils import ensure_buffer, get_logger, get_timestamp
 
 if TYPE_CHECKING:
     from pywebtransport.config import ClientConfig, ServerConfig
@@ -65,11 +68,70 @@ class StreamProcessor:
                     ),
                 )
             ]
-        # Create a snapshot dict and sanitize buffer data for diagnostics
         data_dict = dataclasses.asdict(stream_data)
         data_dict["read_buffer"] = bytes(0)
         data_dict["read_buffer_size"] = stream_data.read_buffer_size
         return [CompleteUserFuture(future=event.future, value=data_dict)]
+
+    def handle_internal_bind_quic_stream(self, *, event: InternalBindQuicStream, state: ProtocolState) -> list[Effect]:
+        """Handle the InternalBindQuicStream event."""
+        effects: list[Effect] = []
+        session_id = event.session_id
+        session_data = state.sessions.get(session_id)
+
+        if not session_data:
+            effects.append(
+                FailUserFuture(
+                    future=event.future, exception=SessionError(f"Session {session_id} not found during stream bind")
+                )
+            )
+            return effects
+
+        stream_id = event.stream_id
+        direction = StreamDirection.SEND_ONLY if event.is_unidirectional else StreamDirection.BIDIRECTIONAL
+
+        stream_data = StreamStateData(
+            stream_id=stream_id,
+            session_id=session_id,
+            direction=direction,
+            state=StreamState.OPEN,
+            created_at=get_timestamp(),
+        )
+
+        state.streams[stream_id] = stream_data
+        state.stream_to_session_map[stream_id] = session_id
+        session_data.active_streams.add(stream_id)
+
+        effects.append(CompleteUserFuture(future=event.future, value=stream_id))
+        effects.append(
+            EmitStreamEvent(
+                stream_id=stream_id,
+                event_type=EventType.STREAM_OPENED,
+                data={"stream_id": stream_id, "session_id": session_id, "direction": direction},
+            )
+        )
+        return effects
+
+    def handle_internal_fail_quic_stream(self, *, event: InternalFailQuicStream, state: ProtocolState) -> list[Effect]:
+        """Handle the InternalFailQuicStream event."""
+        session_data = state.sessions.get(event.session_id)
+        if session_data:
+            if event.is_unidirectional:
+                if session_data.local_streams_uni_opened > 0:
+                    session_data.local_streams_uni_opened -= 1
+            else:
+                if session_data.local_streams_bidi_opened > 0:
+                    session_data.local_streams_bidi_opened -= 1
+
+        return [FailUserFuture(future=event.future, exception=event.exception)]
+
+    def handle_return_stream_data(self, *, event: InternalReturnStreamData, state: ProtocolState) -> list[Effect]:
+        """Handle the InternalReturnStreamData event."""
+        stream_data = state.streams.get(event.stream_id)
+        if stream_data:
+            stream_data.read_buffer.appendleft(event.data)
+            stream_data.read_buffer_size += len(event.data)
+        return []
 
     def handle_reset_stream(self, *, event: UserResetStream, state: ProtocolState) -> list[Effect]:
         """Handle the UserResetStream event to reset the sending side."""
@@ -103,10 +165,17 @@ class StreamProcessor:
                     message=f"Stream {stream_id} reset by application", stream_id=stream_id, error_code=event.error_code
                 )
                 effects.append(FailUserFuture(future=write_future, exception=error))
+        stream_data.write_buffer_size = 0
+
+        session_data = state.sessions.get(stream_data.session_id)
+        if session_data:
+            session_data.blocked_streams.discard(stream_id)
 
         match original_state:
             case StreamState.HALF_CLOSED_REMOTE | StreamState.RESET_RECEIVED:
                 stream_data.state = StreamState.CLOSED
+                if session_data:
+                    session_data.active_streams.discard(stream_id)
                 effects.append(
                     EmitStreamEvent(
                         stream_id=stream_id, event_type=EventType.STREAM_CLOSED, data={"stream_id": stream_id}
@@ -145,14 +214,14 @@ class StreamProcessor:
             return effects
 
         try:
-            data_bytes = ensure_bytes(data=event.data)
+            buffer_data = ensure_buffer(data=event.data)
         except TypeError as exc:
             logger.warning("Stream %d received invalid data type: %s", stream_id, exc)
             return [FailUserFuture(future=event.future, exception=exc)]
 
-        data_len = len(data_bytes)
+        data_len = len(buffer_data)
         max_buffer_size = self._config.max_stream_write_buffer
-        current_buffer_size = sum(len(item[0]) for item in stream_data.write_buffer)
+        current_buffer_size = stream_data.write_buffer_size
 
         if current_buffer_size + data_len > max_buffer_size:
             error = StreamError(
@@ -166,7 +235,9 @@ class StreamProcessor:
 
         if stream_data.write_buffer:
             logger.debug("Stream %d write added to existing write buffer", stream_id)
-            stream_data.write_buffer.append((data_bytes, event.future, event.end_stream))
+            stream_data.write_buffer.append((buffer_data, event.future, event.end_stream))
+            stream_data.write_buffer_size += data_len
+            session_data.blocked_streams.add(stream_id)
             return []
 
         available_credit = session_data.peer_max_data - session_data.local_data_sent
@@ -174,7 +245,7 @@ class StreamProcessor:
         if data_len <= available_credit:
             session_data.local_data_sent += data_len
             stream_data.bytes_sent += data_len
-            effects.append(SendQuicData(stream_id=stream_id, data=data_bytes, end_stream=event.end_stream))
+            effects.append(SendQuicData(stream_id=stream_id, data=buffer_data, end_stream=event.end_stream))
             effects.append(CompleteUserFuture(future=event.future))
 
             if event.end_stream:
@@ -182,6 +253,8 @@ class StreamProcessor:
                 match original_state:
                     case StreamState.HALF_CLOSED_REMOTE | StreamState.RESET_RECEIVED:
                         stream_data.state = StreamState.CLOSED
+                        session_data.active_streams.discard(stream_id)
+                        session_data.blocked_streams.discard(stream_id)
                         effects.append(
                             EmitStreamEvent(
                                 stream_id=stream_id, event_type=EventType.STREAM_CLOSED, data={"stream_id": stream_id}
@@ -194,8 +267,8 @@ class StreamProcessor:
             return effects
 
         elif available_credit > 0:
-            data_to_send_now = data_bytes[:available_credit]
-            remaining_data = data_bytes[available_credit:]
+            data_to_send_now = buffer_data[:available_credit]
+            remaining_data = buffer_data[available_credit:]
 
             session_data.local_data_sent += available_credit
             stream_data.bytes_sent += available_credit
@@ -208,8 +281,10 @@ class StreamProcessor:
                 len(remaining_data),
             )
             stream_data.write_buffer.append((remaining_data, event.future, event.end_stream))
+            stream_data.write_buffer_size += len(remaining_data)
+            session_data.blocked_streams.add(stream_id)
 
-            buf = Buffer(capacity=8)
+            buf = QuicBuffer(capacity=8)
             buf.push_uint_var(session_data.peer_max_data)
             effects.append(
                 SendH3Capsule(
@@ -224,9 +299,11 @@ class StreamProcessor:
             logger.debug(
                 "Stream %d write blocked by session flow control (%d > %d)", stream_id, data_len, available_credit
             )
-            stream_data.write_buffer.append((data_bytes, event.future, event.end_stream))
+            stream_data.write_buffer.append((buffer_data, event.future, event.end_stream))
+            stream_data.write_buffer_size += data_len
+            session_data.blocked_streams.add(stream_id)
 
-            buf = Buffer(capacity=8)
+            buf = QuicBuffer(capacity=8)
             buf.push_uint_var(session_data.peer_max_data)
             effects.append(
                 SendH3Capsule(
@@ -271,9 +348,14 @@ class StreamProcessor:
                 )
                 effects.append(FailUserFuture(future=read_future, exception=error))
 
+        session_data = state.sessions.get(stream_data.session_id)
+
         match original_state:
             case StreamState.HALF_CLOSED_LOCAL | StreamState.RESET_SENT:
                 stream_data.state = StreamState.CLOSED
+                if session_data:
+                    session_data.active_streams.discard(stream_id)
+                    session_data.blocked_streams.discard(stream_id)
                 effects.append(
                     EmitStreamEvent(
                         stream_id=stream_id, event_type=EventType.STREAM_CLOSED, data={"stream_id": stream_id}
@@ -316,7 +398,8 @@ class StreamProcessor:
             effects.append(CompleteUserFuture(future=event.future, value=b""))
             return effects
 
-        stream_data.pending_read_requests.append(event.future)
+        setattr(event.future, "stream_id", stream_id)
+        stream_data.pending_read_requests.append(cast(Future[Buffer], event.future))
         return effects
 
     def handle_transport_stream_reset(self, *, event: TransportStreamReset, state: ProtocolState) -> list[Effect]:
@@ -357,8 +440,14 @@ class StreamProcessor:
                     message=f"Stream {stream_id} reset by peer", stream_id=stream_id, error_code=app_error_code
                 )
                 effects.append(FailUserFuture(future=write_future, exception=error))
+        stream_data.write_buffer_size = 0
 
         stream_data.state = StreamState.CLOSED
+
+        session_data = state.sessions.get(stream_data.session_id)
+        if session_data:
+            session_data.active_streams.discard(stream_id)
+            session_data.blocked_streams.discard(stream_id)
 
         effects.append(
             EmitStreamEvent(stream_id=stream_id, event_type=EventType.STREAM_CLOSED, data={"stream_id": stream_id})
@@ -478,6 +567,7 @@ class StreamProcessor:
             )
             state.streams[stream_id] = stream_data
             state.stream_to_session_map[stream_id] = session_id
+            session_data.active_streams.add(stream_id)
 
             effects.append(
                 EmitStreamEvent(
@@ -527,6 +617,8 @@ class StreamProcessor:
                     if stream_data.read_buffer_size == 0:
                         stream_data.state = StreamState.CLOSED
                         stream_data.closed_at = get_timestamp()
+                        session_data.active_streams.discard(stream_id)
+                        session_data.blocked_streams.discard(stream_id)
                         effects.append(
                             EmitStreamEvent(
                                 stream_id=stream_id, event_type=EventType.STREAM_CLOSED, data={"stream_id": stream_id}
@@ -577,7 +669,7 @@ class StreamProcessor:
 
             session_data.local_max_data = new_limit
 
-            buf = Buffer(capacity=8)
+            buf = QuicBuffer(capacity=8)
             buf.push_uint_var(new_limit)
 
             return SendH3Capsule(
@@ -636,7 +728,7 @@ class StreamProcessor:
             else:
                 session_data.local_max_streams_bidi = new_limit
 
-            buf = Buffer(capacity=8)
+            buf = QuicBuffer(capacity=8)
             buf.push_uint_var(new_limit)
 
             return SendH3Capsule(
@@ -646,7 +738,7 @@ class StreamProcessor:
 
     def _read_from_buffer(self, *, stream_data: StreamStateData, max_bytes: int) -> bytes:
         """Read up to max_bytes from the stream's read buffer."""
-        chunks: list[bytes] = []
+        chunks: list[Buffer] = []
         bytes_collected = 0
 
         while stream_data.read_buffer and bytes_collected < max_bytes:

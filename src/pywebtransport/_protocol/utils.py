@@ -10,6 +10,10 @@ from pywebtransport.types import StreamDirection, StreamId
 
 __all__: list[str] = []
 
+_H3_ERROR_RESERVED_OFFSET = 0x21
+_H3_ERROR_RESERVED_MODULO = 0x1F
+_WT_ERROR_MAP_DIVISOR = 0x1E
+
 
 def can_receive_data_on_stream(*, stream_id: StreamId, is_client: bool) -> bool:
     """Check if the local endpoint can receive data on a given stream."""
@@ -31,7 +35,8 @@ def can_send_data_on_stream(*, stream_id: StreamId, is_client: bool) -> bool:
 
 def get_stream_direction_from_id(*, stream_id: StreamId, is_client: bool) -> StreamDirection:
     """Determine the stream direction from its ID and the endpoint role."""
-    validate_stream_id(stream_id=stream_id)
+    if __debug__:
+        validate_stream_id(stream_id=stream_id)
 
     match (
         is_bidirectional_stream(stream_id=stream_id),
@@ -52,11 +57,11 @@ def http_code_to_webtransport_code(*, http_error_code: int) -> int:
     if not (ErrorCodes.WT_APPLICATION_ERROR_FIRST <= http_error_code <= ErrorCodes.WT_APPLICATION_ERROR_LAST):
         raise ValueError("HTTP error code is not in the WebTransport application range.")
 
-    if (http_error_code - 0x21) % 0x1F == 0:
+    if (http_error_code - _H3_ERROR_RESERVED_OFFSET) % _H3_ERROR_RESERVED_MODULO == 0:
         raise ValueError("HTTP error code is a reserved codepoint and cannot be mapped.")
 
     shifted = http_error_code - ErrorCodes.WT_APPLICATION_ERROR_FIRST
-    return shifted - (shifted // 0x1F)
+    return shifted - (shifted // _H3_ERROR_RESERVED_MODULO)
 
 
 def is_bidirectional_stream(*, stream_id: StreamId) -> bool:
@@ -74,21 +79,13 @@ def is_unidirectional_stream(*, stream_id: StreamId) -> bool:
     return (stream_id & 0x2) != 0
 
 
-def validate_h3_session_id(*, session_id: int) -> None:
+def validate_control_stream_id(*, stream_id: int) -> None:
     """Validate if an ID conforms to the H3 Session ID format (client-bidi)."""
-    if (session_id & 0x3) != 0:
+    if not is_request_response_stream(stream_id=stream_id):
         raise ProtocolError(
-            message=f"Invalid Session ID format: {session_id} (must be client-initiated bidirectional)",
+            message=f"Invalid Session ID format: {stream_id} (must be client-initiated bidirectional)",
             error_code=ErrorCodes.H3_ID_ERROR,
         )
-
-
-def validate_session_id(*, session_id: Any) -> None:
-    """Validate a WebTransport session ID."""
-    if not isinstance(session_id, str):
-        raise TypeError("Session ID must be a string")
-    if not session_id:
-        raise ValueError("Session ID cannot be empty")
 
 
 def validate_stream_id(*, stream_id: Any) -> None:
@@ -104,7 +101,7 @@ def webtransport_code_to_http_code(*, app_error_code: int) -> int:
     if not (0x0 <= app_error_code <= 0xFFFFFFFF):
         raise ValueError("Application error code must be a 32-bit unsigned integer.")
 
-    return ErrorCodes.WT_APPLICATION_ERROR_FIRST + app_error_code + (app_error_code // 0x1E)
+    return ErrorCodes.WT_APPLICATION_ERROR_FIRST + app_error_code + (app_error_code // _WT_ERROR_MAP_DIVISOR)
 
 
 def _is_client_initiated_stream(*, stream_id: StreamId) -> bool:

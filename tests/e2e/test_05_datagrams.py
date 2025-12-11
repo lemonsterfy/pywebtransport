@@ -49,14 +49,11 @@ async def test_basic_datagram() -> bool:
             await session.send_datagram(data=test_message)
 
             logger.info("Waiting for echo...")
-            # v0.9.0: Receive datagrams via session events
             event: Event = await session.events.wait_for(event_type=EventType.DATAGRAM_RECEIVED, timeout=5.0)
 
-            # --- FIX: Check if event.data is a dict before access ---
             response = None
             if isinstance(event.data, dict):
                 response = event.data.get("data")
-            # --- END FIX ---
 
             if response == expected_response:
                 logger.info("SUCCESS: Received correct datagram echo.")
@@ -97,21 +94,19 @@ async def test_multiple_datagrams() -> bool:
                     for _ in range(num_datagrams):
                         event = await session.events.wait_for(event_type=EventType.DATAGRAM_RECEIVED, timeout=5.0)
 
-                        # --- FIX: Check if event.data is a dict before access ---
                         data = None
                         if isinstance(event.data, dict):
                             data = event.data.get("data")
-                        # --- END FIX ---
 
                         if isinstance(data, bytes):
                             received_events.append(data)
                 except asyncio.TimeoutError:
                     logger.warning("Receiver timed out.")
                 except Exception:
-                    pass  # Errors will be handled by main task
+                    pass
 
             receiver_task = asyncio.create_task(receiver())
-            await asyncio.sleep(0.1)  # Ensure receiver task starts listening
+            await asyncio.sleep(0.1)
 
             for i in range(num_datagrams):
                 await session.send_datagram(data=f"Datagram message {i + 1}".encode())
@@ -149,15 +144,19 @@ async def test_datagram_sizes() -> bool:
         initial_max_data=1024 * 1024,
         initial_max_streams_bidi=100,
         initial_max_streams_uni=100,
-        max_datagram_size=1200,  # Explicitly set a known max size
+        max_datagram_size=1200,
     )
 
     try:
         async with WebTransportClient(config=config) as client:
             session = await client.connect(url=SERVER_URL)
-            # v0.9.0: Get max size from the engine's state via the connection
-            # We access the engine's state, which got the value from config
-            max_size = session._connection._engine._state.max_datagram_size
+
+            connection = session._connection()
+            if not connection:
+                logger.error("FAILURE: Connection lost unexpectedly.")
+                return False
+
+            max_size = connection._engine._state.max_datagram_size
             logger.info("Max datagram size from engine state: %s bytes.", max_size)
 
             if max_size != 1200:
@@ -169,7 +168,6 @@ async def test_datagram_sizes() -> bool:
                 await session.send_datagram(data=oversized_data)
                 logger.error("FAILURE: Sending oversized datagram should have raised an exception.")
                 return False
-            # v0.9.0: The engine raises ValueError, not DatagramError
             except ValueError as e:
                 if "Datagram size" in str(e):
                     logger.info("SUCCESS: Oversized datagram correctly raised ValueError: %s", e)
@@ -203,7 +201,6 @@ async def test_datagram_burst() -> bool:
             logger.info("Starting burst of %d datagrams...", burst_size)
             start_time = time.time()
 
-            # v0.9.0: Use session.send_datagram
             tasks = [session.send_datagram(data=f"Burst {i}".encode()) for i in range(burst_size)]
             await asyncio.gather(*tasks)
             duration = time.time() - start_time
@@ -220,8 +217,6 @@ async def main() -> int:
     """Run the main entry point for the datagrams test suite."""
     logger.info("--- Starting Test 05: Datagrams ---")
 
-    # v0.9.0: Removed tests for Priority, TTL, JSON, and Queue Behavior
-    # as the DatagramTransport object no longer exists.
     tests: list[tuple[str, Callable[[], Awaitable[bool]]]] = [
         ("Basic Datagram Echo", test_basic_datagram),
         ("Multiple Datagrams", test_multiple_datagrams),
