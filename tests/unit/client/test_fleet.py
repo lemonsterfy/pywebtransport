@@ -1,6 +1,5 @@
 """Unit tests for the pywebtransport.client.fleet module."""
 
-import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -15,6 +14,7 @@ from pywebtransport.client import ClientFleet
 
 
 class TestClientFleet:
+
     @asyncio_fixture
     async def fleet(self, fleet_unactivated: ClientFleet) -> AsyncGenerator[ClientFleet, None]:
         async with fleet_unactivated as activated_fleet:
@@ -38,13 +38,14 @@ class TestClientFleet:
     @pytest.mark.asyncio
     async def test_aenter_and_aexit_success(self, fleet_unactivated: ClientFleet, mock_clients: list[Any]) -> None:
         async with fleet_unactivated:
-            assert isinstance(fleet_unactivated._lock, asyncio.Lock)
+            assert fleet_unactivated._active
             for client in mock_clients:
                 cast(AsyncMock, client.__aenter__).assert_awaited_once()
 
         for client in mock_clients:
             cast(AsyncMock, client.close).assert_awaited_once()
-        assert fleet_unactivated.get_client_count() == 0
+        assert fleet_unactivated.get_client_count() == 3
+        assert not fleet_unactivated._active
 
     @pytest.mark.asyncio
     async def test_aenter_failure_and_cleanup(self, mock_clients: list[Any], caplog: LogCaptureFixture) -> None:
@@ -58,6 +59,7 @@ class TestClientFleet:
                 pass
 
         assert exc_info.value.exceptions[0] is error
+        assert not fleet._active
         for client in mock_clients:
             cast(AsyncMock, client.close).assert_awaited_once()
         assert "Failed to activate clients in fleet" in caplog.text
@@ -75,6 +77,12 @@ class TestClientFleet:
         assert "Errors during client fleet startup cleanup" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_close_all_idempotency_when_inactive(self, fleet_unactivated: ClientFleet) -> None:
+        await fleet_unactivated.close_all()
+
+        assert not fleet_unactivated._active
+
+    @pytest.mark.asyncio
     async def test_close_all_with_failures(
         self, fleet: ClientFleet, mock_clients: list[Any], caplog: LogCaptureFixture
     ) -> None:
@@ -84,16 +92,16 @@ class TestClientFleet:
 
         for client in mock_clients:
             cast(AsyncMock, client.close).assert_awaited_once()
-        assert fleet.get_client_count() == 0
+        assert not fleet._active
+        assert fleet.get_client_count() == 3
         assert "Errors occurred while closing client fleet" in caplog.text
 
     @pytest.mark.asyncio
     async def test_connect_all_after_close(self, fleet: ClientFleet) -> None:
         await fleet.close_all()
 
-        results = await fleet.connect_all(url="https://example.com")
-
-        assert results == []
+        with pytest.raises(ClientError, match="ClientFleet has not been activated"):
+            await fleet.connect_all(url="https://example.com")
 
     @pytest.mark.asyncio
     async def test_connect_all_with_mixed_results(
@@ -108,39 +116,36 @@ class TestClientFleet:
         assert len(sessions) == len(mock_clients) - 1
         cast(AsyncMock, mock_clients[0].connect).assert_awaited_once_with(url=url)
         cast(AsyncMock, mock_clients[2].connect).assert_awaited_once_with(url=url)
-        assert "Some clients in the fleet failed to connect" in caplog.text
-        assert f"Client 1 in the fleet failed to connect: {error}" in caplog.text
+        assert f"Client failed to connect: {error}" in caplog.text
 
-    @pytest.mark.asyncio
-    async def test_get_client_after_close(self, fleet: ClientFleet) -> None:
-        await fleet.close_all()
-        with pytest.raises(ClientError, match="No clients available"):
-            await fleet.get_client()
+    def test_get_client_after_close(self, fleet_unactivated: ClientFleet) -> None:
+        with pytest.raises(ClientError, match="ClientFleet has not been activated"):
+            fleet_unactivated.get_client()
 
-    @pytest.mark.asyncio
-    async def test_get_client_round_robin(self, fleet: ClientFleet, mock_clients: list[Any]) -> None:
-        client_order = [await fleet.get_client() for _ in range(len(mock_clients) + 1)]
+    def test_get_client_count(self, fleet_unactivated: ClientFleet, mock_clients: list[Any]) -> None:
+        assert fleet_unactivated.get_client_count() == len(mock_clients)
+
+    def test_get_client_round_robin(self, fleet: ClientFleet, mock_clients: list[Any]) -> None:
+        client_order = [fleet.get_client() for _ in range(len(mock_clients) + 1)]
 
         assert client_order[0] is mock_clients[0]
         assert client_order[1] is mock_clients[1]
         assert client_order[2] is mock_clients[2]
         assert client_order[3] is mock_clients[0]
 
-    def test_get_client_count(self, fleet_unactivated: ClientFleet, mock_clients: list[Any]) -> None:
-        assert fleet_unactivated.get_client_count() == len(mock_clients)
-
     def test_init_success(self, mock_clients: list[Any]) -> None:
         fleet = ClientFleet(clients=mock_clients)
+
         assert fleet.get_client_count() == len(mock_clients)
-        assert fleet._lock is None
+        assert not fleet._active
 
     def test_init_with_no_clients(self) -> None:
         with pytest.raises(ValueError, match="ClientFleet requires at least one client instance"):
             ClientFleet(clients=[])
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("method_name", ["close_all", "connect_all", "get_client"])
-    async def test_methods_raise_if_not_activated(self, fleet_unactivated: ClientFleet, method_name: str) -> None:
+    @pytest.mark.parametrize("method_name", ["connect_all"])
+    async def test_methods_raise_if_not_activated_async(self, fleet_unactivated: ClientFleet, method_name: str) -> None:
         method_to_test = getattr(fleet_unactivated, method_name)
         kwargs = {"url": "https://url"} if method_name == "connect_all" else {}
 

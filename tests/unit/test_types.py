@@ -1,15 +1,17 @@
 """Unit tests for the pywebtransport.types module."""
 
+import asyncio
 from typing import Any
 
 import pytest
 
-from pywebtransport import Headers, Serializer
+from pywebtransport import Headers
 from pywebtransport.types import (
-    AuthHandlerProtocol,
+    Buffer,
     ConnectionState,
     EventType,
-    MiddlewareProtocol,
+    Serializer,
+    SessionProtocol,
     SessionState,
     StreamDirection,
     StreamState,
@@ -107,40 +109,12 @@ class TestEnumerations:
 
 class TestRuntimeCheckableProtocols:
 
-    def test_auth_handler_protocol_conformance(self) -> None:
-        class GoodAuthHandler:
-            async def __call__(self, *, headers: Headers) -> bool:
-                return True
-
-        assert isinstance(GoodAuthHandler(), AuthHandlerProtocol)
-
-    def test_auth_handler_protocol_non_conformance(self) -> None:
-        class BadAuthHandler:
-            async def handle(self, *, headers: Headers) -> bool:
-                return True
-
-        assert not isinstance(BadAuthHandler(), AuthHandlerProtocol)
-
-    def test_middleware_protocol_conformance(self) -> None:
-        class GoodMiddleware:
-            async def __call__(self, *, session: Any) -> bool:
-                return True
-
-        assert isinstance(GoodMiddleware(), MiddlewareProtocol)
-
-    def test_middleware_protocol_non_conformance(self) -> None:
-        class BadMiddleware:
-            async def process_session(self, *, session: Any) -> Any:
-                return session
-
-        assert not isinstance(BadMiddleware(), MiddlewareProtocol)
-
     def test_serializer_protocol_conformance(self) -> None:
         class GoodSerializer:
             def serialize(self, *, obj: Any) -> bytes:
                 return b"serialized"
 
-            def deserialize(self, *, data: bytes, obj_type: type[Any] | None = None) -> Any:
+            def deserialize(self, *, data: Buffer, obj_type: Any = None) -> Any:
                 return "deserialized"
 
         assert isinstance(GoodSerializer(), Serializer)
@@ -152,15 +126,46 @@ class TestRuntimeCheckableProtocols:
 
         assert not isinstance(BadSerializer(), Serializer)
 
+    def test_session_protocol_conformance(self) -> None:
+        class GoodSession:
+            @property
+            def headers(self) -> Headers:
+                return {}
+
+            @property
+            def path(self) -> str:
+                return "/"
+
+            @property
+            def session_id(self) -> str:
+                return "id"
+
+            @property
+            def state(self) -> SessionState:
+                return SessionState.CONNECTED
+
+            async def close(self, *, error_code: int = 0, reason: str | None = None) -> None:
+                pass
+
+        assert isinstance(GoodSession(), SessionProtocol)
+
+    def test_session_protocol_non_conformance(self) -> None:
+        class BadSession:
+            @property
+            def headers(self) -> Headers:
+                return {}
+
+        assert not isinstance(BadSession(), SessionProtocol)
+
     def test_web_transport_protocol_conformance(self) -> None:
         class GoodTransport:
             def connection_lost(self, exc: Exception | None) -> None:
                 pass
 
-            def connection_made(self, transport: Any) -> None:
+            def connection_made(self, transport: asyncio.BaseTransport) -> None:
                 pass
 
-            def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+            def datagram_received(self, data: Buffer, addr: tuple[str, int]) -> None:
                 pass
 
             def error_received(self, exc: Exception) -> None:

@@ -9,7 +9,7 @@ from aioquic._buffer import Buffer
 from aioquic.buffer import encode_uint_var
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, ProtocolError, constants
+from pywebtransport import ClientConfig, ErrorCodes, ProtocolError, constants
 from pywebtransport._protocol.events import (
     CapsuleReceived,
     CloseQuicConnection,
@@ -32,7 +32,7 @@ from pywebtransport._protocol.h3_engine import (
     _validate_response_headers,
 )
 from pywebtransport._protocol.state import ProtocolState, SessionStateData, StreamStateData
-from pywebtransport.constants import ErrorCodes
+from pywebtransport.types import Buffer as BufferType
 
 
 class TestWebTransportH3Engine:
@@ -91,19 +91,15 @@ class TestWebTransportH3Engine:
         session_data.control_stream_id = 4
         cast(dict[int, SessionStateData], protocol_state.sessions)[1] = session_data
         cast(dict[int, int], protocol_state.stream_to_session_map)[stream_id] = 1
-
         stream_state = MagicMock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         info = engine._get_or_create_partial_frame_info(stream_id=stream_id)
         info.headers_processed = True
-
         buf = Buffer(capacity=10)
         buf.push_bytes(b"\xc0")
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
-
         engine.handle_transport_event(event=event, state=protocol_state)
 
         assert len(info.buffer) > 0
@@ -113,13 +109,11 @@ class TestWebTransportH3Engine:
     ) -> None:
         stream_id = 2
         engine.cleanup_stream(stream_id=stream_id)
-
         buf = Buffer(capacity=10)
         buf.push_bytes(b"\x40")
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event, state=protocol_state)
-
         info = engine._partial_frames.get(stream_id)
 
         assert info is not None
@@ -160,21 +154,18 @@ class TestWebTransportH3Engine:
         stream_id = 0
         engine._settings_received = True
         engine._local_decoder_stream_id = None
-
         mock_decoder.feed_header.return_value = (b"decoder_instruction", [(b":status", b"200")])
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(5)
         buf.push_bytes(b"xxxxx")
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
-
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
-
         decoder_effect = next(
             (e for e in effects if isinstance(e, SendQuicData) and e.data == b"decoder_instruction"), None
         )
+
         assert decoder_effect is None
 
     def test_decode_headers_sends_instructions(
@@ -183,21 +174,36 @@ class TestWebTransportH3Engine:
         stream_id = 0
         engine._settings_received = True
         engine._local_decoder_stream_id = 10
-
         mock_decoder.feed_header.return_value = (b"decoder_instruction", [(b":status", b"200")])
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(5)
         buf.push_bytes(b"xxxxx")
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
-
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
-
         decoder_effect = next((e for e in effects if isinstance(e, SendQuicData) and e.stream_id == 10), None)
+
         assert decoder_effect is not None
         assert decoder_effect.data == b"decoder_instruction"
+
+    def test_decode_headers_unicode_error(
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mock_decoder: MagicMock
+    ) -> None:
+        stream_id = 0
+        engine._settings_received = True
+        mock_decoder.feed_header.return_value = (b"", [(b":status", b"\xff\xff")])
+        buf = Buffer(capacity=1024)
+        buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
+        buf.push_uint_var(5)
+        buf.push_bytes(b"xxxxx")
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
+        _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        close_effects = [e for e in effects if isinstance(e, CloseQuicConnection)]
+
+        assert len(close_effects) == 1
+        assert close_effects[0].error_code == ErrorCodes.H3_MESSAGE_ERROR
 
     def test_encode_capsule_invalid_stream(self, engine: WebTransportH3Engine) -> None:
         stream_id = 2
@@ -213,8 +219,8 @@ class TestWebTransportH3Engine:
         capsule_data = b"test"
 
         result = engine.encode_capsule(stream_id=stream_id, capsule_type=capsule_type, capsule_data=capsule_data)
-
         buf = Buffer(data=result)
+
         assert buf.pull_uint_var() == capsule_type
         assert buf.pull_uint_var() == len(capsule_data)
         assert buf.pull_bytes(len(capsule_data)) == capsule_data
@@ -230,14 +236,30 @@ class TestWebTransportH3Engine:
         data = b"payload"
 
         result = engine.encode_datagram(stream_id=stream_id, data=data)
-
         quarter_id = stream_id // 4
-        assert result == encode_uint_var(quarter_id) + data
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0] == encode_uint_var(quarter_id)
+        assert result[1] == data
+
+    def test_encode_datagram_with_list(self, engine: WebTransportH3Engine) -> None:
+        stream_id = 4
+        data = cast(list[BufferType], [b"chunk1", b"chunk2"])
+
+        result = engine.encode_datagram(stream_id=stream_id, data=data)
+        quarter_id = stream_id // 4
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert result[0] == encode_uint_var(quarter_id)
+        assert result[1] == b"chunk1"
+        assert result[2] == b"chunk2"
 
     def test_encode_goaway_frame(self, engine: WebTransportH3Engine) -> None:
         data = engine.encode_goaway_frame(last_stream_id=10)
-
         buf = Buffer(data=data)
+
         assert buf.pull_uint_var() == constants.H3_FRAME_TYPE_GOAWAY
         length = buf.pull_uint_var()
         payload = buf.pull_bytes(length)
@@ -297,6 +319,7 @@ class TestWebTransportH3Engine:
         effects = engine.encode_webtransport_stream_creation(
             stream_id=stream_id, control_stream_id=control_stream_id, is_unidirectional=True
         )
+        info = engine._partial_frames[stream_id]
 
         assert len(effects) >= 2
         assert isinstance(effects[0], SendQuicData)
@@ -304,7 +327,6 @@ class TestWebTransportH3Engine:
         assert isinstance(effects[1], SendQuicData)
         assert effects[1].data == encode_uint_var(control_stream_id)
         assert isinstance(effects[-1], LogH3Frame)
-        info = engine._partial_frames[stream_id]
         assert info.stream_type == constants.H3_STREAM_TYPE_WEBTRANSPORT
 
     def test_fragmented_parsing(
@@ -319,7 +341,6 @@ class TestWebTransportH3Engine:
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         headers_payload = b"payload"
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
@@ -329,8 +350,8 @@ class TestWebTransportH3Engine:
         chunk1 = full_data[:2]
         chunk2 = full_data[2:]
         mock_decoder.feed_header.return_value = (b"", [(b":status", b"200")])
-        event1 = TransportStreamDataReceived(stream_id=stream_id, data=chunk1, end_stream=False)
 
+        event1 = TransportStreamDataReceived(stream_id=stream_id, data=chunk1, end_stream=False)
         h3_events, _ = engine.handle_transport_event(event=event1, state=protocol_state)
 
         assert len(h3_events) == 0
@@ -349,17 +370,14 @@ class TestWebTransportH3Engine:
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         session_id = 1
         session_data = mocker.Mock(spec=SessionStateData)
         session_data.session_id = session_id
         session_data.control_stream_id = stream_id
         cast(dict[int, SessionStateData], protocol_state.sessions)[session_id] = session_data
         cast(dict[int, int], protocol_state.stream_to_session_map)[stream_id] = session_id
-
         info = engine._get_or_create_partial_frame_info(stream_id=stream_id)
         info.headers_processed = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(0x1234)
         buf.push_uint_var(4)
@@ -384,10 +402,8 @@ class TestWebTransportH3Engine:
         session_data.control_stream_id = stream_id
         cast(dict[int, SessionStateData], protocol_state.sessions)[session_id] = cast(SessionStateData, session_data)
         cast(dict[int, int], protocol_state.stream_to_session_map)[stream_id] = session_id
-
         info = engine._get_or_create_partial_frame_info(stream_id=stream_id)
         info.headers_processed = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_DATA)
         buf.push_uint_var(0)
@@ -405,14 +421,12 @@ class TestWebTransportH3Engine:
         control_stream_id = 3
         engine._peer_control_stream_id = control_stream_id
         engine._settings_received = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
         buf.push_uint_var(constants.H3_FRAME_TYPE_SETTINGS)
         buf.push_uint_var(0)
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
-
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
 
         assert len(effects) == 1
@@ -423,7 +437,6 @@ class TestWebTransportH3Engine:
         control_stream_id = 3
         engine._peer_control_stream_id = control_stream_id
         engine._settings_received = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
         buf.push_uint_var(constants.H3_FRAME_TYPE_GOAWAY)
@@ -431,7 +444,6 @@ class TestWebTransportH3Engine:
         buf.push_uint_var(100)
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
-
         h3_events, _ = engine.handle_transport_event(event=event, state=protocol_state)
 
         assert len(h3_events) == 1
@@ -443,14 +455,12 @@ class TestWebTransportH3Engine:
         control_stream_id = 3
         engine._peer_control_stream_id = control_stream_id
         engine._settings_received = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(0)
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
-
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
 
         assert len(effects) == 1
@@ -467,12 +477,8 @@ class TestWebTransportH3Engine:
         buf.push_uint_var(constants.H3_FRAME_TYPE_GOAWAY)
         buf.push_uint_var(1)
         buf.push_uint_var(0)
-        event = TransportStreamDataReceived(
-            stream_id=control_stream_id,
-            data=buf.data,
-            end_stream=False,
-        )
 
+        event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
 
         assert len(effects) == 1
@@ -480,10 +486,7 @@ class TestWebTransportH3Engine:
         assert effects[0].error_code == ErrorCodes.H3_MISSING_SETTINGS
 
     def test_handle_control_stream_settings(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mock_decoder: MagicMock,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mock_decoder: MagicMock
     ) -> None:
         control_stream_id = 3
         engine._peer_control_stream_id = control_stream_id
@@ -497,13 +500,9 @@ class TestWebTransportH3Engine:
         settings_data.push_uint_var(1)
         buf.push_uint_var(len(settings_data.data))
         buf.push_bytes(settings_data.data)
-        event = TransportStreamDataReceived(
-            stream_id=control_stream_id,
-            data=buf.data,
-            end_stream=False,
-        )
         protocol_state.remote_max_datagram_frame_size = 1500
 
+        event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
 
         assert engine._settings_received is True
@@ -516,7 +515,6 @@ class TestWebTransportH3Engine:
     ) -> None:
         control_stream_id = 3
         engine._peer_control_stream_id = control_stream_id
-
         info = engine._get_or_create_partial_frame_info(stream_id=control_stream_id)
         info.stream_type = constants.H3_STREAM_TYPE_CONTROL
 
@@ -533,35 +531,29 @@ class TestWebTransportH3Engine:
         control_stream_id = 3
         engine._peer_control_stream_id = control_stream_id
         engine._settings_received = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
         unknown_type = 0x1234
-        payload = b"ignore"
+        payload = b"ignore_me"
         buf.push_uint_var(unknown_type)
         buf.push_uint_var(len(payload))
         buf.push_bytes(payload)
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
-
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        non_log_effects = [e for e in effects if not isinstance(e, LogH3Frame)]
 
         assert len(h3_events) == 0
-        non_log_effects = [e for e in effects if not isinstance(e, LogH3Frame)]
         assert len(non_log_effects) == 0
 
     def test_handle_ignored_frames_on_request_stream(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         stream_id = 0
         engine._settings_received = True
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         cast(dict[int, int], protocol_state.stream_to_session_map)[stream_id] = 1
 
         for frame_type in (
@@ -575,14 +567,12 @@ class TestWebTransportH3Engine:
 
             event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
             h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
             assert len(h3_events) == 0
             assert len(effects) == 0
 
     def test_handle_internal_error(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         mocker.patch.object(engine, "_receive_datagram", side_effect=Exception("Boom"))
 
@@ -594,52 +584,44 @@ class TestWebTransportH3Engine:
         assert effects[0].error_code == ErrorCodes.INTERNAL_ERROR
 
     def test_handle_request_frame_data_no_control_stream(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         stream_id = 0
         engine._settings_received = True
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         session_id = 1
         session_data = mocker.Mock(spec=SessionStateData)
         session_data.session_id = session_id
         session_data.control_stream_id = None
         cast(dict[int, SessionStateData], protocol_state.sessions)[session_id] = cast(SessionStateData, session_data)
         cast(dict[int, int], protocol_state.stream_to_session_map)[stream_id] = session_id
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_DATA)
         buf.push_uint_var(0)
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        close_effects = [e for e in effects if isinstance(e, CloseQuicConnection)]
 
-        assert len(effects) == 1
-        assert isinstance(effects[0], CloseQuicConnection)
-        assert effects[0].error_code == ErrorCodes.INTERNAL_ERROR
+        assert len(close_effects) == 1
+        assert close_effects[0].error_code == ErrorCodes.INTERNAL_ERROR
 
     def test_handle_request_frame_data_on_unassociated_stream(
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
     ) -> None:
         stream_id = 0
         engine._settings_received = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_DATA)
         buf.push_uint_var(0)
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
-
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        close_effects = [e for e in effects if isinstance(e, CloseQuicConnection)]
 
-        assert len(effects) == 1
-        assert isinstance(effects[0], CloseQuicConnection)
-        assert effects[0].error_code == ErrorCodes.H3_FRAME_UNEXPECTED
+        assert len(close_effects) == 0
 
     def test_handle_stream_blocked(
         self,
@@ -653,19 +635,32 @@ class TestWebTransportH3Engine:
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         mock_decoder.feed_header.side_effect = pylsqpack.StreamBlocked(stream_id)
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(5)
         buf.push_bytes(b"xxxxx")
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
-
         engine.handle_transport_event(event=event, state=protocol_state)
 
         assert engine._partial_frames[stream_id].blocked is True
+
+    def test_handle_stream_blocked_no_partial_info(
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mock_decoder: MagicMock
+    ) -> None:
+        stream_id = 0
+        engine._settings_received = True
+        mock_decoder.feed_header.side_effect = pylsqpack.StreamBlocked(999)
+        buf = Buffer(capacity=1024)
+        buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
+        buf.push_uint_var(5)
+        buf.push_bytes(b"xxxxx")
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
+        engine.handle_transport_event(event=event, state=protocol_state)
+
+        assert 999 not in engine._partial_frames
 
     def test_handle_unknown_frame_on_control_stream(
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
@@ -673,7 +668,6 @@ class TestWebTransportH3Engine:
         control_stream_id = 3
         engine._peer_control_stream_id = control_stream_id
         engine._settings_received = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
         unknown_type = 0x1234
@@ -683,33 +677,26 @@ class TestWebTransportH3Engine:
         buf.push_bytes(payload)
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
-
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        non_log_effects = [e for e in effects if not isinstance(e, LogH3Frame)]
 
         assert len(h3_events) == 0
-        non_log_effects = [e for e in effects if not isinstance(e, LogH3Frame)]
         assert len(non_log_effects) == 0
 
     def test_handle_wt_stream_frame_on_request_stream_invalid(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         stream_id = 0
         engine._settings_received = True
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         session_data = mocker.Mock(spec=SessionStateData)
         session_data.control_stream_id = 4
         cast(dict[int, SessionStateData], protocol_state.sessions)[1] = cast(SessionStateData, session_data)
         cast(dict[int, int], protocol_state.stream_to_session_map)[stream_id] = 1
-
         info = engine._get_or_create_partial_frame_info(stream_id=stream_id)
         info.headers_processed = True
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_WEBTRANSPORT_STREAM)
         buf.push_uint_var(0)
@@ -722,17 +709,13 @@ class TestWebTransportH3Engine:
         assert effects[0].error_code == ErrorCodes.H3_FRAME_ERROR
 
     def test_handle_wt_stream_frame_valid_switch(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         stream_id = 0
         engine._settings_received = True
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_WEBTRANSPORT_STREAM)
         buf.push_uint_var(4)
@@ -748,13 +731,9 @@ class TestWebTransportH3Engine:
         assert isinstance(h3_events[0], WebTransportStreamDataReceived)
         assert h3_events[0].control_stream_id == 4
 
-    def test_init(
-        self,
-        client_config: ClientConfig,
-        mock_decoder_cls: MagicMock,
-        mock_encoder_cls: MagicMock,
-    ) -> None:
+    def test_init(self, client_config: ClientConfig, mock_decoder_cls: MagicMock, mock_encoder_cls: MagicMock) -> None:
         engine = WebTransportH3Engine(is_client=True, config=client_config)
+
         assert engine._is_client is True
         assert engine._config == client_config
         assert engine._settings_received is False
@@ -765,8 +744,9 @@ class TestWebTransportH3Engine:
         data = engine.initialize_connection()
         buf = Buffer(data=data)
         frame_type = buf.pull_uint_var()
-        assert frame_type == constants.H3_FRAME_TYPE_SETTINGS
         length = buf.pull_uint_var()
+
+        assert frame_type == constants.H3_FRAME_TYPE_SETTINGS
         assert len(data) >= 2 + length
 
     def test_parse_settings_duplicate_key(self, engine: WebTransportH3Engine, protocol_state: ProtocolState) -> None:
@@ -785,6 +765,7 @@ class TestWebTransportH3Engine:
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_SETTINGS_ERROR
@@ -800,6 +781,7 @@ class TestWebTransportH3Engine:
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_FRAME_ERROR
@@ -818,6 +800,7 @@ class TestWebTransportH3Engine:
 
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_SETTINGS_ERROR
@@ -825,22 +808,18 @@ class TestWebTransportH3Engine:
     def test_parse_stream_data_stuck(self, engine: WebTransportH3Engine, protocol_state: ProtocolState) -> None:
         stream_id = 10
         engine._peer_control_stream_id = 3
-
         buf = Buffer(capacity=10)
         buf.push_bytes(b"\xc0")
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event, state=protocol_state)
-
         info = engine._partial_frames.get(stream_id)
+
         assert info is not None
         assert len(info.buffer) == 1
 
     def test_qpack_decoder_stream_error(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mock_encoder: MagicMock,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mock_encoder: MagicMock
     ) -> None:
         stream_id = 6
         buf = Buffer(capacity=128)
@@ -850,21 +829,20 @@ class TestWebTransportH3Engine:
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.QPACK_DECODER_STREAM_ERROR
 
-    def test_qpack_decoder_stream_wrong_id(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-    ) -> None:
+    def test_qpack_decoder_stream_wrong_id(self, engine: WebTransportH3Engine, protocol_state: ProtocolState) -> None:
         engine._peer_decoder_stream_id = 6
         new_stream_id = 10
         buf = Buffer(capacity=128)
         buf.push_uint_var(constants.H3_STREAM_TYPE_QPACK_DECODER)
+
         event = TransportStreamDataReceived(stream_id=new_stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_STREAM_CREATION_ERROR
@@ -880,43 +858,34 @@ class TestWebTransportH3Engine:
         engine._settings_received = True
         blocked_info = engine._get_or_create_partial_frame_info(stream_id=blocked_stream_id)
         blocked_info.blocked = True
-
         valid_frame_buf = Buffer(capacity=64)
         valid_frame_buf.push_uint_var(constants.H3_FRAME_TYPE_DATA)
         valid_frame_buf.push_uint_var(3)
         valid_frame_buf.push_bytes(b"foo")
         blocked_info.buffer.append(valid_frame_buf.data)
-
         stream_state = MagicMock(spec=StreamStateData)
         stream_state.stream_id = blocked_stream_id
         protocol_state.streams[blocked_stream_id] = cast(StreamStateData, stream_state)
-
         session_data = MagicMock(spec=SessionStateData)
         session_data.session_id = 1
         session_data.control_stream_id = 4
         cast(dict[int, SessionStateData], protocol_state.sessions)[1] = session_data
         cast(dict[int, int], protocol_state.stream_to_session_map)[blocked_stream_id] = 1
-
         encoder_stream_id = 6
         engine._peer_encoder_stream_id = encoder_stream_id
         mock_decoder.feed_encoder.return_value = {blocked_stream_id}
-
         buf = Buffer(capacity=100)
         buf.push_uint_var(constants.H3_STREAM_TYPE_QPACK_ENCODER)
         buf.push_bytes(b"instructions")
 
         event = TransportStreamDataReceived(stream_id=encoder_stream_id, data=buf.data, end_stream=False)
-
         engine.handle_transport_event(event=event, state=protocol_state)
 
         assert blocked_info.blocked is False
         assert len(blocked_info.buffer) == 0
 
     def test_qpack_encoder_stream_error(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mock_decoder: MagicMock,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mock_decoder: MagicMock
     ) -> None:
         stream_id = 2
         buf = Buffer(capacity=128)
@@ -926,21 +895,20 @@ class TestWebTransportH3Engine:
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.QPACK_ENCODER_STREAM_ERROR
 
-    def test_qpack_encoder_stream_wrong_id(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-    ) -> None:
+    def test_qpack_encoder_stream_wrong_id(self, engine: WebTransportH3Engine, protocol_state: ProtocolState) -> None:
         engine._peer_encoder_stream_id = 2
         new_stream_id = 10
         buf = Buffer(capacity=128)
         buf.push_uint_var(constants.H3_STREAM_TYPE_QPACK_ENCODER)
+
         event = TransportStreamDataReceived(stream_id=new_stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_STREAM_CREATION_ERROR
@@ -955,7 +923,6 @@ class TestWebTransportH3Engine:
         encoder_stream_id = 6
         engine._peer_encoder_stream_id = encoder_stream_id
         mock_decoder.feed_encoder.return_value = {999}
-
         buf = Buffer(capacity=100)
         buf.push_uint_var(constants.H3_STREAM_TYPE_QPACK_ENCODER)
         buf.push_bytes(b"instructions")
@@ -964,10 +931,7 @@ class TestWebTransportH3Engine:
         engine.handle_transport_event(event=event, state=protocol_state)
 
     def test_receive_connect_stream_closed(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         stream_id = 0
         session_data = mocker.Mock(spec=SessionStateData)
@@ -978,6 +942,7 @@ class TestWebTransportH3Engine:
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=b"", end_stream=True)
         h3_events, _ = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 1
         assert isinstance(h3_events[0], ConnectStreamClosed)
         assert h3_events[0].stream_id == stream_id
@@ -985,7 +950,6 @@ class TestWebTransportH3Engine:
     def test_receive_control_stream_closed(self, engine: WebTransportH3Engine, protocol_state: ProtocolState) -> None:
         stream_id = 3
         engine._peer_control_stream_id = stream_id
-
         buf = Buffer(capacity=10)
         buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
@@ -998,6 +962,29 @@ class TestWebTransportH3Engine:
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_CLOSED_CRITICAL_STREAM
 
+    def test_receive_control_stream_multiple_frames_truncated(
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState
+    ) -> None:
+        control_stream_id = 3
+        engine._peer_control_stream_id = control_stream_id
+        engine._settings_received = True
+        buf = Buffer(capacity=1024)
+        buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
+        buf.push_uint_var(constants.H3_FRAME_TYPE_GOAWAY)
+        buf.push_uint_var(1)
+        buf.push_uint_var(0)
+        buf.push_bytes(b"\x40")
+
+        event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
+        h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        info = engine._partial_frames.get(control_stream_id)
+
+        assert len(h3_events) == 1
+        assert isinstance(h3_events[0], GoawayReceived)
+        assert info is not None
+        assert len(info.buffer) > 0
+        assert info.frame_type is None
+
     def test_receive_control_stream_truncated_frame(
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
     ) -> None:
@@ -1006,16 +993,20 @@ class TestWebTransportH3Engine:
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_STREAM_TYPE_CONTROL)
         buf.push_uint_var(constants.H3_FRAME_TYPE_SETTINGS)
+
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event, state=protocol_state)
         info = engine._partial_frames.get(control_stream_id)
+
         assert info is not None
         assert len(info.buffer) > 0
 
     def test_receive_datagram_buffer_error(self, engine: WebTransportH3Engine) -> None:
         data = b"\x40"
+
         with pytest.raises(ProtocolError) as exc:
             engine._receive_datagram(data=data)
+
         assert exc.value.error_code == ErrorCodes.H3_DATAGRAM_ERROR
 
     def test_receive_datagram_invalid_session_id(
@@ -1048,6 +1039,7 @@ class TestWebTransportH3Engine:
         payload = encode_uint_var(quarter_id) + b"mydata"
         event = TransportDatagramFrameReceived(data=payload)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 1
         assert isinstance(h3_events[0], DatagramReceived)
         assert len(effects) == 0
@@ -1055,6 +1047,7 @@ class TestWebTransportH3Engine:
     def test_receive_datagram_truncated(self, engine: WebTransportH3Engine, protocol_state: ProtocolState) -> None:
         event = TransportDatagramFrameReceived(data=b"")
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_DATAGRAM_ERROR
@@ -1069,8 +1062,10 @@ class TestWebTransportH3Engine:
         buf.push_uint_var(constants.H3_FRAME_TYPE_GOAWAY)
         buf.push_uint_var(1)
         buf.push_uint_var(100)
+
         event = TransportStreamDataReceived(stream_id=control_stream_id, data=buf.data, end_stream=False)
         h3_events, _ = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 2
         assert isinstance(h3_events[0], SettingsReceived)
         assert isinstance(h3_events[1], GoawayReceived)
@@ -1079,8 +1074,10 @@ class TestWebTransportH3Engine:
         stream_id = 10
         buf = Buffer(capacity=128)
         buf.push_uint_var(constants.H3_STREAM_TYPE_PUSH)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert any(
             isinstance(e, LogH3Frame) and e.event == "stream_type_set" and e.data["new"] == "push" for e in effects
         )
@@ -1098,6 +1095,7 @@ class TestWebTransportH3Engine:
         buf.push_bytes(b"inst")
         event_enc = TransportStreamDataReceived(stream_id=encoder_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event_enc, state=protocol_state)
+
         assert engine._peer_encoder_stream_id == encoder_id
 
         decoder_id = 6
@@ -1106,6 +1104,7 @@ class TestWebTransportH3Engine:
         buf.push_bytes(b"inst")
         event_dec = TransportStreamDataReceived(stream_id=decoder_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event_dec, state=protocol_state)
+
         assert engine._peer_decoder_stream_id == decoder_id
 
     def test_receive_request_data_before_headers(
@@ -1117,11 +1116,32 @@ class TestWebTransportH3Engine:
         buf.push_uint_var(constants.H3_FRAME_TYPE_DATA)
         buf.push_uint_var(5)
         buf.push_bytes(b"12345")
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
-        assert len(effects) == 1
-        assert isinstance(effects[0], CloseQuicConnection)
-        assert effects[0].error_code == ErrorCodes.H3_FRAME_UNEXPECTED
+        close_effects = [e for e in effects if isinstance(e, CloseQuicConnection)]
+
+        assert len(close_effects) == 0
+
+    def test_receive_request_data_no_session_fallback(
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
+    ) -> None:
+        stream_id = 0
+        engine._settings_received = True
+        stream_state = mocker.Mock(spec=StreamStateData)
+        stream_state.stream_id = stream_id
+        protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
+        partial_info = engine._get_or_create_partial_frame_info(stream_id=stream_id)
+        partial_info.stream_type = constants.H3_STREAM_TYPE_WEBTRANSPORT
+        buf = Buffer(capacity=1024)
+        buf.push_bytes(b"data")
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
+        _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        close_effects = [e for e in effects if isinstance(e, CloseQuicConnection)]
+
+        assert len(close_effects) == 1
+        assert close_effects[0].error_code == ErrorCodes.INTERNAL_ERROR
 
     def test_receive_request_data_when_blocked(
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
@@ -1132,8 +1152,10 @@ class TestWebTransportH3Engine:
         info.blocked = True
         buf = Buffer(capacity=1024)
         buf.push_bytes(b"data")
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 0
         assert len(effects) == 0
         assert info.buffer
@@ -1150,26 +1172,48 @@ class TestWebTransportH3Engine:
         stream_state = mocker.Mock(spec=StreamStateData)
         stream_state.stream_id = stream_id
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
-
         headers_payload = b"encoded_headers"
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(len(headers_payload))
         buf.push_bytes(headers_payload)
         mock_decoder.feed_header.return_value = (b"", [(b":status", b"200")])
-        event = TransportStreamDataReceived(
-            stream_id=stream_id,
-            data=buf.data,
-            end_stream=False,
-        )
 
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+        log_effects = [e for e in effects if isinstance(e, LogH3Frame)]
 
         assert len(h3_events) == 1
         assert isinstance(h3_events[0], HeadersReceived)
-        assert h3_events[0].headers == {":status": "200"}
-        log_effects = [e for e in effects if isinstance(e, LogH3Frame)]
+        assert h3_events[0].headers == [(":status", "200")]
         assert len(log_effects) == 1
+
+    def test_receive_request_headers_multiple_values(
+        self,
+        engine: WebTransportH3Engine,
+        protocol_state: ProtocolState,
+        mock_decoder: MagicMock,
+        mocker: MockerFixture,
+    ) -> None:
+        stream_id = 0
+        engine._settings_received = True
+        stream_state = mocker.Mock(spec=StreamStateData)
+        stream_state.stream_id = stream_id
+        protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
+        headers_payload = b"encoded_headers"
+        buf = Buffer(capacity=1024)
+        buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
+        buf.push_uint_var(len(headers_payload))
+        buf.push_bytes(headers_payload)
+        mock_headers = [(b":status", b"200"), (b"set-cookie", b"a=1"), (b"set-cookie", b"b=2")]
+        mock_decoder.feed_header.return_value = (b"", mock_headers)
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
+        h3_events, _ = engine.handle_transport_event(event=event, state=protocol_state)
+
+        assert len(h3_events) == 1
+        assert isinstance(h3_events[0], HeadersReceived)
+        assert h3_events[0].headers == [(":status", "200"), ("set-cookie", "a=1"), ("set-cookie", "b=2")]
 
     def test_receive_request_headers_blocked(self, engine: WebTransportH3Engine, protocol_state: ProtocolState) -> None:
         stream_id = 0
@@ -1177,8 +1221,10 @@ class TestWebTransportH3Engine:
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(0)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event, state=protocol_state)
+
         assert engine._partial_frames[stream_id].blocked is True
 
     def test_receive_request_headers_fin(
@@ -1197,8 +1243,10 @@ class TestWebTransportH3Engine:
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(0)
         mock_decoder.feed_header.return_value = (b"", [(b":status", b"200")])
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=True)
         h3_events, _ = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 1
         assert isinstance(h3_events[0], HeadersReceived)
         assert h3_events[0].stream_ended is True
@@ -1220,8 +1268,10 @@ class TestWebTransportH3Engine:
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_HEADERS)
         buf.push_uint_var(0)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_FRAME_UNEXPECTED
@@ -1234,8 +1284,10 @@ class TestWebTransportH3Engine:
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_FRAME_TYPE_SETTINGS)
         buf.push_uint_var(0)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(effects) == 1
         assert isinstance(effects[0], CloseQuicConnection)
         assert effects[0].error_code == ErrorCodes.H3_FRAME_UNEXPECTED
@@ -1248,13 +1300,40 @@ class TestWebTransportH3Engine:
         buf.push_bytes(b"\x40")
 
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
-
         engine.handle_transport_event(event=event, state=protocol_state)
-
         info = engine._partial_frames.get(stream_id)
 
         assert info is not None
         assert len(info.buffer) == 1
+
+    def test_receive_uni_stream_ended_cleanly(
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState
+    ) -> None:
+        stream_id = 2
+        control_stream_id = 0
+        buf = Buffer(capacity=1024)
+        buf.push_uint_var(constants.H3_STREAM_TYPE_WEBTRANSPORT)
+        buf.push_uint_var(control_stream_id)
+        buf.push_bytes(b"data")
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=True)
+        engine.handle_transport_event(event=event, state=protocol_state)
+
+        assert stream_id not in engine._partial_frames
+
+    def test_receive_uni_stream_ended_partial(
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState
+    ) -> None:
+        stream_id = 2
+        buf = Buffer(capacity=10)
+        buf.push_bytes(b"\x40")
+        event1 = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
+        engine.handle_transport_event(event=event1, state=protocol_state)
+
+        event2 = TransportStreamDataReceived(stream_id=stream_id, data=b"", end_stream=True)
+        engine.handle_transport_event(event=event2, state=protocol_state)
+
+        assert stream_id in engine._partial_frames
 
     def test_receive_uni_stream_payload_parsing(
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
@@ -1266,10 +1345,12 @@ class TestWebTransportH3Engine:
         buf.push_uint_var(control_stream_id)
         payload = b"12345"
         buf.push_bytes(payload)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         h3_events, _ = engine.handle_transport_event(event=event, state=protocol_state)
-        assert len(h3_events) == 1
         event0 = h3_events[0]
+
+        assert len(h3_events) == 1
         assert isinstance(event0, WebTransportStreamDataReceived)
         assert event0.data == payload
 
@@ -1280,9 +1361,11 @@ class TestWebTransportH3Engine:
         buf = Buffer(capacity=128)
         buf.push_uint_var(constants.H3_STREAM_TYPE_WEBTRANSPORT)
         buf.push_bytes(b"\x40")
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event, state=protocol_state)
         info = engine._partial_frames.get(stream_id)
+
         assert info is not None
         assert len(info.buffer) > 0
 
@@ -1292,9 +1375,26 @@ class TestWebTransportH3Engine:
         stream_id = 2
         buf = Buffer(capacity=128)
         buf.push_bytes(b"\x80")
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         engine.handle_transport_event(event=event, state=protocol_state)
         info = engine._partial_frames.get(stream_id)
+
+        assert info is not None
+        assert len(info.buffer) > 0
+
+    def test_receive_uni_stream_wt_truncated_control_id(
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState
+    ) -> None:
+        stream_id = 2
+        buf = Buffer(capacity=128)
+        buf.push_uint_var(constants.H3_STREAM_TYPE_WEBTRANSPORT)
+        buf.push_bytes(b"\x40")
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
+        engine.handle_transport_event(event=event, state=protocol_state)
+        info = engine._partial_frames.get(stream_id)
+
         assert info is not None
         assert len(info.buffer) > 0
 
@@ -1302,8 +1402,10 @@ class TestWebTransportH3Engine:
         stream_id = 18
         buf = Buffer(capacity=128)
         buf.push_uint_var(0x999)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert not any(isinstance(e, CloseQuicConnection) for e in effects)
 
     def test_receive_unknown_uni_stream_type_logging(
@@ -1312,17 +1414,16 @@ class TestWebTransportH3Engine:
         stream_id = 10
         buf = Buffer(capacity=128)
         buf.push_uint_var(0x1F)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         _, effects = engine.handle_transport_event(event=event, state=protocol_state)
         info = engine._partial_frames.get(stream_id)
+
         if info:
             assert len(info.buffer) == 0
 
     def test_receive_webtransport_data_bidi(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         stream_id = 0
         control_stream_id = 4
@@ -1338,26 +1439,20 @@ class TestWebTransportH3Engine:
         partial_info = engine._get_or_create_partial_frame_info(stream_id=stream_id)
         partial_info.stream_type = constants.H3_STREAM_TYPE_WEBTRANSPORT
         partial_info.control_stream_id = control_stream_id
-
         payload = b"wt_data"
         buf = Buffer(capacity=1024)
         buf.push_bytes(payload)
-        event = TransportStreamDataReceived(
-            stream_id=stream_id,
-            data=buf.data,
-            end_stream=False,
-        )
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
-        assert len(h3_events) == 1
         event0 = h3_events[0]
+
+        assert len(h3_events) == 1
         assert isinstance(event0, WebTransportStreamDataReceived)
         assert event0.data == payload
 
     def test_receive_webtransport_data_bidi_session_zero(
-        self,
-        engine: WebTransportH3Engine,
-        protocol_state: ProtocolState,
-        mocker: MockerFixture,
+        self, engine: WebTransportH3Engine, protocol_state: ProtocolState, mocker: MockerFixture
     ) -> None:
         stream_id = 0
         control_stream_id = 4
@@ -1373,16 +1468,13 @@ class TestWebTransportH3Engine:
         protocol_state.streams[stream_id] = cast(StreamStateData, stream_state)
         partial_info = engine._get_or_create_partial_frame_info(stream_id=stream_id)
         partial_info.stream_type = constants.H3_STREAM_TYPE_WEBTRANSPORT
-
         payload = b"wt_data"
         buf = Buffer(capacity=1024)
         buf.push_bytes(payload)
-        event = TransportStreamDataReceived(
-            stream_id=stream_id,
-            data=buf.data,
-            end_stream=False,
-        )
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 1
         assert isinstance(h3_events[0], WebTransportStreamDataReceived)
 
@@ -1395,12 +1487,10 @@ class TestWebTransportH3Engine:
         buf.push_uint_var(constants.H3_STREAM_TYPE_WEBTRANSPORT)
         buf.push_uint_var(control_stream_id)
         buf.push_bytes(b"actual_data")
-        event = TransportStreamDataReceived(
-            stream_id=stream_id,
-            data=buf.data,
-            end_stream=False,
-        )
+
+        event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         h3_events, effects = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 1
         assert isinstance(h3_events[0], WebTransportStreamDataReceived)
 
@@ -1410,8 +1500,10 @@ class TestWebTransportH3Engine:
         stream_id = 2
         buf = Buffer(capacity=1024)
         buf.push_uint_var(constants.H3_STREAM_TYPE_WEBTRANSPORT)
+
         event = TransportStreamDataReceived(stream_id=stream_id, data=buf.data, end_stream=False)
         h3_events, _ = engine.handle_transport_event(event=event, state=protocol_state)
+
         assert len(h3_events) == 0
         assert engine._partial_frames[stream_id].buffer
 
@@ -1419,19 +1511,14 @@ class TestWebTransportH3Engine:
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
     ) -> None:
         stream_id = 2
-
         buf1 = Buffer(capacity=1024)
         buf1.push_uint_var(constants.H3_STREAM_TYPE_WEBTRANSPORT)
-
         event1 = TransportStreamDataReceived(stream_id=stream_id, data=buf1.data, end_stream=False)
         engine.handle_transport_event(event=event1, state=protocol_state)
-
         buf2 = Buffer(capacity=1024)
         buf2.push_bytes(b"\x40")
-
         event2 = TransportStreamDataReceived(stream_id=stream_id, data=buf2.data, end_stream=False)
         engine.handle_transport_event(event=event2, state=protocol_state)
-
         buf3 = Buffer(capacity=1024)
         buf3.push_bytes(b"\x04")
         buf3.push_bytes(b"data")
@@ -1448,11 +1535,11 @@ class TestWebTransportH3Engine:
         engine = WebTransportH3Engine(is_client=False, config=client_config)
         stream_id = 4
         control_stream_id = 0
+
         effects = engine.encode_webtransport_stream_creation(
-            stream_id=stream_id,
-            control_stream_id=control_stream_id,
-            is_unidirectional=False,
+            stream_id=stream_id, control_stream_id=control_stream_id, is_unidirectional=False
         )
+
         assert len(effects) == 2
         assert isinstance(effects[0], SendQuicData)
         assert stream_id not in engine._partial_frames
@@ -1472,11 +1559,13 @@ class TestWebTransportH3Engine:
             (b":path", b"/"),
             (b":protocol", b"webtransport"),
         ]
+
         with pytest.raises(ProtocolError):
             _validate_request_headers(headers=invalid_headers)
 
     def test_set_local_stream_ids(self, engine: WebTransportH3Engine) -> None:
         engine.set_local_stream_ids(control_stream_id=1, encoder_stream_id=2, decoder_stream_id=3)
+
         assert engine._local_control_stream_id == 1
         assert engine._local_encoder_stream_id == 2
         assert engine._local_decoder_stream_id == 3
@@ -1484,10 +1573,12 @@ class TestWebTransportH3Engine:
     def test_validate_header_name_colon_middle(self, engine: WebTransportH3Engine) -> None:
         with pytest.raises(ProtocolError) as exc:
             _validate_header_name(key=b"my:header")
+
         assert ErrorCodes.H3_MESSAGE_ERROR == exc.value.error_code
 
     def test_validate_header_name_format(self, engine: WebTransportH3Engine) -> None:
         _validate_header_name(key=b"content-type")
+
         with pytest.raises(ProtocolError):
             _validate_header_name(key=b"Content-Type")
         with pytest.raises(ProtocolError):
@@ -1495,6 +1586,7 @@ class TestWebTransportH3Engine:
 
     def test_validate_header_name_invalid_chars(self, engine: WebTransportH3Engine) -> None:
         _validate_header_name(key=b"a!#$%&'*+-.^_`|~")
+
         try:
             _validate_header_name(key=b"!#$%&'*+-.^_`|~")
         except ProtocolError:
@@ -1508,6 +1600,7 @@ class TestWebTransportH3Engine:
     def test_validate_header_value_del_char(self, engine: WebTransportH3Engine) -> None:
         with pytest.raises(ProtocolError) as exc:
             _validate_header_value(key=b"k", value=b"\x7f")
+
         assert ErrorCodes.H3_MESSAGE_ERROR == exc.value.error_code
 
     def test_validate_header_value_htab(self, engine: WebTransportH3Engine) -> None:
@@ -1523,6 +1616,7 @@ class TestWebTransportH3Engine:
 
     def test_validate_headers_duplicate_pseudo(self, engine: WebTransportH3Engine) -> None:
         headers = [(b":path", b"/"), (b":path", b"/2")]
+
         with pytest.raises(ProtocolError):
             _validate_request_headers(headers=headers)
 
@@ -1534,36 +1628,52 @@ class TestWebTransportH3Engine:
             (b":method", b"GET"),
             (b":protocol", b"webtransport"),
         ]
+
         with pytest.raises(ProtocolError):
             _validate_request_headers(headers=headers)
 
-    def test_validate_headers_missing_pseudo(self, engine: WebTransportH3Engine) -> None:
-        headers = [(b"custom", b"val")]
+    def test_validate_headers_missing_authority_http(self, engine: WebTransportH3Engine) -> None:
+        headers = [(b":method", b"CONNECT"), (b":scheme", b"https"), (b":path", b"/"), (b":authority", b"")]
+
         with pytest.raises(ProtocolError) as exc:
             _validate_request_headers(headers=headers)
+
+        assert "Pseudo-header b':authority' cannot be empty" in str(exc.value)
+
+    def test_validate_headers_missing_pseudo(self, engine: WebTransportH3Engine) -> None:
+        headers = [(b"custom", b"val")]
+
+        with pytest.raises(ProtocolError) as exc:
+            _validate_request_headers(headers=headers)
+
         assert "Missing pseudo-headers" in str(exc.value)
 
     def test_validate_headers_pseudo_order(self, engine: WebTransportH3Engine) -> None:
         headers = [(b"custom", b"val"), (b":path", b"/")]
+
         with pytest.raises(ProtocolError):
             _validate_request_headers(headers=headers)
+
+    def test_validate_request_headers_optional_protocol(self, client_config: ClientConfig) -> None:
+        headers = [(b":method", b"CONNECT"), (b":scheme", b"https"), (b":authority", b"example.com"), (b":path", b"/")]
+        _validate_request_headers(headers=headers)
 
     def test_validate_response_headers(self, engine: WebTransportH3Engine) -> None:
         headers = [(b":status", b"200")]
         _validate_response_headers(headers=headers)
         invalid = [(b":status", b"200"), (b":other", b"bad")]
+
         with pytest.raises(ProtocolError):
             _validate_response_headers(headers=invalid)
 
     def test_validate_settings_error_connect_protocol(
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
     ) -> None:
-        settings = {
-            constants.SETTINGS_ENABLE_CONNECT_PROTOCOL: 0,
-            constants.SETTINGS_H3_DATAGRAM: 1,
-        }
+        settings = {constants.SETTINGS_ENABLE_CONNECT_PROTOCOL: 0, constants.SETTINGS_H3_DATAGRAM: 1}
+
         with pytest.raises(ProtocolError) as exc:
             engine._validate_settings(settings=settings, state=protocol_state)
+
         assert exc.value.error_code == ErrorCodes.H3_SETTINGS_ERROR
 
     def test_validate_settings_error_missing_datagram_support(
@@ -1571,17 +1681,19 @@ class TestWebTransportH3Engine:
     ) -> None:
         settings = {constants.SETTINGS_H3_DATAGRAM: 1}
         protocol_state.remote_max_datagram_frame_size = 0
+
         with pytest.raises(ProtocolError) as exc:
             engine._validate_settings(settings=settings, state=protocol_state)
+
         assert exc.value.error_code == ErrorCodes.H3_SETTINGS_ERROR
 
     def test_validate_settings_wt_without_datagram(
         self, engine: WebTransportH3Engine, protocol_state: ProtocolState
     ) -> None:
-        settings = {
-            constants.SETTINGS_ENABLE_CONNECT_PROTOCOL: 1,
-        }
+        settings = {constants.SETTINGS_ENABLE_CONNECT_PROTOCOL: 1}
         protocol_state.remote_max_datagram_frame_size = 1000
+
         with pytest.raises(ProtocolError) as exc:
             engine._validate_settings(settings=settings, state=protocol_state)
+
         assert exc.value.error_code == ErrorCodes.H3_SETTINGS_ERROR

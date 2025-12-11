@@ -39,7 +39,7 @@ class BenchmarkServerApp(ServerApp):
         super().__init__(**kwargs)
         self._register_routes()
 
-    async def handle_discard(self, session: WebTransportSession) -> None:
+    async def handle_discard(self, session: WebTransportSession, **kwargs: Any) -> None:
         """Handle unidirectional upload streams by draining them."""
 
         async def stream_drainer(*, stream: WebTransportReceiveStream) -> None:
@@ -59,7 +59,7 @@ class BenchmarkServerApp(ServerApp):
         except Exception:
             pass
 
-    async def handle_duplex(self, session: WebTransportSession) -> None:
+    async def handle_duplex(self, session: WebTransportSession, **kwargs: Any) -> None:
         """Handle full duplex throughput test."""
 
         async def stream_handler(*, stream: WebTransportStream) -> None:
@@ -96,7 +96,7 @@ class BenchmarkServerApp(ServerApp):
         except Exception:
             pass
 
-    async def handle_echo(self, session: WebTransportSession) -> None:
+    async def handle_echo(self, session: WebTransportSession, **kwargs: Any) -> None:
         """Handle bidirectional echo for streams and datagrams."""
 
         async def datagram_loop() -> None:
@@ -144,7 +144,7 @@ class BenchmarkServerApp(ServerApp):
             t1.cancel()
             t2.cancel()
 
-    async def handle_latency(self, session: WebTransportSession) -> None:
+    async def handle_latency(self, session: WebTransportSession, **kwargs: Any) -> None:
         """Handle request-response latency tests."""
 
         async def stream_responder(*, stream: WebTransportStream) -> None:
@@ -168,7 +168,7 @@ class BenchmarkServerApp(ServerApp):
         except Exception:
             pass
 
-    async def handle_produce(self, session: WebTransportSession) -> None:
+    async def handle_produce(self, session: WebTransportSession, **kwargs: Any) -> None:
         """Handle unidirectional download tests by producing static data."""
 
         async def stream_producer(*, stream: WebTransportStream) -> None:
@@ -223,7 +223,6 @@ async def main() -> None:
         bind_port=SERVER_PORT,
         certfile=str(CERT_PATH),
         keyfile=str(KEY_PATH),
-        debug=False,
         max_connections=10000,
         initial_max_data=104857600,
         flow_control_window_size=104857600,
@@ -231,6 +230,7 @@ async def main() -> None:
         initial_max_streams_uni=10000,
         stream_flow_control_increment_bidi=1048576,
         stream_flow_control_increment_uni=1048576,
+        max_event_queue_size=20000,
     )
 
     app = BenchmarkServerApp(config=config)

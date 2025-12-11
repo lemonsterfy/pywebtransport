@@ -16,7 +16,7 @@ SERVER_URL_BASE: Final[str] = "https://127.0.0.1:4433"
 WARMUP_ROUNDS: Final[int] = 5
 PAYLOAD_SIZE: Final[int] = 1024 * 1024
 STREAMS_PER_ROUND: Final[int] = 10
-STATIC_PAYLOAD: Final[bytes] = b"x" * PAYLOAD_SIZE
+STATIC_VIEW: Final[memoryview] = memoryview(b"x" * PAYLOAD_SIZE)
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -31,6 +31,7 @@ def client_config() -> ClientConfig:
         initial_max_data=104857600,
         initial_max_streams_bidi=1000,
         initial_max_streams_uni=1000,
+        max_event_queue_size=5000,
     )
 
 
@@ -44,7 +45,7 @@ class TestStreamThroughput:
                 session = await client.connect(url=url)
                 for _ in range(STREAMS_PER_ROUND):
                     stream = await session.create_unidirectional_stream()
-                    await stream.write_all(data=STATIC_PAYLOAD)
+                    await stream.write_all(data=STATIC_VIEW)
                 await session.close()
 
         for _ in range(WARMUP_ROUNDS):
@@ -95,7 +96,7 @@ class TestStreamThroughput:
                     stream = await session.create_bidirectional_stream()
 
                     async def sender() -> None:
-                        await stream.write(data=STATIC_PAYLOAD, end_stream=False)
+                        await stream.write(data=STATIC_VIEW, end_stream=False)
 
                     async def receiver() -> None:
                         while await stream.read(max_bytes=65536):

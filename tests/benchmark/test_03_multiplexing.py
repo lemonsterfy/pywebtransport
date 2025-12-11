@@ -17,7 +17,7 @@ WARMUP_ROUNDS: Final[int] = 3
 CONCURRENT_STREAMS: Final[int] = 1000
 CONNECTION_COUNT: Final[int] = 100
 PAYLOAD_SIZE: Final[int] = 64 * 1024
-STATIC_PAYLOAD: Final[bytes] = b"x" * PAYLOAD_SIZE
+STATIC_VIEW: Final[memoryview] = memoryview(b"x" * PAYLOAD_SIZE)
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -33,6 +33,7 @@ def client_config() -> ClientConfig:
         initial_max_data=1073741824,
         initial_max_streams_bidi=2000,
         initial_max_streams_uni=2000,
+        max_event_queue_size=20000,
     )
 
 
@@ -43,7 +44,7 @@ class TestMultiplexingEfficiency:
 
         async def stream_worker(*, session: Any) -> None:
             stream = await session.create_unidirectional_stream()
-            await stream.write_all(data=STATIC_PAYLOAD)
+            await stream.write_all(data=STATIC_VIEW)
 
         async def run_multiplexing() -> None:
             async with WebTransportClient(config=client_config) as client:

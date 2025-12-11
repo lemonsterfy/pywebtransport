@@ -11,6 +11,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.10.0] - 2025-12-11
+
+This release implements a definitive architectural purification and core refactoring. It flattens the package structure, enforces strict API boundaries via state caching, and achieves zero-copy data transmission in the hot path. Non-core features have been pruned to reduce the library footprint and improve maintainability.
+
+### Added
+
+- **Messaging Subsystem**: Introduced `pywebtransport.messaging` subpackage to unify structured data handling. Moved and renamed structured stream and datagram transports to `messaging/stream.py` and `messaging/datagram.py`.
+- **Zero-Copy Architecture**: Implemented `Buffer` type (supporting `memoryview`) across the entire data path (Engine -> Processor -> Stream -> Serializer) to minimize memory copying.
+- **Event Multi-Waiting**: Updated `EventEmitter.wait_for` to support waiting for multiple event types simultaneously, resolving potential deadlocks during connection establishment.
+- **Middleware Control**: Introduced `MiddlewareRejected` exception in `server/middleware.py`, allowing middleware to reject requests with specific HTTP status codes and headers.
+- **Blocking Support**: Added `serve_forever` method to `ServerCluster` to support blocking execution patterns.
+- **Recursion Protection**: Added `_MAX_RECURSION_DEPTH` limit to `BaseDataclassSerializer` to prevent recursion exhaustion attacks.
+- **Type Support**: Added native support for `Union`, `Enum`, `bytes` (Base64), and `UUID` in JSON and MsgPack serializers.
+
+### Changed
+
+- **Package Flattening**: Moved core API entities `WebTransportConnection`, `WebTransportSession`, and `WebTransportStream` from subdirectories to the package root (`pywebtransport.connection`, `pywebtransport.session`, `pywebtransport.stream`).
+- **State Isolation**: Refactored API objects to use a "State Caching" pattern, completely removing direct access to private `_engine._state` attributes.
+- **Engine Architecture**: Implemented "Event Loopback" pattern in `WebTransportEngine`. Side effects (I/O) no longer mutate state directly; state updates are now strictly event-driven via internal events like `InternalBindH3Session`.
+- **Adapter Refactoring**: Consolidated client/server adapter logic into `_adapter.base.WebTransportCommonProtocol` to enforce DRY principles.
+- **Type System**: Updated type syntax to Python 3.12 standards (PEP 695). Redefined `Headers` to `dict[str, str] | list[tuple[str, str]]` to support multi-value headers.
+- **Serializer Design**: Refactored `ProtobufSerializer` to be configuration-stateless (removed `message_class` from `__init__`, enabling a single serializer instance to handle multiple message types).
+- **Configuration**:
+  - Extracted `BaseConfig` to eliminate field duplication between Client and Server configs.
+  - Removed factory methods (`create_for_development`, `create_for_production`) from Config classes to enforce dependency inversion.
+  - Removed middleware configuration from `ServerConfig`; middleware must now be registered via `ServerApp`.
+- **API Signatures**:
+  - Changed `RequestRouter.route_request` return type to `tuple[handler, params]` to support path parameters.
+  - Updated `MiddlewareProtocol` to return `None` and raise exceptions for rejection instead of returning `bool`.
+  - Removed `close_connection` parameter from `WebTransportSession.close`.
+
+### Removed
+
+- **Subpackages**: Removed `monitor`, `pool`, `pubsub`, `rpc`, and `datagram` subpackages to adhere to the single-responsibility principle.
+- **Modules**: Removed `browser.py` (application logic) and `load_balancer.py` (redundant functionality).
+- **Config Fields**: Removed `debug`, `access_log`, `auto_reconnect`, `rpc_concurrency_limit`, `pubsub_subscription_queue_size`, and `max_datagram_retries`.
+- **Types**: Removed global `AuthHandlerProtocol` (moved to server scope).
+
+### Fixed
+
+- **Concurrency & Race Conditions**:
+  - Fixed "lost wake-up" race in `Client.connect` by validating state before awaiting events.
+  - Fixed indefinite suspension in `ReconnectingClient.get_session`.
+  - Fixed shutdown deadlocks in `WebTransportEngine` by explicitly failing pending futures.
+  - Fixed startup race conditions and cascading cancellations in `ServerCluster` and `ClientFleet`.
+  - Fixed `ServerApp` dispatch timing to enforce `UserAcceptSession` completion before handler execution.
+- **Resource Leaks**:
+  - Fixed `ConnectionManager` failing to close the underlying transport during passive close.
+  - Fixed zombie resources in `BaseResourceManager` using double-checked locking and proper ID validation.
+  - Fixed closure listener leaks in `SessionManager` upon manual removal.
+  - Fixed memory leak in `StructuredDatagramTransport` using weak references.
+- **Data Integrity**:
+  - Fixed data loss on `Stream.read` cancellation by implementing `InternalReturnStreamData` to restore unconsumed data.
+  - Fixed `error_code` evaluation logic to distinguish `None` from `0` in exception handling.
+- **Protocol Compliance**:
+  - Prevented illegal `STOP_SENDING` frames on local unidirectional streams during session reset.
+  - Filtered HTTP/3 trailers in `ConnectionProcessor` to prevent invalid session creation.
+  - Removed URL fragment handling in client utilities to comply with HTTP/3 `:path` rules.
+- **Infrastructure**:
+  - Fixed shallow copy bug in default config generation.
+  - Fixed `get_default_client_config` global state pollution.
+
+### Performance
+
+- **Zero-Copy I/O**: Enabled Scatter/Gather I/O for datagrams using `list[Buffer]` and refactored Stream read path to use `deque[memoryview]`.
+- **Algorithm Optimization**: Optimized resource cleanup in Processors from $O(M \times N)$ to $O(1)$ via reverse indexing (`active_streams`).
+- **Memory Footprint**: Enabled `slots=True` and `frozen=True` for all core state dataclasses and events.
+- **Overhead Reduction**: Cached `dataclasses.fields` in serializers to reduce reflection overhead.
+
+### Security
+
+- **Input Validation**:
+  - Fixed Regex anchoring vulnerability in `RequestRouter` by enforcing `fullmatch`.
+  - Enforced strict ASCII validation for H3 header names (RFC 9110).
+- **DoS Protection**:
+  - Enforced `maxsize` on `WebTransportEngine` event queues.
+  - Implemented memory protection (`max_tracked_ips`) in `RateLimiter`.
+- **System Security**: Tightened file permissions (`0o600`) for generated private keys.
+
 ## [0.9.1] - 2025-11-30
 
 This is a critical administrative and compliance release that transitions the project's licensing model from MIT to the **Apache License, Version 2.0**. This change provides explicit patent grants and greater legal certainty for enterprise adoption. Additionally, this release unifies the project's visual identity assets across all documentation platforms. No functional code changes are included.
@@ -492,7 +571,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.0...v0.8.1

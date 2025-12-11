@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from types import TracebackType
 from typing import Any, Self
 
-from pywebtransport.client._adapter import create_connection
+from pywebtransport._adapter.client import create_connection
 from pywebtransport.client.utils import parse_webtransport_url, validate_url
 from pywebtransport.config import ClientConfig
-from pywebtransport.connection.connection import WebTransportConnection
+from pywebtransport.connection import WebTransportConnection
 from pywebtransport.events import EventEmitter
 from pywebtransport.exceptions import ClientError, ConnectionError, TimeoutError
 from pywebtransport.manager.connection import ConnectionManager
-from pywebtransport.session.session import WebTransportSession
+from pywebtransport.session import WebTransportSession
 from pywebtransport.types import URL, ConnectionState, EventType, Headers
-from pywebtransport.utils import Timer, format_duration, get_logger, get_timestamp
+from pywebtransport.utils import format_duration, get_logger, get_timestamp, merge_headers
 
 __all__: list[str] = ["ClientDiagnostics", "ClientStats", "WebTransportClient"]
 
@@ -91,13 +92,24 @@ class ClientStats:
 class WebTransportClient(EventEmitter):
     """A client for establishing WebTransport connections and sessions."""
 
-    def __init__(self, *, config: ClientConfig | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        config: ClientConfig | None = None,
+        connection_factory: Callable[..., Awaitable[WebTransportConnection]] = create_connection,
+    ) -> None:
         """Initialize the WebTransport client."""
-        super().__init__()
         self._config = config or ClientConfig()
+        super().__init__(
+            max_queue_size=self._config.max_event_queue_size,
+            max_listeners=self._config.max_event_listeners,
+            max_history=self._config.max_event_history_size,
+        )
+        self._connection_factory = connection_factory
         self._connection_manager = ConnectionManager(max_connections=self._config.max_connections)
-        self._default_headers: Headers = {}
+        self._default_headers: Headers = []
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
         self._stats = ClientStats()
 
         logger.info("WebTransport client initialized")
@@ -125,15 +137,15 @@ class WebTransportClient(EventEmitter):
 
     async def close(self) -> None:
         """Close the client and all underlying connections."""
+        if self._close_task and not self._close_task.done():
+            await self._close_task
+            return
+
         if self._closed:
             return
 
-        logger.info("Closing WebTransport client...")
-        self._closed = True
-
-        await self._connection_manager.shutdown()
-
-        logger.info("WebTransport client closed.")
+        self._close_task = asyncio.create_task(coro=self._close_implementation())
+        await self._close_task
 
     async def connect(
         self, *, url: URL, timeout: float | None = None, headers: Headers | None = None
@@ -149,44 +161,42 @@ class WebTransportClient(EventEmitter):
         self._stats.connections_attempted += 1
 
         connection: WebTransportConnection | None = None
-        session: WebTransportSession | None = None
         success = False
+        start_time = get_timestamp()
 
         try:
             async with asyncio.timeout(delay=connect_timeout):
-                with Timer() as timer:
-                    connection_headers = self._default_headers.copy()
-                    if headers:
-                        connection_headers.update(headers)
-                    conn_config = self._config.update(headers=connection_headers)
+                connection_headers = merge_headers(base=self._default_headers, update=headers)
+                conn_config = self._config.update(headers=connection_headers)
 
-                    connection = await create_connection(
-                        host=host, port=port, config=conn_config, loop=asyncio.get_running_loop()
+                connection = await self._connection_factory(
+                    host=host, port=port, config=conn_config, loop=asyncio.get_running_loop()
+                )
+
+                if connection.state != ConnectionState.CONNECTED:
+                    logger.debug("Waiting for connection establishment events...")
+                    await connection.events.wait_for(
+                        event_type=[
+                            EventType.CONNECTION_ESTABLISHED,
+                            EventType.CONNECTION_FAILED,
+                            EventType.CONNECTION_CLOSED,
+                        ]
                     )
 
-                    connect_wait_timeout = connect_timeout - timer.elapsed
-                    if connect_wait_timeout <= 0:
-                        raise asyncio.TimeoutError("Timeout before connection established")
-                    logger.debug("Waiting for CONNECTION_ESTABLISHED event...")
-                    async with asyncio.timeout(delay=connect_wait_timeout):
-                        await connection.events.wait_for(event_type=EventType.CONNECTION_ESTABLISHED)
-                    logger.debug("CONNECTION_ESTABLISHED event received.")
+                if connection.state != ConnectionState.CONNECTED:
+                    raise ConnectionError(message=f"Connection failed state={connection.state}")
 
-                    await self._connection_manager.add_connection(connection=connection)
+                await self._connection_manager.add_connection(connection=connection)
 
-                    remaining_timeout = connect_timeout - timer.elapsed
-                    if remaining_timeout <= 0:
-                        raise asyncio.TimeoutError("Timeout exceeded before session negotiation")
+                logger.debug("Initiating session creation...")
+                session = await connection.create_session(path=path, headers=connection_headers)
+                logger.debug("Session creation successful: %s", session.session_id)
 
-                    logger.debug("Initiating session creation...")
-                    async with asyncio.timeout(delay=remaining_timeout):
-                        session = await connection.create_session(path=path, headers=connection_headers)
-                    logger.debug("Session creation successful: %s", session.session_id)
-
-                    self._update_success_stats(connect_time=timer.elapsed)
-                    logger.info("Session established to %s in %s", url, format_duration(seconds=timer.elapsed))
-                    success = True
-                    return session
+                elapsed = get_timestamp() - start_time
+                self._update_success_stats(connect_time=elapsed)
+                logger.info("Session established to %s in %s", url, format_duration(seconds=elapsed))
+                success = True
+                return session
 
         except asyncio.TimeoutError as e:
             self._stats.connections_failed += 1
@@ -218,7 +228,14 @@ class WebTransportClient(EventEmitter):
 
     def set_default_headers(self, *, headers: Headers) -> None:
         """Set default headers for all subsequent connections."""
-        self._default_headers = headers.copy()
+        self._default_headers = merge_headers(base=[], update=headers)
+
+    async def _close_implementation(self) -> None:
+        """Internal implementation of client closure."""
+        logger.info("Closing WebTransport client...")
+        self._closed = True
+        await self._connection_manager.shutdown()
+        logger.info("WebTransport client closed.")
 
     def _update_success_stats(self, *, connect_time: float) -> None:
         """Update connection statistics on a successful connection."""

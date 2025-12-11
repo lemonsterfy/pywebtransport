@@ -6,8 +6,8 @@ import asyncio
 from collections import defaultdict
 from typing import Any, ClassVar
 
-from pywebtransport.connection.connection import WebTransportConnection
-from pywebtransport.manager._base import _BaseResourceManager
+from pywebtransport.connection import WebTransportConnection
+from pywebtransport.manager._base import BaseResourceManager
 from pywebtransport.types import ConnectionId, EventType
 from pywebtransport.utils import get_logger
 
@@ -16,7 +16,7 @@ __all__: list[str] = ["ConnectionManager"]
 logger = get_logger(name=__name__)
 
 
-class ConnectionManager(_BaseResourceManager[ConnectionId, WebTransportConnection]):
+class ConnectionManager(BaseResourceManager[ConnectionId, WebTransportConnection]):
     """Manage multiple WebTransport connections using event-driven cleanup."""
 
     _log = logger
@@ -25,8 +25,15 @@ class ConnectionManager(_BaseResourceManager[ConnectionId, WebTransportConnectio
     def __init__(self, *, max_connections: int) -> None:
         """Initialize the connection manager."""
         super().__init__(resource_name="connection", max_resources=max_connections)
-        self._cleanup_queue: asyncio.Queue[WebTransportConnection] | None = None
-        self._cleanup_worker_task: asyncio.Task[None] | None = None
+        self._closing_tasks: set[asyncio.Task[None]] = set()
+
+    async def shutdown(self) -> None:
+        """Shut down the manager and ensure all closing tasks complete."""
+        await super().shutdown()
+
+        if self._closing_tasks:
+            self._log.debug("Waiting for %d closing tasks to complete", len(self._closing_tasks))
+            await asyncio.gather(*self._closing_tasks, return_exceptions=True)
 
     async def add_connection(self, *, connection: WebTransportConnection) -> ConnectionId:
         """Add a new connection and subscribe to its closure event."""
@@ -40,18 +47,18 @@ class ConnectionManager(_BaseResourceManager[ConnectionId, WebTransportConnectio
 
         removed_connection: WebTransportConnection | None = None
         async with self._lock:
+            if connection_id in self._event_handlers:
+                self._event_handlers.pop(connection_id)
+
             removed_connection = self._resources.pop(connection_id, None)
             if removed_connection:
                 self._stats["total_closed"] += 1
                 self._update_stats_unsafe()
+                self._schedule_close(connection=removed_connection)
                 self._log.debug(
                     "Manually removed connection %s (total: %d)", connection_id, self._stats["current_count"]
                 )
 
-        if removed_connection:
-            if self._cleanup_queue:
-                self._cleanup_queue.put_nowait(item=removed_connection)
-            self._on_resource_removed(resource_id=connection_id)
         return removed_connection
 
     async def get_stats(self) -> dict[str, Any]:
@@ -65,67 +72,33 @@ class ConnectionManager(_BaseResourceManager[ConnectionId, WebTransportConnectio
                 stats["states"] = dict(states)
         return stats
 
-    async def _cleanup_worker(self) -> None:
-        """Process the cleanup queue sequentially with yielding."""
-        if self._cleanup_queue is None:
-            return
-
-        while True:
-            try:
-                connection = await self._cleanup_queue.get()
-                try:
-                    if not connection.is_closed:
-                        await connection.close()
-                except Exception as e:
-                    self._log.error("Error closing connection in cleanup worker: %s", e, exc_info=True)
-                finally:
-                    self._cleanup_queue.task_done()
-
-                await asyncio.sleep(0)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self._log.error("Cleanup worker crashed unexpectedly: %s", e, exc_info=True)
-                await asyncio.sleep(0.1)
-
-    async def _close_resource(self, resource: WebTransportConnection) -> None:
+    async def _close_resource(self, *, resource: WebTransportConnection) -> None:
         """Close a single connection resource."""
-        if not resource.is_closed:
-            await resource.close()
+        await resource.close()
 
-    def _get_resource_id(self, resource: WebTransportConnection) -> ConnectionId:
+    def _get_resource_id(self, *, resource: WebTransportConnection) -> ConnectionId:
         """Get the unique ID from a connection object."""
         return resource.connection_id
 
     async def _handle_resource_closed(self, *, resource_id: ConnectionId) -> None:
         """Handle the closure event for a managed resource."""
-        if self._lock is None or self._cleanup_queue is None:
+        if self._lock is None:
             return
 
+        conn: WebTransportConnection | None = None
         async with self._lock:
+            if resource_id in self._event_handlers:
+                self._event_handlers.pop(resource_id)
+
             conn = self._resources.pop(resource_id, None)
             if conn:
                 self._stats["total_closed"] += 1
                 self._update_stats_unsafe()
-                self._cleanup_queue.put_nowait(item=conn)
-                self._log.debug("Passive cleanup: Connection %s removed and queued.", resource_id)
+                self._schedule_close(connection=conn)
+                self._log.debug("Passive cleanup: Connection %s removed and close scheduled.", resource_id)
 
-        self._on_resource_removed(resource_id=resource_id)
-
-    def _on_resource_removed(self, *, resource_id: ConnectionId) -> None:
-        """Hook called after a connection is removed."""
-        pass
-
-    def _start_background_tasks(self) -> None:
-        """Start background tasks including the cleanup worker."""
-        super()._start_background_tasks()
-
-        if self._cleanup_queue is None:
-            self._cleanup_queue = asyncio.Queue()
-
-        if self._cleanup_worker_task is None or self._cleanup_worker_task.done():
-            self._cleanup_worker_task = asyncio.create_task(coro=self._cleanup_worker())
-            self._cleanup_worker_task.add_done_callback(self._on_background_task_done)
-            if self._cleanup_worker_task not in self._background_tasks_to_cancel:
-                self._background_tasks_to_cancel.append(self._cleanup_worker_task)
+    def _schedule_close(self, *, connection: WebTransportConnection) -> None:
+        """Schedule an asynchronous close task for a connection."""
+        task = asyncio.create_task(coro=connection.close())
+        self._closing_tasks.add(task)
+        task.add_done_callback(self._closing_tasks.discard)

@@ -6,7 +6,7 @@ import asyncio
 import weakref
 from collections import deque
 from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Any, cast
 
 from aioquic.buffer import encode_uint_var
 
@@ -29,8 +29,13 @@ from pywebtransport._protocol.events import (
     FailUserFuture,
     GoawayReceived,
     HeadersReceived,
+    InternalBindH3Session,
+    InternalBindQuicStream,
     InternalCleanupEarlyEvents,
     InternalCleanupResources,
+    InternalFailH3Session,
+    InternalFailQuicStream,
+    InternalReturnStreamData,
     LogH3Frame,
     ProtocolEvent,
     RescheduleQuicTimer,
@@ -72,28 +77,20 @@ from pywebtransport._protocol.events import (
 )
 from pywebtransport._protocol.h3_engine import WebTransportH3Engine
 from pywebtransport._protocol.session_processor import SessionProcessor
-from pywebtransport._protocol.state import ProtocolState, StreamStateData
+from pywebtransport._protocol.state import ProtocolState
 from pywebtransport._protocol.stream_processor import StreamProcessor
 from pywebtransport.constants import ErrorCodes
-from pywebtransport.exceptions import ConnectionError, ProtocolError, SessionError
-from pywebtransport.types import (
-    ConnectionId,
-    ConnectionState,
-    EventType,
-    Headers,
-    SessionId,
-    StreamDirection,
-    StreamState,
-)
-from pywebtransport.utils import get_logger, get_timestamp
+from pywebtransport.exceptions import ConnectionError, ProtocolError
+from pywebtransport.types import Buffer, ConnectionId, ConnectionState, EventType, Headers, SessionId
+from pywebtransport.utils import get_logger, get_timestamp, merge_headers
 
 if TYPE_CHECKING:
-    from pywebtransport.client._adapter import WebTransportClientProtocol
+    from pywebtransport._adapter.client import WebTransportClientProtocol
+    from pywebtransport._adapter.server import WebTransportServerProtocol
     from pywebtransport.config import ClientConfig, ServerConfig
-    from pywebtransport.server._adapter import WebTransportServerProtocol
 
-    AdapterProtocol: TypeAlias = WebTransportServerProtocol | WebTransportClientProtocol
-    NotifyCallback: TypeAlias = Callable[[Effect], None]
+    type AdapterProtocol = WebTransportServerProtocol | WebTransportClientProtocol
+    type NotifyCallback = Callable[[Effect], None]
 
 
 __all__: list[str] = []
@@ -123,9 +120,12 @@ class WebTransportEngine:
         self._early_event_cleanup_task: asyncio.Task[None] | None = None
         self._resource_gc_timer_task: asyncio.Task[None] | None = None
 
+        self._internal_error: tuple[int, str] | None = None
+
         self._pending_event_ttl = config.pending_event_ttl
         self._resource_cleanup_interval = config.resource_cleanup_interval
         self._next_early_event_cleanup_at: float = 0.0
+        self._config = config
 
         self._state = ProtocolState(
             is_client=is_client, connection_state=ConnectionState.IDLE, max_datagram_size=config.max_datagram_size
@@ -138,12 +138,34 @@ class WebTransportEngine:
         self._stream_processor = StreamProcessor(is_client=is_client, config=config)
         self._h3_engine = WebTransportH3Engine(is_client=is_client, config=config)
 
-        self._pending_user_actions: deque[UserEvent] = deque()
+        self._pending_user_actions: deque[UserEvent[Any]] = deque()
 
     async def put_event(self, *, event: ProtocolEvent) -> None:
         """Place a new event into the engine's processing queue."""
         if self._driver_task is not None and not self._driver_task.done() and self._event_queue is not None:
-            await self._event_queue.put(event)
+            try:
+                self._event_queue.put_nowait(event)
+            except asyncio.QueueFull:
+                if isinstance(event, UserEvent):
+                    if not event.future.done():
+                        try:
+                            event.future.set_exception(
+                                ConnectionError("Event queue full", error_code=ErrorCodes.APP_RESOURCE_EXHAUSTED)
+                            )
+                        except asyncio.InvalidStateError:
+                            pass
+                elif isinstance(event, TransportDatagramFrameReceived):
+                    logger.warning(
+                        "Event queue full (%d), dropping datagram event: %s", self._event_queue.maxsize, event
+                    )
+                else:
+                    error_msg = f"Event queue full ({self._event_queue.maxsize}), critical event lost: {event}"
+                    logger.critical("%s. Triggering emergency shutdown.", error_msg)
+
+                    self._internal_error = (ErrorCodes.INTERNAL_ERROR, error_msg)
+
+                    if self._driver_task and not self._driver_task.done():
+                        self._driver_task.cancel()
         else:
             if isinstance(event, UserEvent) and not event.future.done():
                 error = ConnectionError("Engine is not running.")
@@ -158,7 +180,7 @@ class WebTransportEngine:
         if self._state.connection_state == ConnectionState.IDLE:
             self._state.connection_state = ConnectionState.CONNECTING
         if self._event_queue is None:
-            self._event_queue = asyncio.Queue()
+            self._event_queue = asyncio.Queue(maxsize=self._config.max_event_queue_size)
 
         if self._driver_task is None:
             self._driver_task = asyncio.create_task(coro=self._driver_loop())
@@ -191,22 +213,25 @@ class WebTransportEngine:
         if self._driver_task and not self._driver_task.done():
             self._driver_task.cancel()
             try:
-                await self._driver_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._driver_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             logger.debug("WebTransportEngine driver loop stopped.")
         self._driver_task = None
 
         if self._event_queue:
             while not self._event_queue.empty():
-                event = self._event_queue.get_nowait()
-                if isinstance(event, UserEvent) and not event.future.done():
-                    error = ConnectionError("Engine stopped")
-                    try:
-                        event.future.set_exception(error)
-                    except asyncio.InvalidStateError:
-                        pass
-                self._event_queue.task_done()
+                try:
+                    event = self._event_queue.get_nowait()
+                    if isinstance(event, UserEvent) and not event.future.done():
+                        error = ConnectionError("Engine stopped")
+                        try:
+                            event.future.set_exception(error)
+                        except asyncio.InvalidStateError:
+                            pass
+                    self._event_queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
 
     def _check_client_connection_ready(self) -> tuple[list[Effect], bool]:
         """Check if the client connection is fully ready (QUIC + H3)."""
@@ -277,8 +302,12 @@ class WebTransportEngine:
 
         except asyncio.CancelledError:
             logger.debug("Engine driver loop cancelled.")
-            final_reason = "Driver loop cancelled"
-            final_error_code = ErrorCodes.NO_ERROR
+            if self._internal_error:
+                final_error_code, final_reason = self._internal_error
+            else:
+                final_reason = "Driver loop cancelled"
+                final_error_code = ErrorCodes.NO_ERROR
+
         except Exception as e:
             logger.critical("Fatal error in engine driver loop: %s", e, exc_info=True)
             final_reason = "Fatal engine error"
@@ -385,7 +414,7 @@ class WebTransportEngine:
                         pass
             return
 
-        for effect in effects:
+        for i, effect in enumerate(effects):
             try:
                 match effect:
                     case CleanupH3Stream(stream_id=sid):
@@ -417,10 +446,10 @@ class WebTransportEngine:
                         handler.reset_stream(stream_id=sid, error_code=ec)
 
                     case SendQuicData(stream_id=sid, data=d, end_stream=es):
-                        handler.send_stream_data(stream_id=sid, data=d, end_stream=es)
+                        handler.send_stream_data(stream_id=sid, data=cast(bytes, d), end_stream=es)
 
                     case SendQuicDatagram(data=d):
-                        handler.send_datagram_frame(data=d)
+                        handler.send_datagram_frame(data=cast(bytes, d))
 
                     case StopQuicStream(stream_id=sid, error_code=ec):
                         handler.stop_stream(stream_id=sid, error_code=ec)
@@ -429,7 +458,19 @@ class WebTransportEngine:
                         handler.handle_timer_now()
 
                     case CompleteUserFuture(future=fut, value=v):
-                        if not fut.done():
+                        if fut.cancelled():
+                            if isinstance(v, (bytes, memoryview)) and v:
+                                stream_id = getattr(fut, "stream_id", None)
+                                if stream_id is not None:
+                                    logger.warning(
+                                        "Read future cancelled, returning %d bytes to stream %d", len(v), stream_id
+                                    )
+                                    await self.put_event(
+                                        event=InternalReturnStreamData(stream_id=stream_id, data=cast(Buffer, v))
+                                    )
+                                else:
+                                    logger.warning("Read future cancelled with data, but stream_id missing. Data lost.")
+                        elif not fut.done():
                             fut.set_result(v)
 
                     case FailUserFuture(future=fut, exception=err):
@@ -443,113 +484,82 @@ class WebTransportEngine:
                         handler.log_event(category=c, event=e, data=d)
 
                     case CreateH3Session(session_id=sid, path=p, headers=h, create_future=fut):
-                        session_data = self._state.sessions.get(sid)
-                        if not session_data:
-                            if not fut.done():
-                                fut.set_exception(SessionError(message=f"Session {sid} vanished during creation"))
-                            continue
-
-                        if session_data.control_stream_id != -1:
-                            logger.warning(
-                                "Session %s already has a control stream ID (%d)", sid, session_data.control_stream_id
-                            )
-                            if not fut.done():
-                                fut.set_exception(SessionError(message=f"Session {sid} control stream already exists"))
-                            continue
-
                         try:
                             control_stream_id = handler.get_next_available_stream_id(is_unidirectional=False)
                         except Exception as e:
                             logger.error("Failed to get next available stream ID for session %s: %s", sid, e)
-                            if not fut.done():
-                                fut.set_exception(
-                                    ConnectionError("No available streams to create session control stream")
-                                )
+                            await self.put_event(event=InternalFailH3Session(session_id=sid, exception=e, future=fut))
                             continue
 
                         server_name = handler.get_server_name()
                         if not server_name:
                             error = ConnectionError("Cannot create session: missing server name (SNI)")
                             logger.error(error)
-                            if not fut.done():
-                                fut.set_exception(error)
+                            await self.put_event(
+                                event=InternalFailH3Session(session_id=sid, exception=error, future=fut)
+                            )
                             continue
 
-                        final_headers: Headers = {
+                        initial_headers: Headers = {
                             ":method": "CONNECT",
                             ":scheme": "https",
                             ":authority": server_name,
                             ":path": p,
                             ":protocol": "webtransport",
                         }
-                        final_headers.update(h)
 
-                        session_data.control_stream_id = control_stream_id
-                        self._state.stream_to_session_map[control_stream_id] = sid
-                        self._state.pending_create_session_futures[control_stream_id] = fut
+                        final_headers = merge_headers(base=initial_headers, update=h)
 
                         h3_effects = self._h3_engine.encode_headers(
                             stream_id=control_stream_id, headers=final_headers, end_stream=False
                         )
                         await self._execute_effects(effects=h3_effects)
+                        await self.put_event(
+                            event=InternalBindH3Session(session_id=sid, control_stream_id=control_stream_id, future=fut)
+                        )
 
                     case CreateQuicStream(session_id=sid, is_unidirectional=is_uni, create_future=fut):
-                        session_data = self._state.sessions.get(sid)
-                        if session_data:
-                            try:
-                                actual_stream_id = handler.get_next_available_stream_id(is_unidirectional=is_uni)
-                                (h3_effects) = self._h3_engine.encode_webtransport_stream_creation(
-                                    stream_id=actual_stream_id,
-                                    control_stream_id=session_data.control_stream_id,
-                                    is_unidirectional=is_uni,
-                                )
-                            except Exception as e:
-                                logger.error(
-                                    "Failed during WebTransport stream creation encoding for session %s: %s", sid, e
-                                )
-                                if not fut.done():
-                                    fut.set_exception(ConnectionError("Failed to encode stream creation frame"))
-                                continue
+                        try:
+                            actual_stream_id = handler.get_next_available_stream_id(is_unidirectional=is_uni)
+                            session_data = self._state.sessions.get(sid)
+                            control_id = session_data.control_stream_id if session_data else -1
 
-                            stream_data = StreamStateData(
+                            (h3_effects) = self._h3_engine.encode_webtransport_stream_creation(
                                 stream_id=actual_stream_id,
-                                session_id=sid,
-                                direction=StreamDirection.SEND_ONLY if is_uni else StreamDirection.BIDIRECTIONAL,
-                                state=StreamState.OPEN,
-                                created_at=get_timestamp(),
+                                control_stream_id=control_id,
+                                is_unidirectional=is_uni,
                             )
-                            self._state.streams[actual_stream_id] = stream_data
-                            self._state.stream_to_session_map[actual_stream_id] = sid
                             await self._execute_effects(effects=h3_effects)
-                            if not fut.done():
-                                fut.set_result(actual_stream_id)
-
-                            self._owner_notify_callback(
-                                EmitStreamEvent(
+                            await self.put_event(
+                                event=InternalBindQuicStream(
                                     stream_id=actual_stream_id,
-                                    event_type=EventType.STREAM_OPENED,
-                                    data={
-                                        "stream_id": actual_stream_id,
-                                        "session_id": sid,
-                                        "direction": stream_data.direction,
-                                    },
+                                    session_id=sid,
+                                    is_unidirectional=is_uni,
+                                    future=fut,
                                 )
                             )
-                        else:
-                            if not fut.done():
-                                fut.set_exception(
-                                    SessionError(message=f"Session {sid} vanished during stream creation")
+                        except Exception as e:
+                            logger.error(
+                                "Failed during WebTransport stream creation encoding for session %s: %s", sid, e
+                            )
+                            await self.put_event(
+                                event=InternalFailQuicStream(
+                                    session_id=sid, is_unidirectional=is_uni, exception=e, future=fut
                                 )
+                            )
+                            continue
 
                     case SendH3Capsule(stream_id=sid, capsule_type=ct, capsule_data=cd):
-                        encoded_bytes = self._h3_engine.encode_capsule(stream_id=sid, capsule_type=ct, capsule_data=cd)
+                        encoded_bytes = self._h3_engine.encode_capsule(
+                            stream_id=sid, capsule_type=ct, capsule_data=cast(bytes, cd)
+                        )
                         await self._execute_effects(
                             effects=[SendQuicData(stream_id=sid, data=encoded_bytes, end_stream=False)]
                         )
 
                     case SendH3Datagram(stream_id=sid, data=d):
-                        encoded_bytes = self._h3_engine.encode_datagram(stream_id=sid, data=d)
-                        await self._execute_effects(effects=[SendQuicDatagram(data=encoded_bytes)])
+                        encoded_data = self._h3_engine.encode_datagram(stream_id=sid, data=d)
+                        await self._execute_effects(effects=[SendQuicDatagram(data=encoded_data)])
 
                     case SendH3Goaway():
                         h3_control_stream_id = self._h3_engine._local_control_stream_id
@@ -574,6 +584,9 @@ class WebTransportEngine:
 
             except Exception as e:
                 logger.error("Error executing effect %s: %s", type(effect).__name__, e, exc_info=True)
+
+                self._fail_remaining_futures(remaining_effects=effects[i + 1 :], exception=e)
+
                 if self._state.connection_state not in (ConnectionState.CLOSING, ConnectionState.CLOSED):
                     close_effects_on_error: list[Effect] = [
                         CloseQuicConnection(error_code=ErrorCodes.INTERNAL_ERROR, reason="Effect execution error")
@@ -598,6 +611,34 @@ class WebTransportEngine:
                             except Exception:
                                 pass
 
+                break
+
+    def _fail_remaining_futures(self, *, remaining_effects: list[Effect], exception: Exception) -> None:
+        """Fail pending futures in unexecuted effects to prevent deadlocks."""
+        for effect in remaining_effects:
+            match effect:
+                case (
+                    CompleteUserFuture(future=fut)
+                    | FailUserFuture(future=fut)
+                    | InternalBindH3Session(future=fut)
+                    | InternalFailH3Session(future=fut)
+                    | InternalBindQuicStream(future=fut)
+                    | InternalFailQuicStream(future=fut)
+                ):
+                    if not fut.done():
+                        try:
+                            fut.set_exception(exception)
+                        except asyncio.InvalidStateError:
+                            pass
+                case CreateH3Session(create_future=fut) | CreateQuicStream(create_future=fut):
+                    if not fut.done():
+                        try:
+                            fut.set_exception(exception)
+                        except asyncio.InvalidStateError:
+                            pass
+                case _:
+                    pass
+
     def _handle_event(self, *, event: ProtocolEvent) -> list[Effect]:
         """Process a single event and return resulting effects."""
         all_effects: list[Effect] = []
@@ -609,39 +650,70 @@ class WebTransportEngine:
             re_queue_pending_actions = False
 
             match current_event:
+                case InternalBindH3Session() as ibhs_ev:
+                    new_effects.extend(
+                        self._connection_processor.handle_internal_bind_h3_session(event=ibhs_ev, state=self._state)
+                    )
+
+                case InternalBindQuicStream() as ibqs_ev:
+                    new_effects.extend(
+                        self._stream_processor.handle_internal_bind_quic_stream(event=ibqs_ev, state=self._state)
+                    )
+
                 case InternalCleanupEarlyEvents():
                     if self._state.early_event_count == 0:
-                        break
+                        continue
 
                     now = get_timestamp()
-                    expired_control_stream_ids = [
-                        control_stream_id
-                        for control_stream_id, events in self._state.early_event_buffer.items()
-                        if events and (now - events[0][0]) > self._pending_event_ttl
-                    ]
+                    for control_stream_id, events in list(self._state.early_event_buffer.items()):
+                        valid_events = []
+                        expired_events = []
 
-                    for control_stream_id in expired_control_stream_ids:
-                        events_to_discard = self._state.early_event_buffer.pop(control_stream_id, [])
-                        if not events_to_discard:
-                            continue
+                        for entry in events:
+                            ts, _ = entry
+                            if (now - ts) <= self._pending_event_ttl:
+                                valid_events.append(entry)
+                            else:
+                                expired_events.append(entry)
 
-                        self._state.early_event_count -= len(events_to_discard)
-                        logger.warning(
-                            "Discarding %d expired early events for unknown session (control stream %d)",
-                            len(events_to_discard),
-                            control_stream_id,
-                        )
-                        for _ts, ev in events_to_discard:
-                            if isinstance(ev, WebTransportStreamDataReceived):
-                                new_effects.append(
-                                    ResetQuicStream(
-                                        stream_id=ev.stream_id, error_code=ErrorCodes.WT_BUFFERED_STREAM_REJECTED
+                        if expired_events:
+                            self._state.early_event_count -= len(expired_events)
+                            logger.warning(
+                                "Discarding %d expired early events for unknown session (control stream %d)",
+                                len(expired_events),
+                                control_stream_id,
+                            )
+                            for _ts, ev in expired_events:
+                                if isinstance(ev, WebTransportStreamDataReceived):
+                                    new_effects.append(
+                                        ResetQuicStream(
+                                            stream_id=ev.stream_id, error_code=ErrorCodes.WT_BUFFERED_STREAM_REJECTED
+                                        )
                                     )
-                                )
+
+                        if valid_events:
+                            self._state.early_event_buffer[control_stream_id] = valid_events
+                        else:
+                            del self._state.early_event_buffer[control_stream_id]
 
                 case InternalCleanupResources() as icr_ev:
                     new_effects.extend(
                         self._connection_processor.handle_cleanup_resources(event=icr_ev, state=self._state)
+                    )
+
+                case InternalFailH3Session() as ifhs_ev:
+                    new_effects.extend(
+                        self._connection_processor.handle_internal_fail_h3_session(event=ifhs_ev, state=self._state)
+                    )
+
+                case InternalFailQuicStream() as ifqs_ev:
+                    new_effects.extend(
+                        self._stream_processor.handle_internal_fail_quic_stream(event=ifqs_ev, state=self._state)
+                    )
+
+                case InternalReturnStreamData() as irsd_ev:
+                    new_effects.extend(
+                        self._stream_processor.handle_return_stream_data(event=irsd_ev, state=self._state)
                     )
 
                 case TransportConnectionTerminated() as tct_ev:

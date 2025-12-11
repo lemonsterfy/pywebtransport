@@ -9,12 +9,16 @@ from pytest_mock import MockerFixture
 from pywebtransport.constants import ErrorCodes
 from pywebtransport.events import EventEmitter
 from pywebtransport.manager.session import SessionManager
-from pywebtransport.session.session import WebTransportSession
+from pywebtransport.session import WebTransportSession
 from pywebtransport.types import SessionState
 
 
-@pytest.mark.asyncio
 class TestSessionManager:
+
+    @pytest.fixture
+    def manager(self) -> SessionManager:
+        return SessionManager(max_sessions=10)
+
     @pytest.fixture
     def mock_session(self, mocker: MockerFixture) -> MagicMock:
         session = mocker.Mock(spec=WebTransportSession)
@@ -25,10 +29,7 @@ class TestSessionManager:
         session.close = mocker.AsyncMock()
         return cast(MagicMock, session)
 
-    @pytest.fixture
-    def manager(self) -> SessionManager:
-        return SessionManager(max_sessions=10)
-
+    @pytest.mark.asyncio
     async def test_add_session(self, manager: SessionManager, mock_session: MagicMock) -> None:
         async with manager:
             session_id = await manager.add_session(session=mock_session)
@@ -37,32 +38,36 @@ class TestSessionManager:
             assert len(manager) == 1
             assert await manager.get_resource(resource_id="sess-1") is mock_session
 
+    @pytest.mark.asyncio
     async def test_close_resource_already_closed(self, manager: SessionManager, mock_session: MagicMock) -> None:
         mock_session.is_closed = True
 
-        await manager._close_resource(mock_session)
+        await manager._close_resource(resource=mock_session)
 
         mock_session.close.assert_not_awaited()
 
+    @pytest.mark.asyncio
     async def test_close_resource_open(self, manager: SessionManager, mock_session: MagicMock) -> None:
         mock_session.is_closed = False
 
-        await manager._close_resource(mock_session)
+        await manager._close_resource(resource=mock_session)
 
-        mock_session.close.assert_awaited_once_with(
-            error_code=ErrorCodes.NO_ERROR, close_connection=False, reason="Session manager shutdown"
-        )
+        mock_session.close.assert_awaited_once_with(error_code=ErrorCodes.NO_ERROR, reason="Session manager shutdown")
 
-    async def test_get_resource_id(self, manager: SessionManager, mock_session: MagicMock) -> None:
-        assert manager._get_resource_id(mock_session) == "sess-1"
+    def test_get_resource_id(self, manager: SessionManager, mock_session: MagicMock) -> None:
+        assert manager._get_resource_id(resource=mock_session) == "sess-1"
 
+    @pytest.mark.asyncio
     async def test_get_sessions_by_state(self, manager: SessionManager, mocker: MockerFixture) -> None:
         s1 = mocker.Mock(spec=WebTransportSession, session_id="s1", events=EventEmitter())
         s1.state = SessionState.CONNECTED
+        s1.is_closed = False
         s2 = mocker.Mock(spec=WebTransportSession, session_id="s2", events=EventEmitter())
         s2.state = SessionState.CLOSING
+        s2.is_closed = False
         s3 = mocker.Mock(spec=WebTransportSession, session_id="s3", events=EventEmitter())
         s3.state = SessionState.CONNECTED
+        s3.is_closed = False
 
         async with manager:
             await manager.add_session(session=s1)
@@ -78,14 +83,18 @@ class TestSessionManager:
             assert len(closing) == 1
             assert s2 in closing
 
+    @pytest.mark.asyncio
     async def test_get_sessions_by_state_no_lock(self, manager: SessionManager) -> None:
         assert await manager.get_sessions_by_state(state=SessionState.CONNECTED) == []
 
+    @pytest.mark.asyncio
     async def test_get_stats_includes_states(self, manager: SessionManager, mocker: MockerFixture) -> None:
         s1 = mocker.Mock(spec=WebTransportSession, session_id="s1", events=EventEmitter())
         s1.state = SessionState.CONNECTED
+        s1.is_closed = False
         s2 = mocker.Mock(spec=WebTransportSession, session_id="s2", events=EventEmitter())
         s2.state = SessionState.DRAINING
+        s2.is_closed = False
 
         async with manager:
             await manager.add_session(session=s1)
@@ -97,18 +106,21 @@ class TestSessionManager:
             assert stats["states"]["connected"] == 1
             assert stats["states"]["draining"] == 1
 
+    @pytest.mark.asyncio
     async def test_get_stats_no_lock(self, manager: SessionManager) -> None:
         stats = await manager.get_stats()
 
         assert stats == {}
 
-    async def test_init(self, manager: SessionManager) -> None:
+    def test_init(self, manager: SessionManager) -> None:
         assert len(manager) == 0
 
-    async def test_on_resource_removed_hook(self, manager: SessionManager) -> None:
-        manager._on_resource_removed(resource_id="sess-1")
+    @pytest.mark.asyncio
+    async def test_remove_session(
+        self, manager: SessionManager, mock_session: MagicMock, mocker: MockerFixture
+    ) -> None:
+        spy_off = mocker.spy(mock_session.events, "off")
 
-    async def test_remove_session(self, manager: SessionManager, mock_session: MagicMock) -> None:
         async with manager:
             await manager.add_session(session=mock_session)
             assert len(manager) == 1
@@ -119,12 +131,29 @@ class TestSessionManager:
             assert len(manager) == 0
             stats = await manager.get_stats()
             assert stats["total_closed"] == 1
+            spy_off.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_remove_session_handler_error(
+        self, manager: SessionManager, mock_session: MagicMock, mocker: MockerFixture
+    ) -> None:
+        mocker.patch.object(mock_session.events, "off", side_effect=ValueError("Handler not found"))
+
+        async with manager:
+            await manager.add_session(session=mock_session)
+
+            removed = await manager.remove_session(session_id="sess-1")
+
+            assert removed is mock_session
+            assert len(manager) == 0
+
+    @pytest.mark.asyncio
     async def test_remove_session_missing(self, manager: SessionManager) -> None:
         async with manager:
             removed = await manager.remove_session(session_id="missing")
 
             assert removed is None
 
+    @pytest.mark.asyncio
     async def test_remove_session_no_lock(self, manager: SessionManager) -> None:
         assert await manager.remove_session(session_id="s1") is None

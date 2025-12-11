@@ -14,15 +14,12 @@ PyWebTransport provides a comprehensive and robust WebTransport implementation f
 
 The primary entry points for building WebTransport applications. These abstractions are designed for ease of use and cover the most common use cases.
 
-| Module                          | Description                                           | Key Classes                                                                      |
-| :------------------------------ | :---------------------------------------------------- | :------------------------------------------------------------------------------- |
-| **[Client](client.md)**         | High-level client abstractions and fleet management.  | `WebTransportClient`, `ClientFleet`, `ReconnectingClient`, `WebTransportBrowser` |
-| **[Monitor](monitor.md)**       | Health and performance monitoring for key components. | `ClientMonitor`, `ConnectionMonitor`, `ServerMonitor`, `SessionMonitor`          |
-| **[Pool](pool.md)**             | Reusable object pools for sessions and streams.       | `SessionPool`, `StreamPool`                                                      |
-| **[Pub/Sub](pubsub.md)**        | High-level framework for publish/subscribe messaging. | `PubSubManager`, `Subscription`                                                  |
-| **[RPC](rpc.md)**               | Framework for Remote Procedure Calls (JSON-RPC 2.0).  | `RpcManager`, `RpcRequest`, `RpcSuccessResponse`                                 |
-| **[Server](server.md)**         | High-level server application framework with routing. | `ServerApp`, `WebTransportServer`, `ServerCluster`, `RequestRouter`              |
-| **[Serializer](serializer.md)** | Framework for structured data serialization.          | `JSONSerializer`, `MsgPackSerializer`, `ProtobufSerializer`                      |
+| Module                          | Description                                           | Key Classes                                                                        |
+| :------------------------------ | :---------------------------------------------------- | :--------------------------------------------------------------------------------- |
+| **[Client](client.md)**         | High-level client abstractions and fleet management.  | `WebTransportClient`, `ClientFleet`, `ReconnectingClient`                          |
+| **[Server](server.md)**         | High-level server application framework with routing. | `ServerApp`, `WebTransportServer`, `ServerCluster`, `RequestRouter`, `RateLimiter` |
+| **[Messaging](messaging.md)**   | High-level structured data transmission support.      | `StructuredStream`, `StructuredDatagramTransport`                                  |
+| **[Serializer](serializer.md)** | Framework for structured data serialization.          | `JSONSerializer`, `MsgPackSerializer`, `ProtobufSerializer`                        |
 
 ---
 
@@ -30,13 +27,12 @@ The primary entry points for building WebTransport applications. These abstracti
 
 Foundational components that provide the core logic and building blocks for the high-level APIs. Use these for more advanced customization and control.
 
-| Module                          | Description                                                 | Key Classes                                                                      |
-| :------------------------------ | :---------------------------------------------------------- | :------------------------------------------------------------------------------- |
-| **[Connection](connection.md)** | Core connection abstraction and load balancing.             | `WebTransportConnection`, `ConnectionLoadBalancer`                               |
-| **[Datagram](datagram.md)**     | Unreliable, low-latency datagram messaging and utilities.   | `StructuredDatagramTransport`, `DatagramReliabilityLayer`, `DatagramBroadcaster` |
-| **[Manager](manager.md)**       | Generic resource lifecycle managers.                        | `ConnectionManager`, `SessionManager`                                            |
-| **[Session](session.md)**       | Session lifecycle and communication management abstraction. | `WebTransportSession`                                                            |
-| **[Stream](stream.md)**         | Reliable, ordered stream communication abstractions.        | `WebTransportStream`, `WebTransportSendStream`, `WebTransportReceiveStream`      |
+| Module                          | Description                                                 | Key Classes                                                                 |
+| :------------------------------ | :---------------------------------------------------------- | :-------------------------------------------------------------------------- |
+| **[Connection](connection.md)** | Core connection abstraction and state management.           | `WebTransportConnection`                                                    |
+| **[Session](session.md)**       | Session lifecycle and communication management abstraction. | `WebTransportSession`                                                       |
+| **[Stream](stream.md)**         | Reliable, ordered stream communication abstractions.        | `WebTransportStream`, `WebTransportSendStream`, `WebTransportReceiveStream` |
+| **[Manager](manager.md)**       | Generic resource lifecycle managers.                        | `ConnectionManager`, `SessionManager`                                       |
 
 ---
 
@@ -52,12 +48,3 @@ Cross-cutting components that provide essential utilities, data structures, and 
 | **[Exceptions](exceptions.md)** | Exception hierarchy and error handling patterns.  | `WebTransportError`, `StreamError`      |
 | **[Types](types.md)**           | Core type aliases, protocols, and enumerations.   | `StreamId`, `SessionId`, `StreamState`  |
 | **[Utils](utils.md)**           | Helper functions and utilities.                   | `Timer`                                 |
-
----
-
-## See Also
-
-- **[Client API](client.md)**: Learn how to create and manage client connections.
-- **[Connection API](connection.md)**: Manage the underlying QUIC connection lifecycle.
-- **[Server API](server.md)**: Build and manage WebTransport servers.
-- **[Session API](session.md)**: Learn about the `WebTransportSession` lifecycle and management.

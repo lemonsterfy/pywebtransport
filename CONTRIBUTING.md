@@ -152,7 +152,6 @@ tests/
 ├── benchmark/
 ├── e2e/
 ├── integration/
-├── performance/
 └── unit/
 ```
 

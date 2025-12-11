@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http
 from typing import TYPE_CHECKING
 
 from pywebtransport import constants
@@ -17,7 +18,9 @@ from pywebtransport._protocol.events import (
     FailUserFuture,
     GoawayReceived,
     HeadersReceived,
+    InternalBindH3Session,
     InternalCleanupResources,
+    InternalFailH3Session,
     SendH3Capsule,
     SendH3Goaway,
     SendH3Headers,
@@ -27,11 +30,11 @@ from pywebtransport._protocol.events import (
     UserCreateSession,
     UserGetConnectionDiagnostics,
 )
-from pywebtransport._protocol.state import ProtocolState, SessionStateData
+from pywebtransport._protocol.state import ProtocolState, SessionInitData, SessionStateData
 from pywebtransport.constants import ErrorCodes
-from pywebtransport.exceptions import ConnectionError, ProtocolError
+from pywebtransport.exceptions import ConnectionError, ProtocolError, SessionError
 from pywebtransport.types import ConnectionId, ConnectionState, EventType, SessionState, StreamState
-from pywebtransport.utils import generate_session_id, get_logger, get_timestamp
+from pywebtransport.utils import generate_session_id, get_header, get_logger, get_timestamp
 
 if TYPE_CHECKING:
     from pywebtransport.config import ClientConfig, ServerConfig
@@ -67,8 +70,7 @@ class ConnectionProcessor:
                     state.stream_to_session_map.pop(control_stream_id, None)
                     effects.append(CleanupH3Stream(stream_id=control_stream_id))
 
-                assoc_streams = {stid for stid, st_sid in state.stream_to_session_map.items() if st_sid == sid}
-                for stid in assoc_streams:
+                for stid in session_data.active_streams:
                     if stid in state.streams:
                         state.streams.pop(stid, None)
                     state.stream_to_session_map.pop(stid, None)
@@ -106,11 +108,13 @@ class ConnectionProcessor:
         effects: list[Effect] = []
         error = ConnectionError(message=f"Connection terminated: {event.reason_phrase}", error_code=event.error_code)
 
+        state.pending_session_configs.clear()
+
         pending_futures = state.pending_create_session_futures
-        for stream_id, fut in list(pending_futures.items()):
+        while pending_futures:
+            _stream_id, fut = pending_futures.popitem()
             if not fut.done():
                 effects.append(FailUserFuture(future=fut, exception=error))
-            pending_futures.pop(stream_id, None)
 
         for stream_data in state.streams.values():
             while stream_data.pending_read_requests:
@@ -156,23 +160,10 @@ class ConnectionProcessor:
             ]
 
         session_id = generate_session_id()
-        now = get_timestamp()
 
-        session_data = SessionStateData(
-            session_id=session_id,
-            control_stream_id=-1,
-            state=SessionState.CONNECTING,
-            path=event.path,
-            headers=event.headers,
-            created_at=now,
-            local_max_data=self._config.initial_max_data,
-            peer_max_data=state.peer_initial_max_data,
-            local_max_streams_bidi=self._config.initial_max_streams_bidi,
-            peer_max_streams_bidi=state.peer_initial_max_streams_bidi,
-            local_max_streams_uni=self._config.initial_max_streams_uni,
-            peer_max_streams_uni=state.peer_initial_max_streams_uni,
+        state.pending_session_configs[session_id] = SessionInitData(
+            path=event.path, headers=event.headers, created_at=get_timestamp()
         )
-        state.sessions[session_id] = session_data
 
         return [
             CreateH3Session(session_id=session_id, path=event.path, headers=event.headers, create_future=event.future)
@@ -223,10 +214,15 @@ class ConnectionProcessor:
     def handle_graceful_close(self, *, event: UserConnectionGracefulClose, state: ProtocolState) -> list[Effect]:
         """Handle the user request for a graceful H3 GOAWAY shutdown."""
         effects: list[Effect] = []
-        if state.connection_state not in (ConnectionState.CLOSING, ConnectionState.CLOSED):
-            state.connection_state = ConnectionState.CLOSING
-            state.closed_at = get_timestamp()
+
+        if not state.local_goaway_sent:
+            state.local_goaway_sent = True
             effects.append(SendH3Goaway())
+
+            if state.connection_state not in (ConnectionState.CLOSING, ConnectionState.CLOSED):
+                state.connection_state = ConnectionState.CLOSING
+                state.closed_at = get_timestamp()
+
         effects.append(CompleteUserFuture(future=event.future))
         return effects
 
@@ -250,21 +246,28 @@ class ConnectionProcessor:
             pending_futures = state.pending_create_session_futures
             create_future = pending_futures.pop(stream_id, None)
 
-            if event.headers.get(":status") == "200":
+            status = get_header(headers=event.headers, key=":status")
+            if status == str(http.HTTPStatus.OK):
                 session_data.state = SessionState.CONNECTED
                 session_data.ready_at = now
                 effects.append(
                     EmitSessionEvent(
                         session_id=session_id,
                         event_type=EventType.SESSION_READY,
-                        data={"session_id": session_id, "ready_at": now},
+                        data={
+                            "session_id": session_id,
+                            "ready_at": now,
+                            "control_stream_id": session_data.control_stream_id,
+                            "path": session_data.path,
+                            "headers": session_data.headers,
+                        },
                     )
                 )
                 if create_future and not create_future.done():
                     effects.append(CompleteUserFuture(future=create_future, value=session_id))
             else:
-                status = event.headers.get(":status", "Unknown")
-                reason = f"Session creation failed with status {status}"
+                status_val = status or "Unknown"
+                reason = f"Session creation failed with status {status_val}"
                 session_data.state = SessionState.CLOSED
                 session_data.closed_at = now
                 session_data.close_reason = reason
@@ -282,26 +285,33 @@ class ConnectionProcessor:
                 state.stream_to_session_map.pop(stream_id, None)
 
         else:
+            if stream_id in state.stream_to_session_map:
+                logger.debug("Received trailers on existing session stream %d, ignoring.", stream_id)
+                return []
+
             if state.connection_state != ConnectionState.CONNECTED:
                 logger.debug(
                     "Rejecting new session on stream %d: connection state is %s", stream_id, state.connection_state
                 )
-                effects.append(SendH3Headers(stream_id=stream_id, status=429))
+                effects.append(SendH3Headers(stream_id=stream_id, status=http.HTTPStatus.TOO_MANY_REQUESTS))
                 return effects
 
-            if event.headers.get(":method") != "CONNECT" or event.headers.get(":protocol") != "webtransport":
+            method = get_header(headers=event.headers, key=":method")
+            protocol = get_header(headers=event.headers, key=":protocol")
+
+            if method != "CONNECT" or protocol != "webtransport":
                 logger.debug("Rejecting non-WebTransport request on stream %d", stream_id)
-                effects.append(SendH3Headers(stream_id=stream_id, status=400))
+                effects.append(SendH3Headers(stream_id=stream_id, status=http.HTTPStatus.BAD_REQUEST))
                 return effects
 
             max_sess = getattr(self._config, "max_sessions", 0)
             if max_sess > 0 and len(state.sessions) >= max_sess:
                 logger.warning("Session limit (%d) reached, rejecting new session on stream %d", max_sess, stream_id)
-                effects.append(SendH3Headers(stream_id=stream_id, status=429))
+                effects.append(SendH3Headers(stream_id=stream_id, status=http.HTTPStatus.TOO_MANY_REQUESTS))
                 return effects
 
             session_id = generate_session_id()
-            path = event.headers.get(":path", "/")
+            path = get_header(headers=event.headers, key=":path", default="/") or "/"
 
             session_data = SessionStateData(
                 session_id=session_id,
@@ -334,6 +344,47 @@ class ConnectionProcessor:
             )
 
         return effects
+
+    def handle_internal_bind_h3_session(self, *, event: InternalBindH3Session, state: ProtocolState) -> list[Effect]:
+        """Handle the InternalBindH3Session event."""
+        session_id = event.session_id
+
+        init_data = state.pending_session_configs.pop(session_id, None)
+        if not init_data:
+            return [
+                FailUserFuture(
+                    future=event.future, exception=SessionError(f"Session init data for {session_id} not found")
+                )
+            ]
+
+        session_data = SessionStateData(
+            session_id=session_id,
+            control_stream_id=event.control_stream_id,
+            state=SessionState.CONNECTING,
+            path=init_data.path,
+            headers=init_data.headers,
+            created_at=init_data.created_at,
+            local_max_data=self._config.initial_max_data,
+            peer_max_data=state.peer_initial_max_data,
+            local_max_streams_bidi=self._config.initial_max_streams_bidi,
+            peer_max_streams_bidi=state.peer_initial_max_streams_bidi,
+            local_max_streams_uni=self._config.initial_max_streams_uni,
+            peer_max_streams_uni=state.peer_initial_max_streams_uni,
+        )
+
+        state.sessions[session_id] = session_data
+        state.stream_to_session_map[event.control_stream_id] = session_id
+        state.pending_create_session_futures[event.control_stream_id] = event.future
+
+        return []
+
+    def handle_internal_fail_h3_session(self, *, event: InternalFailH3Session, state: ProtocolState) -> list[Effect]:
+        """Handle the InternalFailH3Session event."""
+        logger.error("H3 Session creation failed for %s: %s", event.session_id, event.exception)
+
+        state.pending_session_configs.pop(event.session_id, None)
+
+        return [FailUserFuture(future=event.future, exception=event.exception)]
 
     def handle_transport_parameters_received(
         self, *, event: TransportQuicParametersReceived, state: ProtocolState

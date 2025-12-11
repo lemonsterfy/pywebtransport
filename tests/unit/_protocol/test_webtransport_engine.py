@@ -1,7 +1,6 @@
 """Unit tests for the pywebtransport._protocol.webtransport_engine module."""
 
 import asyncio
-import time
 import weakref
 from collections.abc import AsyncGenerator, Generator
 from typing import Any, cast
@@ -11,7 +10,7 @@ import pytest
 import pytest_asyncio
 from pytest_mock import MockerFixture
 
-from pywebtransport import ClientConfig, ConnectionError, SessionError
+from pywebtransport import ClientConfig, ConnectionError, ErrorCodes, ProtocolError
 from pywebtransport._protocol.events import (
     CapsuleReceived,
     CleanupH3Stream,
@@ -27,8 +26,13 @@ from pywebtransport._protocol.events import (
     FailUserFuture,
     GoawayReceived,
     HeadersReceived,
+    InternalBindH3Session,
+    InternalBindQuicStream,
     InternalCleanupEarlyEvents,
     InternalCleanupResources,
+    InternalFailH3Session,
+    InternalFailQuicStream,
+    InternalReturnStreamData,
     LogH3Frame,
     ProtocolEvent,
     RescheduleQuicTimer,
@@ -69,8 +73,6 @@ from pywebtransport._protocol.events import (
 )
 from pywebtransport._protocol.state import SessionStateData
 from pywebtransport._protocol.webtransport_engine import WebTransportEngine
-from pywebtransport.constants import ErrorCodes
-from pywebtransport.exceptions import ProtocolError
 from pywebtransport.types import ConnectionState, EventType, SessionState
 
 
@@ -79,6 +81,7 @@ def mock_config() -> ClientConfig:
     config = ClientConfig()
     config.pending_event_ttl = 0.1
     config.resource_cleanup_interval = 0.1
+    config.max_event_queue_size = 100
     return config
 
 
@@ -120,6 +123,8 @@ async def engine(
     cast(Mock, engine_instance._connection_processor.handle_get_connection_diagnostics).return_value = []
     cast(Mock, engine_instance._connection_processor.handle_create_session).return_value = []
     cast(Mock, engine_instance._connection_processor.handle_connection_close).return_value = []
+    cast(Mock, engine_instance._connection_processor.handle_internal_bind_h3_session).return_value = []
+    cast(Mock, engine_instance._connection_processor.handle_internal_fail_h3_session).return_value = []
 
     cast(Mock, engine_instance._stream_processor.handle_transport_stream_reset).return_value = []
     cast(Mock, engine_instance._stream_processor.handle_webtransport_stream_data).return_value = []
@@ -128,6 +133,9 @@ async def engine(
     cast(Mock, engine_instance._stream_processor.handle_send_stream_data).return_value = []
     cast(Mock, engine_instance._stream_processor.handle_stop_stream).return_value = []
     cast(Mock, engine_instance._stream_processor.handle_stream_read).return_value = []
+    cast(Mock, engine_instance._stream_processor.handle_internal_bind_quic_stream).return_value = []
+    cast(Mock, engine_instance._stream_processor.handle_internal_fail_quic_stream).return_value = []
+    cast(Mock, engine_instance._stream_processor.handle_return_stream_data).return_value = []
 
     cast(Mock, engine_instance._session_processor.handle_capsule_received).return_value = []
     cast(Mock, engine_instance._session_processor.handle_connect_stream_closed).return_value = []
@@ -178,9 +186,12 @@ class TestCleanupLoops:
         )
 
         engine_instance.start_driver_loop()
+        await asyncio.sleep(0.01)
 
-        assert engine_instance._early_event_cleanup_task is None
-        assert engine_instance._resource_gc_timer_task is None
+        if engine_instance._early_event_cleanup_task:
+            assert engine_instance._early_event_cleanup_task.done()
+        if engine_instance._resource_gc_timer_task:
+            assert engine_instance._resource_gc_timer_task.done()
 
         await engine_instance.stop_driver_loop()
 
@@ -224,7 +235,10 @@ class TestCleanupLoops:
     @pytest.mark.asyncio
     async def test_early_event_cleanup_triggers_event(self, engine: WebTransportEngine, mocker: MockerFixture) -> None:
         control_stream_id = 10
-        engine._state.early_event_buffer[control_stream_id] = [(time.time() - 100.0, mocker.Mock())]
+        mock_now = 1000.0
+        mocker.patch("pywebtransport._protocol.webtransport_engine.get_timestamp", return_value=mock_now)
+
+        engine._state.early_event_buffer[control_stream_id] = [(mock_now - 100.0, mocker.Mock())]
         engine._state.early_event_count = 1
 
         await asyncio.sleep(delay=0.2)
@@ -311,29 +325,22 @@ class TestCoverageGaps:
         assert engine._state.connection_state == ConnectionState.CONNECTING
 
     @pytest.mark.asyncio
-    async def test_create_h3_session_control_stream_exists(self, engine: WebTransportEngine, mock_handler: Any) -> None:
-        sid = "s1"
-        engine._state.sessions[sid] = SessionStateData(
-            session_id=sid,
-            control_stream_id=99,
-            state=cast(SessionState, ANY),
-            path="/",
-            headers={},
-            created_at=0,
-            local_max_data=0,
-            peer_max_data=0,
-            local_max_streams_bidi=0,
-            peer_max_streams_bidi=0,
-            local_max_streams_uni=0,
-            peer_max_streams_uni=0,
-        )
-
+    async def test_create_h3_session_control_stream_failure(
+        self, engine: WebTransportEngine, mock_handler: Any
+    ) -> None:
+        mock_handler.get_next_available_stream_id.side_effect = Exception("No streams")
         fut: asyncio.Future[Any] = asyncio.Future()
+
+        def fail_side_effect(event: Any, state: Any) -> list[Effect]:
+            return [FailUserFuture(future=event.future, exception=event.exception)]
+
+        cast(Mock, engine._connection_processor.handle_internal_fail_h3_session).side_effect = fail_side_effect
+
         await engine._execute_effects(
-            effects=[CreateH3Session(session_id=sid, path="/", headers={}, create_future=fut)]
+            effects=[CreateH3Session(session_id="s1", path="/", headers={}, create_future=fut)]
         )
 
-        with pytest.raises(SessionError, match="control stream already exists"):
+        with pytest.raises(Exception, match="No streams"):
             await fut
 
     @pytest.mark.asyncio
@@ -416,6 +423,33 @@ class TestCoverageGaps:
         call_args = mock_notify_callback.call_args[0][0]
         assert call_args.event_type == EventType.CONNECTION_CLOSED
         assert call_args.data["error_code"] == ErrorCodes.INTERNAL_ERROR
+
+    @pytest.mark.asyncio
+    async def test_driver_loop_fatal_error_fails_cleanup(
+        self, engine: WebTransportEngine, mocker: MockerFixture, mock_handler: Any, mock_notify_callback: Any
+    ) -> None:
+        mocker.patch.object(engine, "_handle_event", return_value=[RescheduleQuicTimer()])
+
+        cast(Mock, mock_handler.schedule_timer_now).side_effect = Exception("Primary Failed")
+
+        original_execute = engine._execute_effects
+
+        async def execute_side_effect(effects: list[Effect]) -> None:
+            if effects and isinstance(effects[0], CloseQuicConnection):
+                raise Exception("Forced Cleanup Failure")
+            await original_execute(effects=effects)
+
+        mocker.patch.object(engine, "_execute_effects", side_effect=execute_side_effect)
+
+        await engine.put_event(event=TransportQuicTimerFired())
+        await asyncio.sleep(delay=0.05)
+
+        assert engine._state.connection_state == ConnectionState.CLOSED
+
+        mock_notify_callback.assert_called()
+        call_args = mock_notify_callback.call_args[0][0]
+        assert call_args.event_type == EventType.CONNECTION_CLOSED
+        assert call_args.data["reason"] == "Effect execution error, close failed"
 
     @pytest.mark.asyncio
     async def test_driver_loop_final_owner_notify_error(
@@ -502,6 +536,23 @@ class TestCoverageGaps:
         assert engine._state.closed_at is None
 
     @pytest.mark.asyncio
+    async def test_execute_effect_close_quic_connection_transition_to_closing(
+        self, engine: WebTransportEngine, mock_handler: Any, mocker: MockerFixture
+    ) -> None:
+        engine._state.connection_state = ConnectionState.CONNECTED
+        mocker.patch("pywebtransport._protocol.webtransport_engine.get_timestamp", return_value=777.0)
+
+        def close_side_effect(*args: Any, **kwargs: Any) -> None:
+            engine._state.connection_state = ConnectionState.CLOSING
+
+        mock_handler.close_connection.side_effect = close_side_effect
+
+        await engine._execute_effects(effects=[CloseQuicConnection(error_code=0, reason="Test")])
+
+        assert engine._state.connection_state == ConnectionState.CLOSING
+        assert engine._state.closed_at == 777.0
+
+    @pytest.mark.asyncio
     async def test_execute_effect_close_quic_connection_transition_to_closed(
         self, engine: WebTransportEngine, mock_handler: Any, mock_notify_callback: Any, mocker: MockerFixture
     ) -> None:
@@ -524,171 +575,96 @@ class TestCoverageGaps:
         )
 
     @pytest.mark.asyncio
+    async def test_execute_effect_complete_user_future_cancelled_with_data(self, engine: WebTransportEngine) -> None:
+        fut: asyncio.Future[Any] = asyncio.Future()
+        fut.cancel()
+        setattr(fut, "stream_id", 100)
+
+        await engine._execute_effects(effects=[CompleteUserFuture(future=fut, value=b"data")])
+        await asyncio.sleep(delay=0.01)
+
+        mock_stream_proc = cast(Mock, engine._stream_processor)
+        mock_stream_proc.handle_return_stream_data.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_effect_complete_user_future_cancelled_with_data_no_stream_id(
+        self, engine: WebTransportEngine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        fut: asyncio.Future[Any] = asyncio.Future()
+        fut.cancel()
+
+        await engine._execute_effects(effects=[CompleteUserFuture(future=fut, value=b"data_lost")])
+        assert "Read future cancelled with data, but stream_id missing. Data lost." in caplog.text
+
+    @pytest.mark.asyncio
     async def test_execute_effect_create_h3_session_missing_sni(
         self, engine: WebTransportEngine, mock_handler: Any
     ) -> None:
-        sid = "nosni"
-        engine._state.sessions[sid] = SessionStateData(
-            session_id=sid,
-            control_stream_id=-1,
-            state=cast(SessionState, ANY),
-            path="/",
-            headers={},
-            created_at=0,
-            local_max_data=0,
-            peer_max_data=0,
-            local_max_streams_bidi=0,
-            peer_max_streams_bidi=0,
-            local_max_streams_uni=0,
-            peer_max_streams_uni=0,
-        )
-
         mock_handler.get_server_name.return_value = None
         fut: asyncio.Future[Any] = asyncio.Future()
 
+        def fail_side_effect(event: Any, state: Any) -> list[Effect]:
+            return [FailUserFuture(future=event.future, exception=event.exception)]
+
+        cast(Mock, engine._connection_processor.handle_internal_fail_h3_session).side_effect = fail_side_effect
+
         await engine._execute_effects(
-            effects=[CreateH3Session(session_id=sid, path="/", headers={}, create_future=fut)]
+            effects=[CreateH3Session(session_id="nosni", path="/", headers={}, create_future=fut)]
         )
 
         with pytest.raises(ConnectionError, match="missing server name"):
             await fut
 
     @pytest.mark.asyncio
-    async def test_execute_effect_create_h3_session_no_streams_available(
-        self, engine: WebTransportEngine, mock_handler: Any
-    ) -> None:
-        sid = "nostream"
-        engine._state.sessions[sid] = SessionStateData(
-            session_id=sid,
-            control_stream_id=-1,
-            state=cast(SessionState, ANY),
-            path="/",
-            headers={},
-            created_at=0,
-            local_max_data=0,
-            peer_max_data=0,
-            local_max_streams_bidi=0,
-            peer_max_streams_bidi=0,
-            local_max_streams_uni=0,
-            peer_max_streams_uni=0,
-        )
-        mock_handler.get_next_available_stream_id.side_effect = Exception("No ID")
-        fut: asyncio.Future[Any] = asyncio.Future()
-        await engine._execute_effects(
-            effects=[CreateH3Session(session_id=sid, path="/", headers={}, create_future=fut)]
-        )
-        with pytest.raises(ConnectionError, match="No available streams"):
-            await fut
-
-    @pytest.mark.asyncio
-    async def test_execute_effect_create_h3_session_session_not_found(self, engine: WebTransportEngine) -> None:
-        fut: asyncio.Future[Any] = asyncio.Future()
-        await engine._execute_effects(
-            effects=[CreateH3Session(session_id="vanished", path="/", headers={}, create_future=fut)]
-        )
-        with pytest.raises(SessionError, match="vanished"):
-            await fut
-
-    @pytest.mark.asyncio
     async def test_execute_effect_create_h3_session_success_verify_state(
         self, engine: WebTransportEngine, mock_handler: Any, mocker: MockerFixture
     ) -> None:
-        sid = "s1"
-        engine._state.sessions[sid] = SessionStateData(
-            session_id=sid,
-            control_stream_id=-1,
-            state=cast(SessionState, ANY),
-            path="/",
-            headers={},
-            created_at=0,
-            local_max_data=0,
-            peer_max_data=0,
-            local_max_streams_bidi=0,
-            peer_max_streams_bidi=0,
-            local_max_streams_uni=0,
-            peer_max_streams_uni=0,
-        )
-
         mock_handler.get_next_available_stream_id.side_effect = None
         mock_handler.get_next_available_stream_id.return_value = 100
         cast(Mock, engine._h3_engine).encode_headers.return_value = []
 
         fut: asyncio.Future[Any] = asyncio.Future()
         await engine._execute_effects(
-            effects=[CreateH3Session(session_id=sid, path="/p", headers={}, create_future=fut)]
+            effects=[CreateH3Session(session_id="s1", path="/p", headers={}, create_future=fut)]
         )
+        await asyncio.sleep(delay=0.01)
 
-        assert engine._state.sessions[sid].control_stream_id == 100
-        assert engine._state.stream_to_session_map[100] == sid
-        assert engine._state.pending_create_session_futures[100] is fut
+        mock_conn_proc = cast(Mock, engine._connection_processor)
+        mock_conn_proc.handle_internal_bind_h3_session.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_effect_create_quic_stream(self, engine: WebTransportEngine, mock_handler: Any) -> None:
-        sid = "s1"
-        engine._state.sessions[sid] = SessionStateData(
-            session_id=sid,
-            control_stream_id=100,
-            state=cast(SessionState, ANY),
-            path="/",
-            headers={},
-            created_at=0,
-            local_max_data=0,
-            peer_max_data=0,
-            local_max_streams_bidi=0,
-            peer_max_streams_bidi=0,
-            local_max_streams_uni=0,
-            peer_max_streams_uni=0,
-        )
-
         mock_handler.get_next_available_stream_id.side_effect = None
         mock_handler.get_next_available_stream_id.return_value = 200
         cast(Mock, engine._h3_engine).encode_webtransport_stream_creation.return_value = []
 
         fut: asyncio.Future[Any] = asyncio.Future()
         await engine._execute_effects(
-            effects=[CreateQuicStream(session_id=sid, is_unidirectional=False, create_future=fut)]
+            effects=[CreateQuicStream(session_id="s1", is_unidirectional=False, create_future=fut)]
         )
+        await asyncio.sleep(delay=0.01)
 
-        assert await fut == 200
-        assert 200 in engine._state.streams
-        assert engine._state.stream_to_session_map[200] == sid
+        mock_stream_proc = cast(Mock, engine._stream_processor)
+        mock_stream_proc.handle_internal_bind_quic_stream.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_effect_create_quic_stream_failures(
         self, engine: WebTransportEngine, mock_handler: Any
     ) -> None:
-        sid = "s1"
-        engine._state.sessions[sid] = SessionStateData(
-            session_id=sid,
-            control_stream_id=10,
-            state=cast(SessionState, ANY),
-            path="/",
-            headers={},
-            created_at=0,
-            local_max_data=0,
-            peer_max_data=0,
-            local_max_streams_bidi=0,
-            peer_max_streams_bidi=0,
-            local_max_streams_uni=0,
-            peer_max_streams_uni=0,
-        )
         cast(Mock, engine._h3_engine).encode_webtransport_stream_creation.side_effect = Exception("Encode Fail")
 
         fut2: asyncio.Future[Any] = asyncio.Future()
-        await engine._execute_effects(
-            effects=[CreateQuicStream(session_id=sid, is_unidirectional=False, create_future=fut2)]
-        )
-        with pytest.raises(ConnectionError, match="Failed to encode"):
-            await fut2
 
-    @pytest.mark.asyncio
-    async def test_execute_effect_create_quic_stream_session_not_found(self, engine: WebTransportEngine) -> None:
-        fut1: asyncio.Future[Any] = asyncio.Future()
+        def fail_side_effect(event: Any, state: Any) -> list[Effect]:
+            return [FailUserFuture(future=event.future, exception=event.exception)]
+
+        cast(Mock, engine._stream_processor.handle_internal_fail_quic_stream).side_effect = fail_side_effect
+
         await engine._execute_effects(
-            effects=[CreateQuicStream(session_id="gone", is_unidirectional=False, create_future=fut1)]
+            effects=[CreateQuicStream(session_id="s1", is_unidirectional=False, create_future=fut2)]
         )
-        with pytest.raises(SessionError, match="vanished"):
-            await fut1
+        with pytest.raises(Exception, match="Encode Fail"):
+            await fut2
 
     @pytest.mark.asyncio
     async def test_execute_effect_delegates(self, engine: WebTransportEngine, mock_handler: Any) -> None:
@@ -724,11 +700,16 @@ class TestCoverageGaps:
         fut3: asyncio.Future[Any] = asyncio.Future()
         fut4: asyncio.Future[Any] = asyncio.Future()
 
+        fut_fail_set = mocker.Mock(spec=asyncio.Future)
+        fut_fail_set.done.return_value = False
+        fut_fail_set.set_exception.side_effect = asyncio.InvalidStateError()
+
         effects: list[Effect] = [
             CompleteUserFuture(future=fut1, value="success"),
             FailUserFuture(future=fut2, exception=Exception("test")),
             CreateH3Session(session_id="s1", path="/", headers={}, create_future=fut3),
             CreateQuicStream(session_id="s1", is_unidirectional=False, create_future=fut4),
+            FailUserFuture(future=fut_fail_set, exception=Exception("ignored")),
         ]
 
         await engine._execute_effects(effects=effects)
@@ -742,6 +723,8 @@ class TestCoverageGaps:
             await fut3
         with pytest.raises(ConnectionError):
             await fut4
+
+        fut_fail_set.set_exception.assert_called()
 
     @pytest.mark.asyncio
     async def test_execute_effect_send_h3_actions(self, engine: WebTransportEngine, mock_handler: Any) -> None:
@@ -820,8 +803,8 @@ class TestCoverageGaps:
     ) -> None:
         await engine.stop_driver_loop()
 
-        mock_handler.schedule_timer_now.side_effect = Exception("Effect Error")
-        mock_handler.close_connection.side_effect = Exception("Close Error")
+        cast(Mock, mock_handler.schedule_timer_now).side_effect = Exception("Effect Error")
+        cast(Mock, mock_handler.close_connection).side_effect = Exception("Close Error")
 
         await engine._execute_effects(effects=[RescheduleQuicTimer()])
 
@@ -830,7 +813,7 @@ class TestCoverageGaps:
     @pytest.mark.asyncio
     async def test_execute_effects_exception_handling(self, engine: WebTransportEngine, mock_handler: Any) -> None:
         effects: list[Effect] = [RescheduleQuicTimer()]
-        mock_handler.schedule_timer_now.side_effect = Exception("Boom")
+        cast(Mock, mock_handler.schedule_timer_now).side_effect = Exception("Boom")
 
         def close_side_effect(*args: Any, **kwargs: Any) -> None:
             engine._state.connection_state = ConnectionState.CLOSED
@@ -845,11 +828,27 @@ class TestCoverageGaps:
         assert engine._state.connection_state == ConnectionState.CLOSED
 
     @pytest.mark.asyncio
+    async def test_execute_effects_fail_remaining_futures_invalid_state(
+        self, engine: WebTransportEngine, mocker: MockerFixture
+    ) -> None:
+        mock_handler = engine._protocol_handler()
+        cast(Mock, mock_handler).schedule_timer_now.side_effect = Exception("Initial Error")
+
+        fut_fail = mocker.Mock(spec=asyncio.Future)
+        fut_fail.done.return_value = False
+        fut_fail.set_exception.side_effect = asyncio.InvalidStateError()
+
+        effects: list[Effect] = [RescheduleQuicTimer(), FailUserFuture(future=fut_fail, exception=Exception("skip"))]
+
+        await engine._execute_effects(effects=effects)
+        fut_fail.set_exception.assert_called()
+
+    @pytest.mark.asyncio
     async def test_execute_effects_fatal_error_while_closing(
         self, engine: WebTransportEngine, mock_handler: Any
     ) -> None:
         engine._state.connection_state = ConnectionState.CLOSING
-        mock_handler.schedule_timer_now.side_effect = Exception("Boom")
+        cast(Mock, mock_handler.schedule_timer_now).side_effect = Exception("Boom")
         await engine._execute_effects(effects=[RescheduleQuicTimer()])
         mock_handler.close_connection.assert_not_called()
 
@@ -879,6 +878,7 @@ class TestCoverageGaps:
 
         fut2 = Mock(spec=asyncio.Future)
         fut2.done.return_value = False
+        fut2.cancelled.return_value = False
         fut2.set_result.side_effect = asyncio.InvalidStateError()
 
         effects2: list[Effect] = [CompleteUserFuture(future=fut2, value=1)]
@@ -893,7 +893,7 @@ class TestCoverageGaps:
         class UnknownEffect(Effect):
             pass
 
-        await engine._execute_effects(effects=[UnknownEffect()])
+        await engine._execute_effects(effects=[cast(Effect, UnknownEffect())])
         assert "Unhandled effect type" in caplog.text
 
 
@@ -998,6 +998,30 @@ class TestEngineLifecycle:
         with pytest.raises(ConnectionError, match="Engine stopped"):
             await fut
 
+    @pytest.mark.asyncio
+    async def test_stop_driver_loop_drains_user_events_invalid_state(
+        self, engine: WebTransportEngine, mocker: MockerFixture
+    ) -> None:
+        if engine._driver_task:
+            engine._driver_task.cancel()
+            try:
+                await engine._driver_task
+            except asyncio.CancelledError:
+                pass
+
+        if engine._event_queue is None:
+            engine._event_queue = asyncio.Queue()
+
+        mock_fut = mocker.Mock(spec=asyncio.Future)
+        mock_fut.done.return_value = False
+        mock_fut.set_exception.side_effect = asyncio.InvalidStateError()
+
+        event = UserCreateSession(future=mock_fut, path="/", headers={})
+        engine._event_queue.put_nowait(event)
+
+        await engine.stop_driver_loop()
+        mock_fut.set_exception.assert_called()
+
 
 class TestEventProcessing:
 
@@ -1070,10 +1094,59 @@ class TestEventProcessing:
         cast(Mock, engine._connection_processor).handle_goaway_received.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handle_event_internal_cleanup_early_events_no_count(self, engine: WebTransportEngine) -> None:
-        engine._state.early_event_count = 0
+    async def test_handle_event_internal_bind_h3_session(self, engine: WebTransportEngine) -> None:
+        ev = InternalBindH3Session(session_id="s1", control_stream_id=10, future=asyncio.Future())
+        await engine.put_event(event=ev)
+        await asyncio.sleep(delay=0.01)
+        cast(Mock, engine._connection_processor).handle_internal_bind_h3_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_event_internal_bind_quic_stream(self, engine: WebTransportEngine) -> None:
+        ev = InternalBindQuicStream(stream_id=1, session_id="s1", is_unidirectional=False, future=asyncio.Future())
+        await engine.put_event(event=ev)
+        await asyncio.sleep(delay=0.01)
+        cast(Mock, engine._stream_processor).handle_internal_bind_quic_stream.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_internal_cleanup_early_events(self, engine: WebTransportEngine, mocker: MockerFixture) -> None:
+        mock_now = 1000.0
+        mocker.patch("pywebtransport._protocol.webtransport_engine.get_timestamp", return_value=mock_now)
+        engine._pending_event_ttl = 0.1
+
+        engine._state.early_event_count = 1
+        engine._state.early_event_buffer[100] = [
+            (
+                mock_now - 1.0,
+                WebTransportStreamDataReceived(stream_id=100, data=b"", stream_ended=False, control_stream_id=0),
+            )
+        ]
+
         await engine.put_event(event=InternalCleanupEarlyEvents())
         await asyncio.sleep(delay=0.01)
+        assert engine._state.early_event_count == 0
+
+    @pytest.mark.asyncio
+    async def test_handle_event_internal_fail_h3_session(self, engine: WebTransportEngine) -> None:
+        ev = InternalFailH3Session(session_id="s1", exception=Exception(), future=asyncio.Future())
+        await engine.put_event(event=ev)
+        await asyncio.sleep(delay=0.01)
+        cast(Mock, engine._connection_processor).handle_internal_fail_h3_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_event_internal_fail_quic_stream(self, engine: WebTransportEngine) -> None:
+        ev = InternalFailQuicStream(
+            session_id="s1", is_unidirectional=False, exception=Exception(), future=asyncio.Future()
+        )
+        await engine.put_event(event=ev)
+        await asyncio.sleep(delay=0.01)
+        cast(Mock, engine._stream_processor).handle_internal_fail_quic_stream.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_event_internal_return_stream_data(self, engine: WebTransportEngine) -> None:
+        ev = InternalReturnStreamData(stream_id=1, data=b"data")
+        await engine.put_event(event=ev)
+        await asyncio.sleep(delay=0.01)
+        cast(Mock, engine._stream_processor).handle_return_stream_data.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_event_safety_net_reschedules_timer(
@@ -1193,32 +1266,72 @@ class TestEventProcessing:
         assert ctrl_sid not in engine._state.early_event_buffer
 
     @pytest.mark.asyncio
-    async def test_internal_cleanup_early_events(self, engine: WebTransportEngine) -> None:
-        engine._state.early_event_count = 1
-        engine._state.early_event_buffer[100] = [
-            (
-                time.time() - 10.0,
-                WebTransportStreamDataReceived(stream_id=100, data=b"", stream_ended=False, control_stream_id=0),
-            )
-        ]
-
-        await engine.put_event(event=InternalCleanupEarlyEvents())
-        await asyncio.sleep(delay=0.01)
-        assert engine._state.early_event_count == 0
-        assert 100 not in engine._state.early_event_buffer
-
-    @pytest.mark.asyncio
-    async def test_internal_cleanup_early_events_empty(self, engine: WebTransportEngine) -> None:
-        engine._state.early_event_count = 0
-        await engine.put_event(event=InternalCleanupEarlyEvents())
-        await asyncio.sleep(delay=0.01)
-
-    @pytest.mark.asyncio
     async def test_internal_cleanup_resources(self, engine: WebTransportEngine) -> None:
         mock_proc = cast(Mock, engine._connection_processor)
         await engine.put_event(event=InternalCleanupResources())
         await asyncio.sleep(delay=0.01)
         mock_proc.handle_cleanup_resources.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_put_event_queue_full_datagram_dropped(
+        self, engine: WebTransportEngine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        engine._config.max_event_queue_size = 1
+        engine._event_queue = asyncio.Queue(maxsize=1)
+        engine._event_queue.put_nowait(TransportQuicTimerFired())
+
+        event = TransportDatagramFrameReceived(data=b"dropped")
+        await engine.put_event(event=event)
+
+        assert "Event queue full" in caplog.text
+        assert "dropping datagram event" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_put_event_queue_full_critical_lost(
+        self, engine: WebTransportEngine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        engine._config.max_event_queue_size = 1
+        engine._event_queue = asyncio.Queue(maxsize=1)
+        engine._event_queue.put_nowait(TransportQuicTimerFired())
+
+        event = TransportQuicTimerFired()
+        await engine.put_event(event=event)
+
+        assert "Event queue full" in caplog.text
+        assert "critical event lost" in caplog.text
+        assert engine._internal_error is not None
+        assert engine._internal_error[0] == ErrorCodes.INTERNAL_ERROR
+
+    @pytest.mark.asyncio
+    async def test_put_event_queue_full_user_event_rejected(self, engine: WebTransportEngine) -> None:
+        engine._config.max_event_queue_size = 1
+        engine._event_queue = asyncio.Queue(maxsize=1)
+        engine._event_queue.put_nowait(TransportQuicTimerFired())
+
+        fut: asyncio.Future[Any] = asyncio.Future()
+        event = UserSendDatagram(data=b"test", session_id="s1", future=fut)
+
+        await engine.put_event(event=event)
+
+        with pytest.raises(ConnectionError, match="Event queue full"):
+            await fut
+
+    @pytest.mark.asyncio
+    async def test_put_event_queue_full_user_event_rejected_invalid_state(
+        self, engine: WebTransportEngine, mocker: MockerFixture
+    ) -> None:
+        engine._config.max_event_queue_size = 1
+        engine._event_queue = asyncio.Queue(maxsize=1)
+        engine._event_queue.put_nowait(TransportQuicTimerFired())
+
+        mock_fut = mocker.Mock(spec=asyncio.Future)
+        mock_fut.done.return_value = False
+        mock_fut.set_exception.side_effect = asyncio.InvalidStateError()
+
+        event = UserSendDatagram(data=b"test", session_id="s1", future=mock_fut)
+        await engine.put_event(event=event)
+
+        mock_fut.set_exception.assert_called()
 
     @pytest.mark.asyncio
     async def test_put_event_future_race_condition(self, engine: WebTransportEngine) -> None:
@@ -1436,13 +1549,15 @@ class TestEventProcessing:
         class WeirdEvent(ProtocolEvent):
             pass
 
-        await engine.put_event(event=WeirdEvent())
+        weird_event = cast(ProtocolEvent, WeirdEvent())
+
+        await engine.put_event(event=weird_event)
         await asyncio.sleep(delay=0.01)
         assert "Unhandled event type" in caplog.text
 
     @pytest.mark.asyncio
     async def test_user_events_delegation(self, engine: WebTransportEngine) -> None:
-        events = [
+        events: list[ProtocolEvent] = [
             UserAcceptSession(session_id="s1", future=asyncio.Future()),
             UserCloseSession(session_id="s1", future=asyncio.Future(), error_code=0, reason=""),
             UserConnectionGracefulClose(future=asyncio.Future()),

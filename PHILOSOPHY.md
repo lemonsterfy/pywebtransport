@@ -22,7 +22,7 @@ The primary responsibility of this library is correctness. The core protocol lay
 As a foundational infrastructure component, PyWebTransport is designed with a clear separation of concerns, ensuring a lean and pure protocol core.
 
 - **Pure Protocol Core**: The low-level protocol implementation is kept independent of application-level concerns. It focuses solely on providing a reliable and efficient transport layer.
-- **Optional Application Toolkit**: High-level utilities such as serializers, RPC frameworks, or Pub/Sub patterns are provided as optional, pluggable modules. This allows developers to build complex applications quickly without bloating the core protocol implementation.
+- **Optional Application Toolkit**: High-level utilities such as **pluggable serializers** and **structured messaging** wrappers are provided as optional modules. This allows developers to build complex applications quickly without bloating the core protocol implementation.
 
 ### 3. Standard-Focused Development and Testing
 

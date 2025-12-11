@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
+import http
 from typing import TYPE_CHECKING
 
-from aioquic._buffer import Buffer, BufferReadError
+from aioquic._buffer import Buffer as QuicBuffer
+from aioquic._buffer import BufferReadError
 
 from pywebtransport import constants
 from pywebtransport._protocol.events import (
@@ -35,10 +37,11 @@ from pywebtransport._protocol.events import (
     UserSendDatagram,
 )
 from pywebtransport._protocol.state import ProtocolState, SessionStateData
+from pywebtransport._protocol.utils import can_receive_data_on_stream
 from pywebtransport.constants import ErrorCodes
 from pywebtransport.exceptions import FlowControlError, ProtocolError, SessionError, StreamError
 from pywebtransport.types import EventType, SessionId, SessionState, StreamState
-from pywebtransport.utils import ensure_bytes, get_logger, get_timestamp
+from pywebtransport.utils import get_logger, get_timestamp
 
 if TYPE_CHECKING:
     from pywebtransport.config import ClientConfig, ServerConfig
@@ -92,7 +95,9 @@ class SessionProcessor:
         session_data.state = SessionState.CONNECTED
         session_data.ready_at = get_timestamp()
 
-        effects.append(SendH3Headers(stream_id=session_data.control_stream_id, status=200, end_stream=False))
+        effects.append(
+            SendH3Headers(stream_id=session_data.control_stream_id, status=http.HTTPStatus.OK, end_stream=False)
+        )
         effects.append(
             EmitSessionEvent(
                 session_id=session_id,
@@ -123,7 +128,7 @@ class SessionProcessor:
             )
 
         try:
-            buf = Buffer(data=event.capsule_data)
+            buf = QuicBuffer(data=bytes(event.capsule_data))
             match event.capsule_type:
                 case constants.WT_MAX_DATA_TYPE:
                     new_limit = buf.pull_uint_var()
@@ -245,13 +250,13 @@ class SessionProcessor:
                         new_limit = session_data.peer_data_sent + target_window
                         if new_limit > session_data.local_max_data:
                             session_data.local_max_data = new_limit
-                            buf = Buffer(capacity=8)
-                            buf.push_uint_var(new_limit)
+                            resp_buf = QuicBuffer(capacity=8)
+                            resp_buf.push_uint_var(new_limit)
                             effects.append(
                                 SendH3Capsule(
                                     stream_id=session_data.control_stream_id,
                                     capsule_type=constants.WT_MAX_DATA_TYPE,
-                                    capsule_data=buf.data,
+                                    capsule_data=resp_buf.data,
                                 )
                             )
                     else:
@@ -298,13 +303,13 @@ class SessionProcessor:
                                 session_data.local_max_streams_bidi = new_limit
 
                         if new_limit > current_limit:
-                            buf = Buffer(capacity=8)
-                            buf.push_uint_var(new_limit)
+                            resp_buf = QuicBuffer(capacity=8)
+                            resp_buf.push_uint_var(new_limit)
                             effects.append(
                                 SendH3Capsule(
                                     stream_id=session_data.control_stream_id,
                                     capsule_type=capsule_type,
-                                    capsule_data=buf.data,
+                                    capsule_data=resp_buf.data,
                                 )
                             )
                     else:
@@ -365,20 +370,23 @@ class SessionProcessor:
             logger.warning("Error processing capsule for session %s: %s", session_id, e, exc_info=True)
             error_code = getattr(e, "error_code", ErrorCodes.PROTOCOL_VIOLATION)
             effects.append(CloseQuicConnection(error_code=error_code, reason=f"Capsule processing error: {e}"))
-            if session_data.state != SessionState.CLOSED:
-                session_data.state = SessionState.CLOSED
-                session_data.closed_at = get_timestamp()
-                session_data.close_reason = "Capsule processing error"
-                effects.append(
-                    EmitSessionEvent(
-                        session_id=session_id,
-                        event_type=EventType.SESSION_CLOSED,
-                        data={"session_id": session_id, "code": error_code, "reason": "Capsule processing error"},
+            try:
+                if session_data.state != SessionState.CLOSED:
+                    session_data.state = SessionState.CLOSED
+                    session_data.closed_at = get_timestamp()
+                    session_data.close_reason = "Capsule processing error"
+                    effects.append(
+                        EmitSessionEvent(
+                            session_id=session_id,
+                            event_type=EventType.SESSION_CLOSED,
+                            data={"session_id": session_id, "code": error_code, "reason": "Capsule processing error"},
+                        )
                     )
-                )
-                effects.extend(
-                    self._reset_all_session_streams(session_id=session_id, session_data=session_data, state=state)
-                )
+                    effects.extend(
+                        self._reset_all_session_streams(session_id=session_id, session_data=session_data, state=state)
+                    )
+            except Exception as cleanup_e:
+                logger.error("Secondary error during fail-safe cleanup for session %s: %s", session_id, cleanup_e)
 
         return effects
 
@@ -404,7 +412,7 @@ class SessionProcessor:
         if len(reason_bytes) > constants.MAX_CLOSE_REASON_BYTES:
             reason_bytes = reason_bytes[: constants.MAX_CLOSE_REASON_BYTES]
 
-        buf = Buffer(capacity=4 + len(reason_bytes))
+        buf = QuicBuffer(capacity=4 + len(reason_bytes))
         buf.push_uint32(event.error_code)
         buf.push_bytes(reason_bytes)
         capsule_payload = buf.data
@@ -493,7 +501,7 @@ class SessionProcessor:
                         session_data.peer_max_streams_uni,
                     )
                     session_data.pending_uni_stream_futures.append(event.future)
-                    buf = Buffer(capacity=8)
+                    buf = QuicBuffer(capacity=8)
                     buf.push_uint_var(session_data.peer_max_streams_uni)
                     return [
                         SendH3Capsule(
@@ -510,7 +518,7 @@ class SessionProcessor:
                         session_data.peer_max_streams_bidi,
                     )
                     session_data.pending_bidi_stream_futures.append(event.future)
-                    buf = Buffer(capacity=8)
+                    buf = QuicBuffer(capacity=8)
                     buf.push_uint_var(session_data.peer_max_streams_bidi)
                     return [
                         SendH3Capsule(
@@ -597,7 +605,12 @@ class SessionProcessor:
                     future=event.future, exception=SessionError(f"Session {event.session_id} not found for diagnostics")
                 )
             ]
-        return [CompleteUserFuture(future=event.future, value=dataclasses.asdict(session_data))]
+
+        diag_data = dataclasses.asdict(session_data)
+        diag_data["active_streams"] = list(session_data.active_streams)
+        diag_data["blocked_streams"] = list(session_data.blocked_streams)
+
+        return [CompleteUserFuture(future=event.future, value=diag_data)]
 
     def handle_grant_data_credit(self, *, event: UserGrantDataCredit, state: ProtocolState) -> list[Effect]:
         """Handle the UserGrantDataCredit event."""
@@ -620,7 +633,7 @@ class SessionProcessor:
             return effects
 
         session_data.local_max_data = event.max_data
-        buf = Buffer(capacity=8)
+        buf = QuicBuffer(capacity=8)
         buf.push_uint_var(event.max_data)
         effects.append(
             SendH3Capsule(
@@ -665,7 +678,7 @@ class SessionProcessor:
             session_data.local_max_streams_bidi = event.max_streams
             capsule_type = constants.WT_MAX_STREAMS_BIDI_TYPE
 
-        buf = Buffer(capacity=8)
+        buf = QuicBuffer(capacity=8)
         buf.push_uint_var(event.max_streams)
         effects.append(
             SendH3Capsule(stream_id=session_data.control_stream_id, capsule_type=capsule_type, capsule_data=buf.data)
@@ -746,20 +759,25 @@ class SessionProcessor:
             )
             return effects
 
-        data_bytes = ensure_bytes(data=event.data)
-        if len(data_bytes) > state.max_datagram_size:
+        data_len = 0
+        if isinstance(event.data, list):
+            data_len = sum(len(chunk) for chunk in event.data)
+        else:
+            data_len = len(event.data)
+
+        if data_len > state.max_datagram_size:
             effects.append(
                 FailUserFuture(
                     future=event.future,
-                    exception=ValueError(f"Datagram size {len(data_bytes)} exceeds maximum {state.max_datagram_size}"),
+                    exception=ValueError(f"Datagram size {data_len} exceeds maximum {state.max_datagram_size}"),
                 )
             )
             return effects
 
         session_data.datagrams_sent += 1
-        session_data.datagram_bytes_sent += len(data_bytes)
+        session_data.datagram_bytes_sent += data_len
 
-        effects.append(SendH3Datagram(stream_id=session_data.control_stream_id, data=data_bytes))
+        effects.append(SendH3Datagram(stream_id=session_data.control_stream_id, data=event.data))
         effects.append(CompleteUserFuture(future=event.future))
         return effects
 
@@ -799,21 +817,24 @@ class SessionProcessor:
         if available_credit <= 0:
             return []
 
-        streams_to_wake = [
-            s
-            for s in state.streams.values()
-            if s.session_id == session_id
-            and s.write_buffer
-            and s.state not in (StreamState.CLOSED, StreamState.RESET_SENT)
-        ]
+        streams_to_check = list(session_data.blocked_streams)
 
-        for stream_data in streams_to_wake:
+        for stream_id in streams_to_check:
             if available_credit <= 0:
                 break
 
+            stream_data = state.streams.get(stream_id)
+            if not stream_data:
+                session_data.blocked_streams.discard(stream_id)
+                continue
+
+            if stream_data.state in (StreamState.CLOSED, StreamState.RESET_SENT) or not stream_data.write_buffer:
+                session_data.blocked_streams.discard(stream_id)
+                continue
+
             logger.debug(
                 "Draining write buffer for stream %d (session %s) with %d credit",
-                stream_data.stream_id,
+                stream_id,
                 session_id,
                 available_credit,
             )
@@ -822,24 +843,28 @@ class SessionProcessor:
                 try:
                     (buffered_data, buffered_future, buffered_end_stream) = stream_data.write_buffer.popleft()
                 except (IndexError, TypeError, ValueError):
-                    logger.error("Internal state error: Stream %d write_buffer is malformed.", stream_data.stream_id)
+                    logger.error("Internal state error: Stream %d write_buffer is malformed.", stream_id)
                     break
 
-                send_amount = min(len(buffered_data), available_credit)
-                data_to_send = buffered_data[:send_amount]
-                remaining_data = buffered_data[send_amount:]
+                view = memoryview(buffered_data)
+                data_len = len(view)
 
-                is_final_chunk = not remaining_data and buffered_end_stream
+                send_amount = min(data_len, available_credit)
 
-                effects.append(
-                    SendQuicData(stream_id=stream_data.stream_id, data=data_to_send, end_stream=is_final_chunk)
-                )
+                data_to_send = view[:send_amount]
+                remaining_view = view[send_amount:]
+
+                is_final_chunk = (len(remaining_view) == 0) and buffered_end_stream
+
+                effects.append(SendQuicData(stream_id=stream_id, data=data_to_send, end_stream=is_final_chunk))
                 session_data.local_data_sent += send_amount
                 stream_data.bytes_sent += send_amount
                 available_credit -= send_amount
 
-                if remaining_data:
-                    stream_data.write_buffer.appendleft((remaining_data, buffered_future, buffered_end_stream))
+                stream_data.write_buffer_size -= send_amount
+
+                if len(remaining_view) > 0:
+                    stream_data.write_buffer.appendleft((remaining_view, buffered_future, buffered_end_stream))
                     break
                 else:
                     if is_final_chunk:
@@ -849,17 +874,20 @@ class SessionProcessor:
                                 stream_data.state = StreamState.CLOSED
                                 effects.append(
                                     EmitStreamEvent(
-                                        stream_id=stream_data.stream_id,
+                                        stream_id=stream_id,
                                         event_type=EventType.STREAM_CLOSED,
-                                        data={"stream_id": stream_data.stream_id},
+                                        data={"stream_id": stream_id},
                                     )
                                 )
                             case StreamState.OPEN:
                                 stream_data.state = StreamState.HALF_CLOSED_LOCAL
-                        logger.debug("Stream %d send side closed (from buffer drain)", stream_data.stream_id)
+                        logger.debug("Stream %d send side closed (from buffer drain)", stream_id)
 
                     if not buffered_future.done():
                         effects.append(CompleteUserFuture(future=buffered_future))
+
+            if not stream_data.write_buffer:
+                session_data.blocked_streams.discard(stream_id)
 
         return effects
 
@@ -881,37 +909,38 @@ class SessionProcessor:
 
         stream_error = StreamError(message=f"Session {session_id} terminated", error_code=ErrorCodes.WT_SESSION_GONE)
 
-        for stream_data in state.streams.values():
-            if stream_data.session_id == session_id and stream_data.state != StreamState.CLOSED:
-                while stream_data.pending_read_requests:
-                    read_fut = stream_data.pending_read_requests.popleft()
-                    if not read_fut.done():
-                        effects.append(FailUserFuture(future=read_fut, exception=stream_error))
+        streams_to_reset = list(session_data.active_streams)
 
-                while stream_data.write_buffer:
-                    _data, write_fut, _end = stream_data.write_buffer.popleft()
-                    if not write_fut.done():
-                        effects.append(FailUserFuture(future=write_fut, exception=stream_error))
+        for stream_id in streams_to_reset:
+            stream_data = state.streams.get(stream_id)
+            if not stream_data or stream_data.state == StreamState.CLOSED:
+                continue
 
-                if stream_data.state not in (StreamState.RESET_SENT, StreamState.CLOSED):
-                    effects.append(
-                        ResetQuicStream(stream_id=stream_data.stream_id, error_code=ErrorCodes.WT_SESSION_GONE)
-                    )
+            while stream_data.pending_read_requests:
+                read_fut = stream_data.pending_read_requests.popleft()
+                if not read_fut.done():
+                    effects.append(FailUserFuture(future=read_fut, exception=stream_error))
 
-                if stream_data.state not in (StreamState.RESET_RECEIVED, StreamState.CLOSED):
-                    effects.append(
-                        StopQuicStream(stream_id=stream_data.stream_id, error_code=ErrorCodes.WT_SESSION_GONE)
-                    )
+            while stream_data.write_buffer:
+                _data, write_fut, _end = stream_data.write_buffer.popleft()
+                if not write_fut.done():
+                    effects.append(FailUserFuture(future=write_fut, exception=stream_error))
 
-                stream_data.state = StreamState.CLOSED
-                stream_data.closed_at = session_data.closed_at
+            if stream_data.state not in (StreamState.RESET_SENT, StreamState.CLOSED):
+                effects.append(ResetQuicStream(stream_id=stream_id, error_code=ErrorCodes.WT_SESSION_GONE))
 
-                effects.append(
-                    EmitStreamEvent(
-                        stream_id=stream_data.stream_id,
-                        event_type=EventType.STREAM_CLOSED,
-                        data={"stream_id": stream_data.stream_id},
-                    )
-                )
+            if stream_data.state not in (StreamState.RESET_RECEIVED, StreamState.CLOSED):
+                if can_receive_data_on_stream(stream_id=stream_id, is_client=self._is_client):
+                    effects.append(StopQuicStream(stream_id=stream_id, error_code=ErrorCodes.WT_SESSION_GONE))
+
+            stream_data.state = StreamState.CLOSED
+            stream_data.closed_at = session_data.closed_at
+
+            effects.append(
+                EmitStreamEvent(stream_id=stream_id, event_type=EventType.STREAM_CLOSED, data={"stream_id": stream_id})
+            )
+
+        session_data.active_streams.clear()
+        session_data.blocked_streams.clear()
 
         return effects

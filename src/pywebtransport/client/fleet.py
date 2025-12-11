@@ -26,11 +26,11 @@ class ClientFleet:
 
         self._clients = clients
         self._current_index = 0
-        self._lock: asyncio.Lock | None = None
+        self._active = False
 
     async def __aenter__(self) -> Self:
         """Enter the async context and activate all clients in the fleet."""
-        self._lock = asyncio.Lock()
+        self._active = True
 
         try:
             async with asyncio.TaskGroup() as tg:
@@ -38,6 +38,7 @@ class ClientFleet:
                     tg.create_task(coro=client.__aenter__())
         except* Exception as eg:
             logger.error("Failed to activate clients in fleet: %s", eg.exceptions, exc_info=eg)
+            self._active = False
             try:
                 async with asyncio.TaskGroup() as cleanup_tg:
                     for client in self._clients:
@@ -59,14 +60,7 @@ class ClientFleet:
 
     async def close_all(self) -> None:
         """Close all clients in the fleet concurrently."""
-        if self._lock is None:
-            raise ClientError(
-                message=(
-                    "ClientFleet has not been activated. It must be used as an "
-                    "asynchronous context manager (`async with ...`)."
-                )
-            )
-        if not self._clients:
+        if not self._active:
             return
 
         logger.info("Closing all %d clients in the fleet.", len(self._clients))
@@ -77,54 +71,51 @@ class ClientFleet:
         except* Exception as eg:
             logger.error("Errors occurred while closing client fleet: %s", eg.exceptions, exc_info=eg)
 
-        self._clients.clear()
+        self._active = False
         logger.info("Client fleet closed.")
 
     async def connect_all(self, *, url: str) -> list[WebTransportSession]:
         """Connect all clients in the fleet to a URL concurrently."""
-        if self._lock is None:
-            raise ClientError(
-                message=(
-                    "ClientFleet has not been activated. It must be used as an "
-                    "asynchronous context manager (`async with ...`)."
-                )
-            )
-        if not self._clients:
-            return []
+        self._check_active()
 
-        tasks: list[asyncio.Task[WebTransportSession]] = []
-        try:
-            async with asyncio.TaskGroup() as tg:
-                for client in self._clients:
-                    tasks.append(tg.create_task(coro=client.connect(url=url)))
-        except* Exception as eg:
-            logger.warning("Some clients in the fleet failed to connect: %s", eg.exceptions)
+        async def safe_connect(client: WebTransportClient) -> WebTransportSession | None:
+            try:
+                return await client.connect(url=url)
+            except Exception as e:
+                logger.warning("Client failed to connect: %s", e)
+                return None
 
-        sessions = []
-        for i, task in enumerate(tasks):
-            if task.done() and not task.exception():
-                sessions.append(task.result())
-            else:
-                logger.warning("Client %d in the fleet failed to connect: %s", i, task.exception())
+        tasks: list[asyncio.Task[WebTransportSession | None]] = []
+        async with asyncio.TaskGroup() as tg:
+            for client in self._clients:
+                tasks.append(tg.create_task(coro=safe_connect(client)))
+
+        sessions: list[WebTransportSession] = []
+        for task in tasks:
+            result = task.result()
+            if result is not None:
+                sessions.append(result)
+
         return sessions
 
-    async def get_client(self) -> WebTransportClient:
+    def get_client(self) -> WebTransportClient:
         """Get an active client from the fleet using a round-robin strategy."""
-        if self._lock is None:
-            raise ClientError(
-                message=(
-                    "ClientFleet has not been activated. It must be used as an "
-                    "asynchronous context manager (`async with ...`)."
-                )
-            )
-        if not self._clients:
-            raise ClientError(message="No clients available. The fleet might not have been started or is empty.")
+        self._check_active()
 
-        async with self._lock:
-            client = self._clients[self._current_index]
-            self._current_index = (self._current_index + 1) % len(self._clients)
-            return client
+        client = self._clients[self._current_index]
+        self._current_index = (self._current_index + 1) % len(self._clients)
+        return client
 
     def get_client_count(self) -> int:
         """Get the number of clients currently in the fleet."""
         return len(self._clients)
+
+    def _check_active(self) -> None:
+        """Check if the fleet is active."""
+        if not self._active:
+            raise ClientError(
+                message=(
+                    "ClientFleet has not been activated. It must be used as an "
+                    "asynchronous context manager (`async with ...`)."
+                )
+            )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from pywebtransport.exceptions import ConfigurationError, SerializationError
-from pywebtransport.types import Serializer
+from pywebtransport.types import Buffer, Serializer
 
 try:
     from google.protobuf.message import DecodeError, Message
@@ -23,7 +23,7 @@ __all__: list[str] = ["ProtobufSerializer"]
 class ProtobufSerializer(Serializer):
     """Serializer for encoding and decoding using the Protobuf format."""
 
-    def __init__(self, *, message_class: type[MessageType]) -> None:
+    def __init__(self) -> None:
         """Initialize the Protobuf serializer."""
         if Message is None:
             raise ConfigurationError(
@@ -31,40 +31,34 @@ class ProtobufSerializer(Serializer):
                 config_key="dependency.protobuf",
                 details={"installation_guide": "Please install it with: pip install pywebtransport[protobuf]"},
             )
-        if not issubclass(message_class, Message):
-            raise TypeError(f"'{message_class.__name__}' is not a valid Protobuf Message class.")
 
-        self._message_class = message_class
+    def deserialize(self, *, data: Buffer, obj_type: Any = None) -> MessageType:
+        """Deserialize bytes into an instance of the specified Protobuf message class."""
+        if obj_type is None:
+            raise SerializationError(message="Protobuf deserialization requires a specific 'obj_type'.")
 
-    def deserialize(self, *, data: bytes, obj_type: Any = None) -> MessageType:
-        """Deserialize bytes into an instance of the configured Protobuf message class."""
-        if obj_type and obj_type is not self._message_class:
+        if not issubclass(obj_type, Message):
             raise SerializationError(
-                message=(
-                    f"This ProtobufSerializer is configured for type '{self._message_class.__name__}', "
-                    f"but was asked to deserialize into '{obj_type.__name__}'."
-                )
+                message=f"Target type '{obj_type.__name__}' is not a valid Protobuf Message class."
             )
 
-        instance = self._message_class()
+        if isinstance(data, memoryview):
+            data = bytes(data)
+
+        instance = obj_type()
 
         try:
             instance.ParseFromString(serialized=data)
             return instance
         except (DecodeError, Exception) as e:
             raise SerializationError(
-                message=f"Failed to deserialize data into '{self._message_class.__name__}'.", original_exception=e
+                message=f"Failed to deserialize data into '{obj_type.__name__}'.", original_exception=e
             ) from e
 
     def serialize(self, *, obj: Any) -> bytes:
         """Serialize a Protobuf message object into bytes."""
-        if not isinstance(obj, self._message_class):
-            raise SerializationError(
-                message=(
-                    f"This ProtobufSerializer is configured for type '{self._message_class.__name__}', "
-                    f"but received an object of type '{type(obj).__name__}'."
-                )
-            )
+        if not isinstance(obj, Message):
+            raise SerializationError(message=f"Object of type '{type(obj).__name__}' is not a valid Protobuf Message.")
 
         try:
             return cast(bytes, obj.SerializeToString())

@@ -68,7 +68,8 @@ def test_get_stream_direction_from_id(
 
     direction = protocol_utils.get_stream_direction_from_id(stream_id=stream_id, is_client=is_client)
 
-    mock_validate.assert_called_once_with(stream_id=stream_id)
+    if __debug__:
+        mock_validate.assert_called_once_with(stream_id=stream_id)
     assert direction == expected_direction
 
 
@@ -127,7 +128,7 @@ def test_internal_stream_checks() -> None:
 
 
 @pytest.mark.parametrize(
-    "session_id, is_valid",
+    "stream_id, is_valid",
     [
         (0, True),
         (4, True),
@@ -138,30 +139,12 @@ def test_internal_stream_checks() -> None:
         (5, False),
     ],
 )
-def test_validate_h3_session_id(session_id: int, is_valid: bool) -> None:
+def test_validate_control_stream_id(stream_id: int, is_valid: bool) -> None:
     if is_valid:
-        protocol_utils.validate_h3_session_id(session_id=session_id)
+        protocol_utils.validate_control_stream_id(stream_id=stream_id)
     else:
         with pytest.raises(ProtocolError, match="Invalid Session ID format"):
-            protocol_utils.validate_h3_session_id(session_id=session_id)
-
-
-@pytest.mark.parametrize(
-    "value, is_valid, exc_type",
-    [
-        ("some-valid-id", True, None),
-        ("", False, ValueError),
-        (None, False, TypeError),
-        (123, False, TypeError),
-    ],
-)
-def test_validate_session_id(value: Any, is_valid: bool, exc_type: type[Exception] | None) -> None:
-    if is_valid:
-        protocol_utils.validate_session_id(session_id=value)
-    else:
-        assert exc_type is not None
-        with pytest.raises(exc_type):
-            protocol_utils.validate_session_id(session_id=value)
+            protocol_utils.validate_control_stream_id(stream_id=stream_id)
 
 
 @pytest.mark.parametrize(

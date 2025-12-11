@@ -1,3 +1,9 @@
+---
+hide:
+  - navigation
+  - toc
+---
+
 <div style="text-align: center">
   <h1>
     <img src="assets/favicon.svg" alt="PyWebTransport Icon" width="120" />
@@ -21,11 +27,12 @@ performance, and reliability.
 
 - **Full Async Support**: Built from the ground up on `asyncio` for high-performance, non-blocking I/O.
 - **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for fleet management, auto-reconnection, and browser-like navigation.
-- **Advanced Messaging**: Built-in managers for Pub/Sub and RPC (JSON-RPC 2.0 compliant), plus pluggable serializers (`JSON`, `MsgPack`, `Protobuf`) for structured data.
+- **Structured Messaging**: Send typed Python objects over streams and datagrams using pluggable serializers (`JSON`, `MsgPack`, `Protobuf`).
+- **Zero-Copy Architecture**: End-to-end support for `memoryview` and buffer protocols to minimize data copying.
 - **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
-- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, monitoring, pooling, and resource management.
+- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and resource cleanup.
 - **Event-Driven Architecture**: A powerful `EventEmitter` system for decoupled, asynchronous communication between components.
-- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E, performance, benchmark) to ensure reliability and maintainability.
+- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E, benchmark) to ensure reliability and maintainability.
 
 ## Core Concepts
 

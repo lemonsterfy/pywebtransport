@@ -6,14 +6,13 @@ import asyncio
 import ssl
 from collections.abc import AsyncGenerator, AsyncIterator
 from enum import StrEnum
-from typing import Any, AsyncContextManager, Protocol, TypeAlias, runtime_checkable
+from typing import Any, AsyncContextManager, Protocol, runtime_checkable
 
 __all__: list[str] = [
     "Address",
     "AsyncContextManager",
     "AsyncGenerator",
     "AsyncIterator",
-    "AuthHandlerProtocol",
     "Buffer",
     "ConnectionId",
     "ConnectionState",
@@ -23,11 +22,11 @@ __all__: list[str] = [
     "EventType",
     "Future",
     "Headers",
-    "MiddlewareProtocol",
     "Priority",
     "SSLContext",
     "Serializer",
     "SessionId",
+    "SessionProtocol",
     "SessionState",
     "StreamDirection",
     "StreamId",
@@ -41,49 +40,64 @@ __all__: list[str] = [
 ]
 
 
-Address: TypeAlias = tuple[str, int]
-Buffer: TypeAlias = bytes | bytearray | memoryview
-ConnectionId: TypeAlias = str
-Data: TypeAlias = bytes | bytearray | memoryview | str
-ErrorCode: TypeAlias = int
-EventData: TypeAlias = Any
-Future: TypeAlias = asyncio.Future
-Headers: TypeAlias = dict[str, str]
-Priority: TypeAlias = int
-SessionId: TypeAlias = str
-SSLContext: TypeAlias = ssl.SSLContext
-StreamId: TypeAlias = int
-Timeout: TypeAlias = float | None
-Timestamp: TypeAlias = float
-URL: TypeAlias = str
-URLParts: TypeAlias = tuple[str, int, str]
-Weight: TypeAlias = int
-
-
-@runtime_checkable
-class AuthHandlerProtocol(Protocol):
-    """A protocol for auth handlers."""
-
-    async def __call__(self, *, headers: Headers) -> bool: ...
-
-
-@runtime_checkable
-class MiddlewareProtocol(Protocol):
-    """A protocol for a middleware object."""
-
-    async def __call__(self, *, session: Any) -> bool: ...
+type Address = tuple[str, int]
+type Buffer = bytes | bytearray | memoryview
+type ConnectionId = str
+type Data = bytes | bytearray | memoryview | str
+type ErrorCode = int
+type EventData = Any
+type Future[T] = asyncio.Future[T]
+type Headers = dict[str, str] | list[tuple[str, str]]
+type Priority = int
+type SessionId = str
+type SSLContext = ssl.SSLContext
+type StreamId = int
+type Timeout = float | None
+type Timestamp = float
+type URL = str
+type URLParts = tuple[str, int, str]
+type Weight = int
 
 
 @runtime_checkable
 class Serializer(Protocol):
     """A protocol for serializing and deserializing structured data."""
 
-    def deserialize(self, *, data: bytes, obj_type: Any = None) -> Any:
-        """Deserialize bytes into an object."""
+    def deserialize(self, *, data: Buffer, obj_type: Any = None) -> Any:
+        """Deserialize buffer into an object."""
         ...
 
     def serialize(self, *, obj: Any) -> bytes:
         """Serialize an object into bytes."""
+        ...
+
+
+@runtime_checkable
+class SessionProtocol(Protocol):
+    """A protocol defining the essential interface of a WebTransport session."""
+
+    @property
+    def headers(self) -> Headers:
+        """Get the session headers."""
+        ...
+
+    @property
+    def path(self) -> str:
+        """Get the session path."""
+        ...
+
+    @property
+    def session_id(self) -> SessionId:
+        """Get the session ID."""
+        ...
+
+    @property
+    def state(self) -> SessionState:
+        """Get the current session state."""
+        ...
+
+    async def close(self, *, error_code: int = 0, reason: str | None = None) -> None:
+        """Close the session."""
         ...
 
 
@@ -95,11 +109,11 @@ class WebTransportProtocol(Protocol):
         """Called when a connection is lost."""
         ...
 
-    def connection_made(self, transport: Any) -> None:
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Called when a connection is established."""
         ...
 
-    def datagram_received(self, data: bytes, addr: Address) -> None:
+    def datagram_received(self, data: Buffer, addr: Address) -> None:
         """Called when a datagram is received."""
         ...
 

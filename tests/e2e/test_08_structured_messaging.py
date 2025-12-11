@@ -12,7 +12,6 @@ from typing import Any, Final
 from pywebtransport import (
     ClientConfig,
     ConnectionError,
-    Serializer,
     StructuredDatagramTransport,
     StructuredStream,
     TimeoutError,
@@ -20,6 +19,7 @@ from pywebtransport import (
 )
 from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE
 from pywebtransport.serializer import JSONSerializer, MsgPackSerializer
+from pywebtransport.types import Serializer
 
 SERVER_HOST: Final[str] = "127.0.0.1"
 SERVER_PORT: Final[int] = 4433
@@ -103,7 +103,7 @@ async def run_structured_test(*, serializer: Serializer, path: str, serializer_n
             structured_datagram_transport = StructuredDatagramTransport(
                 session=session, serializer=serializer, registry=MESSAGE_REGISTRY
             )
-            await structured_datagram_transport.initialize()
+            structured_datagram_transport.initialize()
 
             datagram_obj = UserData(id=99, name="datagram_user", email="dg@example.com")
             logger.info("   - Sending datagram object: %s", datagram_obj)

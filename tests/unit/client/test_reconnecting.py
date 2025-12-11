@@ -1,6 +1,7 @@
 """Unit tests for the pywebtransport.client.reconnecting module."""
 
 import asyncio
+import logging
 from collections.abc import Coroutine
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -22,6 +23,7 @@ from pywebtransport.types import EventType, SessionState
 
 
 class TestReconnectingClient:
+
     URL = "https://example.com"
 
     @pytest.fixture
@@ -34,6 +36,7 @@ class TestReconnectingClient:
         type(session).state = mocker.PropertyMock(return_value=SessionState.CONNECTED)
         session.is_closed = False
         session.close = mocker.AsyncMock(return_value=None)
+        session._connection = mocker.Mock(return_value=mocker.AsyncMock())
         session.events = mocker.MagicMock()
         session.events.wait_for = mocker.AsyncMock()
         return session
@@ -61,11 +64,12 @@ class TestReconnectingClient:
         connect_mock.side_effect = asyncio.CancelledError
 
         async with client:
-            assert client._is_initialized is True
+            assert client._is_initialized
             assert client._reconnect_task is created_task
             assert not created_task.done()
 
         await asyncio.sleep(delay=0)
+
         assert created_task.cancelled()
 
     @pytest.mark.asyncio
@@ -81,6 +85,7 @@ class TestReconnectingClient:
     @pytest.mark.asyncio
     async def test_aenter_on_closed_client(self, client: ReconnectingClient) -> None:
         await client.close()
+
         with pytest.raises(ClientError, match="Client is already closed"):
             async with client:
                 pass
@@ -116,16 +121,83 @@ class TestReconnectingClient:
         self, client: ReconnectingClient, mock_session: Any, mocker: MockerFixture
     ) -> None:
         mocker.patch.object(client, "_reconnect_loop", new_callable=mocker.AsyncMock)
+
         async with client:
             client._session = mock_session
+            conn_mock = mock_session._connection.return_value
             await client.close()
-            mock_session.close.assert_awaited_once()
+            conn_mock.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_session_client_closed_while_waiting(
+        self, client: ReconnectingClient, mocker: MockerFixture
+    ) -> None:
+        client._connected_event = asyncio.Event()
+        mock_task = mocker.Mock(spec=asyncio.Task)
+        cast(MagicMock, mock_task.done).return_value = False
+        client._reconnect_task = mock_task
+
+        async def simulate_close_during_wait() -> None:
+            client._closed = True
+            assert client._connected_event is not None
+            client._connected_event.set()
+
+        mocker.patch.object(client._connected_event, "wait", side_effect=simulate_close_during_wait)
+
+        with pytest.raises(ClientError, match="Client closed while waiting for session"):
+            await client.get_session()
+
+    @pytest.mark.asyncio
+    async def test_get_session_crashes_propagation(self, client: ReconnectingClient) -> None:
+        client._closed = False
+        crash_error = ValueError("Unexpected crash")
+        client._crashed_exception = crash_error
+        client._connected_event = asyncio.Event()
+
+        with pytest.raises(ClientError, match="Background reconnection task crashed") as exc_info:
+            await client.get_session()
+
+        assert exc_info.value.__cause__ is crash_error
+
+    @pytest.mark.asyncio
+    async def test_get_session_defensive_task_check(self, client: ReconnectingClient, mocker: MockerFixture) -> None:
+        client._connected_event = asyncio.Event()
+        client._reconnect_task = None
+        call_count = 0
+
+        async def side_effect() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                client._closed = True
+
+        mocker.patch.object(client._connected_event, "wait", side_effect=side_effect)
+
+        with pytest.raises(ClientError, match="Client closed while waiting"):
+            await client.get_session(wait_timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_get_session_fails_if_task_done(self, client: ReconnectingClient, mocker: MockerFixture) -> None:
+        client._connected_event = asyncio.Event()
+        mock_task = mocker.Mock(spec=asyncio.Task)
+        cast(MagicMock, mock_task.done).return_value = True
+        mock_task.result.return_value = None
+        client._reconnect_task = mock_task
+
+        async def simulate_event_wait() -> None:
+            return
+
+        mocker.patch.object(client._connected_event, "wait", side_effect=simulate_event_wait)
+
+        with pytest.raises(ClientError, match="Reconnection failed permanently"):
+            await client.get_session()
 
     @pytest.mark.asyncio
     async def test_get_session_on_closed_client(self, client: ReconnectingClient) -> None:
         await client.close()
-        session = await client.get_session()
-        assert session is None
+
+        with pytest.raises(ClientError, match="Client is closed"):
+            await client.get_session()
 
     @pytest.mark.asyncio
     async def test_get_session_succeeds_when_connected(self, client: ReconnectingClient, mock_session: Any) -> None:
@@ -138,28 +210,74 @@ class TestReconnectingClient:
         assert session is mock_session
 
     @pytest.mark.asyncio
-    async def test_get_session_timeout(
-        self, client: ReconnectingClient, mock_underlying_client: Any, mocker: MockerFixture
-    ) -> None:
-        mock_underlying_client.connect.side_effect = TimeoutError("Connection timed out")
-        mock_underlying_client.config.max_retries = 0
+    async def test_get_session_task_cancelled_error(self, client: ReconnectingClient, mocker: MockerFixture) -> None:
+        client._connected_event = asyncio.Event()
+        mock_task = mocker.Mock(spec=asyncio.Task)
+        cast(MagicMock, mock_task.done).return_value = True
+        mock_task.result.side_effect = asyncio.CancelledError()
+        client._reconnect_task = mock_task
 
-        async with client:
-            session = await client.get_session(wait_timeout=0.01)
+        async def simulate_event_wait() -> None:
+            return
 
-        assert session is None
+        mocker.patch.object(client._connected_event, "wait", side_effect=simulate_event_wait)
+
+        with pytest.raises(ClientError, match="Reconnection failed permanently"):
+            await client.get_session()
 
     @pytest.mark.asyncio
-    async def test_get_session_waits_and_succeeds(self, client: ReconnectingClient, mock_session: Any) -> None:
-        session_closed_event = asyncio.Event()
+    async def test_get_session_task_exception(self, client: ReconnectingClient, mocker: MockerFixture) -> None:
+        client._connected_event = asyncio.Event()
+        mock_task = mocker.Mock(spec=asyncio.Task)
+        cast(MagicMock, mock_task.done).return_value = True
+        original_error = RuntimeError("Task died")
+        mock_task.result.side_effect = original_error
+        client._reconnect_task = mock_task
 
-        async def wait_forever(*args: Any, **kwargs: Any) -> None:
-            await session_closed_event.wait()
+        async def simulate_event_wait() -> None:
+            return
 
-        mock_session.events.wait_for.side_effect = wait_forever
+        mocker.patch.object(client._connected_event, "wait", side_effect=simulate_event_wait)
+
+        with pytest.raises(ClientError, match="Reconnection task failed: Task died") as exc_info:
+            await client.get_session()
+
+        assert exc_info.value.__cause__ is original_error
+
+    @pytest.mark.asyncio
+    async def test_get_session_timeout(self, client: ReconnectingClient, mock_underlying_client: Any) -> None:
+        async def sleep_forever(*args: Any, **kwargs: Any) -> Any:
+            await asyncio.sleep(10)
+
+        mock_underlying_client.connect.side_effect = sleep_forever
+        mock_underlying_client.config.max_connection_retries = 5
 
         async with client:
-            session = await client.get_session(wait_timeout=1.0)
+            with pytest.raises(asyncio.TimeoutError):
+                await client.get_session(wait_timeout=0.01)
+
+    @pytest.mark.asyncio
+    async def test_get_session_uninitialized(self, client: ReconnectingClient) -> None:
+        with pytest.raises(ClientError, match="Client not initialized"):
+            await client.get_session()
+
+    @pytest.mark.asyncio
+    async def test_get_session_waits_and_succeeds(
+        self, client: ReconnectingClient, mock_session: Any, mocker: MockerFixture
+    ) -> None:
+        session_available = asyncio.Event()
+
+        async def wait_side_effect(*args: Any, **kwargs: Any) -> None:
+            await session_available.wait()
+            client._session = mock_session
+
+        client._connected_event = asyncio.Event()
+        mocker.patch.object(client._connected_event, "wait", side_effect=wait_side_effect)
+
+        task = asyncio.create_task(client.get_session(wait_timeout=1.0))
+        await asyncio.sleep(0.01)
+        session_available.set()
+        session = await task
 
         assert session is mock_session
 
@@ -170,8 +288,8 @@ class TestReconnectingClient:
         assert client._client is mock_underlying_client
         assert client._config is mock_underlying_client.config
         assert client._session is None
-        assert client._closed is False
-        assert client._is_initialized is False
+        assert not client._closed
+        assert not client._is_initialized
 
     @pytest.mark.parametrize(
         ("session_state", "event_is_set", "expected"),
@@ -199,44 +317,14 @@ class TestReconnectingClient:
         assert client.is_connected is expected
 
     def test_is_connected_property_when_uninitialized(self, client: ReconnectingClient) -> None:
-        assert client.is_connected is False
-
-    @pytest.mark.asyncio
-    async def test_no_reconnect_if_explicitly_closed(
-        self, mock_underlying_client: Any, mock_session: Any, mocker: MockerFixture
-    ) -> None:
-        loop_is_waiting = asyncio.Event()
-        closed_future: asyncio.Future[None] = asyncio.Future()
-
-        async def wait_closed_side_effect(*args: Any, **kwargs: Any) -> None:
-            loop_is_waiting.set()
-            await closed_future
-
-        mock_session.events.wait_for.side_effect = wait_closed_side_effect
-        mock_underlying_client.connect.return_value = mock_session
-        client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
-        emit_spy = mocker.spy(client, "emit")
-
-        await client.__aenter__()
-        async with asyncio.timeout(delay=1):
-            await loop_is_waiting.wait()
-
-        client._closed = True
-        closed_future.set_result(None)
-        await asyncio.sleep(delay=0)
-
-        connection_lost_emitted = any(
-            call.kwargs["event_type"] == EventType.CONNECTION_LOST for call in emit_spy.call_args_list
-        )
-        assert not connection_lost_emitted
-        await client.close()
+        assert not client.is_connected
 
     @pytest.mark.asyncio
     async def test_reconnect_loop_cancels_during_sleep(
         self, mock_underlying_client: Any, mocker: MockerFixture
     ) -> None:
         sleep_started = asyncio.Event()
-        config = ClientConfig(retry_delay=10, max_retries=1)
+        config = ClientConfig(retry_delay=10, max_connection_retries=1)
         mock_underlying_client.config = config
         mock_underlying_client.connect.side_effect = ConnectionError("Failed to connect")
 
@@ -252,8 +340,151 @@ class TestReconnectingClient:
         async with client:
             async with asyncio.timeout(delay=1):
                 await sleep_started.wait()
+
+            assert client._reconnect_task is not None
+            client._reconnect_task.cancel()
+            try:
+                await client._reconnect_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_cleanup_edge_cases(
+        self, mock_underlying_client: Any, mock_session: Any, caplog: LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+
+        del mock_session._connection
+        mock_underlying_client.connect.return_value = mock_session
+
+        async def wait_forever(*args: Any, **kwargs: Any) -> None:
+            await asyncio.sleep(10)
+
+        mock_session.events.wait_for.side_effect = wait_forever
+
+        client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
+        async with client:
+            await asyncio.sleep(0.01)
             assert client._reconnect_task
             client._reconnect_task.cancel()
+            try:
+                await client._reconnect_task
+            except asyncio.CancelledError:
+                pass
+
+        assert client._session is None
+
+        mock_session._connection = MagicMock(return_value=None)
+        mock_underlying_client.connect.return_value = mock_session
+        client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
+        async with client:
+            await asyncio.sleep(0.01)
+            assert client._reconnect_task
+            client._reconnect_task.cancel()
+            try:
+                await client._reconnect_task
+            except asyncio.CancelledError:
+                pass
+        assert client._session is None
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_cleanup_error(
+        self, mock_underlying_client: Any, mock_session: Any, caplog: LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG)
+
+        mock_underlying_client.connect.return_value = mock_session
+
+        async def wait_forever(*args: Any, **kwargs: Any) -> None:
+            await asyncio.sleep(10)
+
+        mock_session.events.wait_for.side_effect = wait_forever
+
+        conn_mock = mock_session._connection.return_value
+        conn_mock.close.side_effect = RuntimeError("Cleanup failed")
+
+        client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
+
+        async with client:
+            await asyncio.sleep(0.01)
+
+            assert client._reconnect_task is not None
+            client._reconnect_task.cancel()
+            try:
+                await client._reconnect_task
+            except asyncio.CancelledError:
+                pass
+
+        assert "Error cleaning up old connection: Cleanup failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_crash_after_connect(
+        self, client: ReconnectingClient, mock_underlying_client: Any, mock_session: Any, mocker: MockerFixture
+    ) -> None:
+        mock_underlying_client.connect.return_value = mock_session
+
+        mock_emit = mocker.patch.object(client, "emit", new_callable=mocker.AsyncMock)
+        mock_emit.side_effect = RuntimeError("Crash after connect")
+
+        async with client:
+            try:
+                assert client._reconnect_task
+                await client._reconnect_task
+            except RuntimeError:
+                pass
+
+        assert isinstance(client._crashed_exception, RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_crash_during_session_wait(
+        self, client: ReconnectingClient, mock_underlying_client: Any, mock_session: Any
+    ) -> None:
+        mock_underlying_client.connect.return_value = mock_session
+
+        mock_session.events.wait_for.side_effect = ValueError("Unexpected crash in wait")
+
+        async with client:
+            try:
+                assert client._reconnect_task
+                await client._reconnect_task
+            except ValueError:
+                pass
+
+        assert isinstance(client._crashed_exception, ValueError)
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_crash_with_none_event(
+        self, client: ReconnectingClient, mock_underlying_client: Any
+    ) -> None:
+        async def connect_side_effect(*args: Any, **kwargs: Any) -> Any:
+            client._connected_event = None
+            raise ValueError("Crash")
+
+        mock_underlying_client.connect.side_effect = connect_side_effect
+
+        async with client:
+            assert client._reconnect_task
+            await client._reconnect_task
+
+        assert isinstance(client._crashed_exception, ValueError)
+        assert client._connected_event is None
+
+    @pytest.mark.asyncio
+    async def test_reconnect_loop_crashes_and_sets_event(
+        self, client: ReconnectingClient, mock_underlying_client: Any, mocker: MockerFixture
+    ) -> None:
+        mock_underlying_client.connect.side_effect = ValueError("Fatal crash")
+        event_set_spy = mocker.spy(asyncio.Event, "set")
+
+        async with client:
+            assert client._reconnect_task is not None
+            await client._reconnect_task
+
+        assert client._crashed_exception is not None
+        assert isinstance(client._crashed_exception, ValueError)
+        assert client._connected_event is not None
+        assert client._connected_event.is_set()
+        event_set_spy.assert_called()
 
     @pytest.mark.asyncio
     async def test_reconnect_loop_delay_capping(
@@ -282,23 +513,47 @@ class TestReconnectingClient:
         mock_sleep.assert_has_awaits([mocker.call(delay=0.1), mocker.call(delay=0.15)])
 
     @pytest.mark.asyncio
-    async def test_reconnect_loop_finally_branch_when_event_is_none(
-        self, client: ReconnectingClient, mock_underlying_client: Any, mocker: MockerFixture
-    ) -> None:
-        """Test the finally block in reconnect loop when connected_event is None."""
-        ready_to_cancel = asyncio.Event()
+    async def test_reconnect_loop_infinite_retries(self, mock_underlying_client: Any, mocker: MockerFixture) -> None:
+        failed_event = asyncio.Event()
+        original_sleep = asyncio.sleep
+        mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
+
+        config_mock = MagicMock()
+        config_mock.max_connection_retries = -1
+        config_mock.retry_delay = 0.01
+        config_mock.retry_backoff = 1.0
+        config_mock.max_retry_delay = 1.0
+        config_mock.max_event_queue_size = 100
+        config_mock.max_event_listeners = 100
+        config_mock.max_event_history_size = 100
+        mock_underlying_client.config = config_mock
+
+        client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
+
+        fail_count = 0
 
         async def connect_side_effect(*args: Any, **kwargs: Any) -> Any:
-            ready_to_cancel.set()
-            await asyncio.sleep(delay=10)
-            return MagicMock()
+            nonlocal fail_count
+            fail_count += 1
+            if fail_count >= 5:
+                failed_event.set()
+            await original_sleep(0)
+            raise TimeoutError("Fail")
 
         mock_underlying_client.connect.side_effect = connect_side_effect
 
         async with client:
-            async with asyncio.timeout(delay=1.0):
-                await ready_to_cancel.wait()
-            client._connected_event = None
+            async with asyncio.timeout(delay=2.0):
+                await failed_event.wait()
+
+            assert client._reconnect_task is not None
+            client._reconnect_task.cancel()
+            try:
+                await client._reconnect_task
+            except asyncio.CancelledError:
+                pass
+
+        assert mock_underlying_client.connect.call_count >= 5
 
     @pytest.mark.asyncio
     async def test_reconnect_loop_max_retries_exceeded(
@@ -306,7 +561,7 @@ class TestReconnectingClient:
     ) -> None:
         failed_event = asyncio.Event()
         mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
-        config = ClientConfig(max_retries=2, retry_delay=0.01)
+        config = ClientConfig(max_connection_retries=2, retry_delay=0.01)
         mock_underlying_client.config = config
         client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
         mock_emit = mocker.patch.object(client, "emit", new_callable=mocker.AsyncMock)
@@ -334,7 +589,7 @@ class TestReconnectingClient:
     ) -> None:
         connection_established = asyncio.Event()
         mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
-        config = ClientConfig(retry_delay=0.01, max_retries=5)
+        config = ClientConfig(retry_delay=0.01, max_connection_retries=5)
         mock_underlying_client.config = config
         client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
         mock_emit = mocker.patch.object(client, "emit", new_callable=mocker.AsyncMock)
@@ -351,6 +606,21 @@ class TestReconnectingClient:
         assert mock_sleep.call_count == 5
 
     @pytest.mark.asyncio
+    async def test_reconnect_loop_skips_wait_if_session_closed(
+        self, mock_underlying_client: Any, mock_session: Any, mocker: MockerFixture
+    ) -> None:
+        type(mock_session).state = mocker.PropertyMock(return_value=SessionState.CLOSED)
+
+        mock_underlying_client.connect.side_effect = [mock_session, asyncio.CancelledError]
+
+        client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
+
+        async with client:
+            await asyncio.sleep(0.01)
+
+        mock_session.events.wait_for.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_reconnect_loop_success_and_disconnect(
         self, mock_underlying_client: Any, mock_session: Any, caplog: LogCaptureFixture, mocker: MockerFixture
     ) -> None:
@@ -364,7 +634,7 @@ class TestReconnectingClient:
         mock_session.events.wait_for.side_effect = wait_for_side_effect
 
         mock_underlying_client.connect.side_effect = [mock_session, ConnectionError(message="Reconnect failed")]
-        config = ClientConfig(max_retries=0, retry_delay=0.01)
+        config = ClientConfig(max_connection_retries=0, retry_delay=0.01)
         mock_underlying_client.config = config
         client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
         mock_emit = mocker.patch.object(client, "emit", new_callable=mocker.AsyncMock)
@@ -392,34 +662,5 @@ class TestReconnectingClient:
         assert f"Connection to {self.URL} lost, attempting to reconnect..." in caplog.text
 
     @pytest.mark.asyncio
-    async def test_reconnect_loop_uninitialized(self, client: ReconnectingClient, caplog: LogCaptureFixture) -> None:
+    async def test_reconnect_loop_uninitialized_exit(self, client: ReconnectingClient) -> None:
         await client._reconnect_loop()
-        assert "Reconnection loop started before client was properly initialized." in caplog.text
-
-    @pytest.mark.asyncio
-    async def test_reconnect_loop_with_backoff(
-        self, mock_underlying_client: Any, mock_session: Any, mocker: MockerFixture
-    ) -> None:
-        connection_established = asyncio.Event()
-        mock_sleep = mocker.patch("asyncio.sleep", new_callable=mocker.AsyncMock)
-        config = ClientConfig(retry_delay=0.1, retry_backoff=2.0, max_retry_delay=1.0)
-        mock_underlying_client.config = config
-        client = ReconnectingClient(url=self.URL, client=mock_underlying_client)
-        mock_emit = mocker.patch.object(client, "emit", new_callable=mocker.AsyncMock)
-        mock_emit.side_effect = lambda *args, **kwargs: connection_established.set()
-        mock_session.events.wait_for.side_effect = asyncio.CancelledError
-        mock_underlying_client.connect.side_effect = [
-            TimeoutError(message="Fail 1"),
-            ConnectionError(message="Fail 2"),
-            mock_session,
-        ]
-
-        async with client:
-            async with asyncio.timeout(delay=1):
-                await connection_established.wait()
-
-        assert mock_underlying_client.connect.call_count == 3
-        mock_sleep.assert_has_awaits([mocker.call(delay=0.1), mocker.call(delay=0.2)])
-        mock_emit.assert_awaited_once_with(
-            event_type=EventType.CONNECTION_ESTABLISHED, data={"session": mock_session, "attempt": 3}
-        )

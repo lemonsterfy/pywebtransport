@@ -3,11 +3,8 @@
 import asyncio
 import json
 import logging
-import struct
 import sys
 import time
-from collections import defaultdict
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -27,7 +24,6 @@ from pywebtransport import (
     WebTransportStream,
 )
 from pywebtransport.constants import DEFAULT_MAX_MESSAGE_SIZE
-from pywebtransport.rpc import InvalidParamsError, MethodNotFoundError, RpcError
 from pywebtransport.serializer import JSONSerializer, MsgPackSerializer
 from pywebtransport.types import ConnectionState, EventType, SessionState
 from pywebtransport.utils import generate_self_signed_cert, get_timestamp
@@ -47,14 +43,6 @@ if DEBUG_MODE:
     logging.getLogger("pywebtransport").setLevel(logging.DEBUG)
 
 logger = logging.getLogger("e2e_server")
-
-
-@dataclass(kw_only=True)
-class RpcUserData:
-    """Represents user data structure for RPC tests."""
-
-    id: int
-    name: str
 
 
 @dataclass(kw_only=True)
@@ -85,7 +73,7 @@ class E2EServerApp(ServerApp):
         self._register_handlers()
         logger.info("E2E Server initialized with full test support")
 
-    async def _diagnostics_handler(self, session: WebTransportSession) -> None:
+    async def _diagnostics_handler(self, session: WebTransportSession, **kwargs: Any) -> None:
         """Handle requests for server statistics on the /diagnostics path."""
         logger.info("Diagnostics request from session %s", session.session_id)
         stream: WebTransportStream | None = None
@@ -112,7 +100,7 @@ class E2EServerApp(ServerApp):
             if not session.is_closed:
                 await session.close()
 
-    async def _health_handler(self, session: WebTransportSession) -> None:
+    async def _health_handler(self, session: WebTransportSession, **kwargs: Any) -> None:
         """Handle health check requests on the /health path."""
         logger.info("Health check from session %s", session.session_id)
         try:
@@ -152,15 +140,12 @@ class E2EServerApp(ServerApp):
         self.route(path="/")(echo_handler)
         self.route(path="/echo")(echo_handler)
         self.route(path="/health")(self._health_handler)
-        self.route(path="/pubsub")(pubsub_handler)
-        self.route(path="/rpc")(rpc_handler)
         self.route(path="/diagnostics")(self._diagnostics_handler)
         self.route(path="/structured-echo/json")(structured_echo_json_handler)
         self.route(path="/structured-echo/msgpack")(structured_echo_msgpack_handler)
 
 
 MESSAGE_REGISTRY: dict[int, type[Any]] = {1: UserData, 2: StatusUpdate}
-GLOBAL_TOPICS: defaultdict[str, set[asyncio.Queue[tuple[str, bytes]]]] = defaultdict(set)
 
 
 async def _structured_echo_base_handler(*, session: WebTransportSession, serializer: Any, serializer_name: str) -> None:
@@ -182,7 +167,7 @@ async def _structured_echo_base_handler(*, session: WebTransportSession, seriali
         logger.info("Structured handler finished for session %s", session_id)
 
 
-async def echo_handler(session: WebTransportSession) -> None:
+async def echo_handler(session: WebTransportSession, **kwargs: Any) -> None:
     """Handle echoing streams and datagrams."""
     session_id = session.session_id
     logger.info("Handler started for session %s on path %s", session_id, session.path)
@@ -322,7 +307,7 @@ async def handle_structured_datagram(*, session: WebTransportSession, serializer
         structured_datagram_transport = StructuredDatagramTransport(
             session=session, serializer=serializer, registry=MESSAGE_REGISTRY
         )
-        await structured_datagram_transport.initialize()
+        structured_datagram_transport.initialize()
 
         while not session.is_closed:
             obj = await structured_datagram_transport.receive_obj()
@@ -361,185 +346,12 @@ async def handle_structured_stream(*, stream: WebTransportStream, serializer: An
             await raw_stream.close()
 
 
-async def pubsub_handler(session: WebTransportSession) -> None:
-    """Handle the Pub/Sub test logic."""
-    session_id = session.session_id
-    logger.info("Pub/Sub handler started for session %s", session_id)
-
-    my_queue: asyncio.Queue[tuple[str, bytes]] = asyncio.Queue()
-    subscribed_topics: set[str] = set()
-
-    try:
-        stream_fut: asyncio.Future[WebTransportStream] = asyncio.Future()
-
-        async def first_stream_handler(event: Event) -> None:
-            if not stream_fut.done() and isinstance(event.data, dict):
-                stream = event.data.get("stream")
-                if isinstance(stream, WebTransportStream):
-                    stream_fut.set_result(stream)
-
-        session.events.on(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
-
-        try:
-            async with asyncio.timeout(delay=10.0):
-                stream = await stream_fut
-        except asyncio.TimeoutError:
-            stream_fut.cancel()
-            logger.warning("Pub/Sub session %s timed out waiting for stream.", session_id)
-            return
-        finally:
-            session.events.off(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
-
-        async def reader() -> None:
-            try:
-                while not stream.is_closed:
-                    line = await stream.readline()
-                    if not line:
-                        break
-                    parts = line.strip().split(b" ", 2)
-                    command = parts[0]
-                    if command == b"SUB" and len(parts) == 2:
-                        topic = parts[1].decode()
-                        subscribed_topics.add(topic)
-                        GLOBAL_TOPICS[topic].add(my_queue)
-                        await stream.write(data=b"SUB-OK %s\n" % parts[1])
-                    elif command == b"UNSUB" and len(parts) == 2:
-                        topic = parts[1].decode()
-                        subscribed_topics.discard(topic)
-                        GLOBAL_TOPICS[topic].discard(my_queue)
-                    elif command == b"PUB" and len(parts) == 3:
-                        topic, length = parts[1].decode(), int(parts[2])
-                        payload = await stream.readexactly(n=length)
-                        for q in GLOBAL_TOPICS.get(topic, set()).copy():
-                            q.put_nowait((topic, payload))
-            except (asyncio.CancelledError, ConnectionError, StreamError, asyncio.IncompleteReadError):
-                pass
-
-        async def writer() -> None:
-            try:
-                while not stream.is_closed:
-                    topic, payload = await my_queue.get()
-                    msg = b"MSG %s %d\n" % (topic.encode(), len(payload))
-                    await stream.write(data=msg + payload)
-                    my_queue.task_done()
-            except (asyncio.CancelledError, ConnectionError, StreamError):
-                pass
-
-        await asyncio.gather(reader(), writer())
-    except (StopAsyncIteration, asyncio.CancelledError, ConnectionError):
-        pass
-    except Exception as e:
-        logger.error("Pub/Sub handler error for session %s: %s", session_id, e, exc_info=True)
-    finally:
-        for topic in subscribed_topics:
-            GLOBAL_TOPICS[topic].discard(my_queue)
-        logger.info("Pub/Sub handler finished for session %s", session_id)
-
-
-async def rpc_handler(session: WebTransportSession) -> None:
-    """Handle the RPC test logic."""
-    session_id = session.session_id
-    logger.info("RPC handler started for session %s", session_id)
-
-    handlers: dict[str, Callable[..., Any]] = {}
-
-    def add(a: int, b: int) -> int:
-        return a + b
-
-    def get_user(user_id: int) -> dict[str, Any]:
-        return {"id": user_id, "name": f"User {user_id}"}
-
-    def log_message(message: str) -> None:
-        logger.info("RPC log_message from %s: %s", session_id, message)
-
-    def divide(a: int, b: int) -> float:
-        return a / b
-
-    async def slow_operation(delay: float) -> str:
-        await asyncio.sleep(delay=delay)
-        return f"Completed after {delay} seconds."
-
-    handlers["add"] = add
-    handlers["get_user"] = get_user
-    handlers["log_message"] = log_message
-    handlers["divide"] = divide
-    handlers["slow_operation"] = slow_operation
-
-    async def send_message(stream: WebTransportStream, message: dict[str, Any]) -> None:
-        try:
-            payload = json.dumps(message).encode("utf-8")
-            header = struct.pack("!I", len(payload))
-            await stream.write(data=header + payload)
-        except Exception:
-            await stream.close(error_code=1)
-
-    async def process_request(stream: WebTransportStream, request: dict[str, Any]) -> None:
-        request_id = request.get("id")
-        method_name = request.get("method")
-        params = request.get("params", [])
-        response: dict[str, Any] | None = None
-
-        if method_name not in handlers:
-            if request_id is not None:
-                error = MethodNotFoundError(message=f"Method '{method_name}' not found.").to_dict()
-                response = {"id": request_id, "error": error}
-        else:
-            try:
-                if not isinstance(params, list):
-                    raise InvalidParamsError(message="Parameters must be a list.")
-                result = handlers[method_name](*params)
-                if asyncio.iscoroutine(result):
-                    result = await result
-                if request_id is not None:
-                    response = {"id": request_id, "result": result}
-            except Exception as e:
-                if request_id is not None:
-                    error = RpcError(message=f"Error executing '{method_name}': {e}").to_dict()
-                    response = {"id": request_id, "error": error}
-        if response:
-            await send_message(stream, response)
-
-    try:
-        stream_fut: asyncio.Future[WebTransportStream] = asyncio.Future()
-
-        async def first_stream_handler(event: Event) -> None:
-            if not stream_fut.done() and isinstance(event.data, dict):
-                stream = event.data.get("stream")
-                if isinstance(stream, WebTransportStream):
-                    stream_fut.set_result(stream)
-
-        session.events.on(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
-
-        try:
-            async with asyncio.timeout(delay=10.0):
-                stream = await stream_fut
-        except asyncio.TimeoutError:
-            stream_fut.cancel()
-            logger.warning("RPC session %s timed out waiting for stream.", session_id)
-            return
-        finally:
-            session.events.off(event_type=EventType.STREAM_OPENED, handler=first_stream_handler)
-
-        while not stream.is_closed:
-            header = await stream.readexactly(n=4)
-            length = struct.unpack("!I", header)[0]
-            payload = await stream.readexactly(n=length)
-            message = json.loads(payload.decode("utf-8"))
-            asyncio.create_task(coro=process_request(stream, message))
-    except (StopAsyncIteration, asyncio.CancelledError, ConnectionError, StreamError, asyncio.IncompleteReadError):
-        pass
-    except Exception as e:
-        logger.error("RPC handler error for session %s: %s", session_id, e, exc_info=True)
-    finally:
-        logger.info("RPC handler finished for session %s", session_id)
-
-
-async def structured_echo_json_handler(session: WebTransportSession) -> None:
+async def structured_echo_json_handler(session: WebTransportSession, **kwargs: Any) -> None:
     """Handle echoing structured objects using JSON."""
     await _structured_echo_base_handler(session=session, serializer=JSON_SERIALIZER, serializer_name="JSON")
 
 
-async def structured_echo_msgpack_handler(session: WebTransportSession) -> None:
+async def structured_echo_msgpack_handler(session: WebTransportSession, **kwargs: Any) -> None:
     """Handle echoing structured objects using MsgPack."""
     await _structured_echo_base_handler(session=session, serializer=MSGPACK_SERIALIZER, serializer_name="MsgPack")
 
@@ -557,7 +369,6 @@ async def main() -> None:
         bind_port=SERVER_PORT,
         certfile=str(CERT_PATH),
         keyfile=str(KEY_PATH),
-        debug=DEBUG_MODE,
         log_level="DEBUG" if DEBUG_MODE else "INFO",
         initial_max_data=16 * 1024,
         initial_max_streams_bidi=5,
