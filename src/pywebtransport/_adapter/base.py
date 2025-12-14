@@ -221,9 +221,13 @@ class WebTransportCommonProtocol(QuicConnectionProtocol):
             and hasattr(transport, "sendto")
         ):
             packets = self._quic.datagrams_to_send(now=self._loop.time())
+            is_client = self._quic.configuration.is_client
             for data, addr in packets:
                 try:
-                    transport.sendto(data, addr)
+                    if is_client:
+                        transport.sendto(data)
+                    else:
+                        transport.sendto(data, addr)
                 except (ConnectionRefusedError, OSError) as e:
                     logger.debug("Failed to send UDP packet: %s", e)
                 except Exception as e:

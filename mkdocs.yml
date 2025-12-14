@@ -5,7 +5,7 @@ site_description: An async-native WebTransport stack for Python.
 site_url: https://docs.pywebtransport.org
 repo_url: https://github.com/lemonsterfy/pywebtransport
 repo_name: lemonsterfy/pywebtransport
-copyright: Copyright &copy; 2025 lemonsterfy
+copyright: Copyright &copy; 2025 PyWebTransport
 
 theme:
   name: material
