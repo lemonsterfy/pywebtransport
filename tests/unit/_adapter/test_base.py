@@ -51,6 +51,7 @@ class TestWebTransportCommonProtocol:
         quic._remote_max_datagram_frame_size = 1200
         quic.configuration = mocker.Mock(spec=QuicConfiguration)
         quic.configuration.server_name = "example.com"
+        quic.configuration.is_client = False
         quic.datagrams_to_send.return_value = []
         quic.get_timer.return_value = 12345.6
         return cast(MagicMock, quic)
@@ -571,6 +572,7 @@ class TestWebTransportCommonProtocol:
     def test_transmit_connection_refused(
         self, protocol: WebTransportCommonProtocol, mock_quic: MagicMock, mock_transport: MagicMock
     ) -> None:
+        mock_quic.configuration.is_client = False
         protocol.connection_made(transport=mock_transport)
         mock_quic.datagrams_to_send.return_value = [(b"packet", "addr")]
         mock_transport.sendto.side_effect = ConnectionRefusedError("Refused")
@@ -582,6 +584,7 @@ class TestWebTransportCommonProtocol:
     def test_transmit_generic_exception(
         self, protocol: WebTransportCommonProtocol, mock_quic: MagicMock, mock_transport: MagicMock
     ) -> None:
+        mock_quic.configuration.is_client = False
         protocol.connection_made(transport=mock_transport)
         mock_quic.datagrams_to_send.return_value = [(b"packet", "addr")]
         mock_transport.sendto.side_effect = ValueError("Unexpected error")
@@ -593,6 +596,7 @@ class TestWebTransportCommonProtocol:
     def test_transmit_handles_os_error(
         self, protocol: WebTransportCommonProtocol, mock_quic: MagicMock, mock_transport: MagicMock
     ) -> None:
+        mock_quic.configuration.is_client = False
         protocol.connection_made(transport=mock_transport)
         mock_quic.datagrams_to_send.return_value = [(b"packet", "addr")]
         mock_transport.sendto.side_effect = OSError("Network unreachable")
@@ -621,13 +625,32 @@ class TestWebTransportCommonProtocol:
 
         mock_quic.datagrams_to_send.assert_not_called()
 
-    def test_transmit_sends_packets(
+    def test_transmit_sends_packets_client(
         self,
         protocol: WebTransportCommonProtocol,
         mock_quic: MagicMock,
         mock_transport: MagicMock,
         mock_loop: MagicMock,
     ) -> None:
+        mock_quic.configuration.is_client = True
+        protocol.connection_made(transport=mock_transport)
+        mock_quic.datagrams_to_send.return_value = [(b"packet1", "addr1"), (b"packet2", "addr2")]
+
+        protocol.transmit()
+
+        mock_quic.datagrams_to_send.assert_called_once_with(now=mock_loop.time())
+        assert mock_transport.sendto.call_count == 2
+        mock_transport.sendto.assert_any_call(b"packet1")
+        mock_transport.sendto.assert_any_call(b"packet2")
+
+    def test_transmit_sends_packets_server(
+        self,
+        protocol: WebTransportCommonProtocol,
+        mock_quic: MagicMock,
+        mock_transport: MagicMock,
+        mock_loop: MagicMock,
+    ) -> None:
+        mock_quic.configuration.is_client = False
         protocol.connection_made(transport=mock_transport)
         mock_quic.datagrams_to_send.return_value = [(b"packet1", "addr1"), (b"packet2", "addr2")]
 

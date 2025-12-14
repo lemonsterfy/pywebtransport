@@ -22,14 +22,14 @@ _An async-native WebTransport stack for Python_
 
 ## Features
 
-- **Full Async Support**: Built from the ground up on `asyncio` for high-performance, non-blocking I/O.
-- **High-Level Frameworks**: Includes a `ServerApp` with routing and middleware, and a versatile `WebTransportClient` with helpers for fleet management, auto-reconnection, and browser-like navigation.
-- **Structured Messaging**: Send typed Python objects over streams and datagrams using pluggable serializers (`JSON`, `MsgPack`, `Protobuf`).
-- **Zero-Copy Architecture**: End-to-end support for `memoryview` and buffer protocols to minimize data copying.
-- **Complete Protocol Implementation**: Full support for bidirectional and unidirectional streams, as well as unreliable datagrams.
-- **Lifecycle and Resource Management**: Robust, async context-managed components for handling connections, sessions, streams, and resource cleanup.
-- **Event-Driven Architecture**: A powerful `EventEmitter` system for decoupled, asynchronous communication between components.
-- **Type-Safe and Tested**: A fully type-annotated API with extensive test coverage (unit, integration, E2E, benchmark) to ensure reliability and maintainability.
+- **Pure Async**: Built entirely on `asyncio` for high-concurrency, non-blocking I/O operations.
+- **Event Architecture**: Powered by a Sans-I/O unified state machine and a strictly typed `EventEmitter`.
+- **Zero-Copy I/O**: End-to-end support for `memoryview` and buffer protocols to minimize data copying overhead.
+- **Structured Messaging**: Transmission of typed Python objects via pluggable serializers (`JSON`, `MsgPack`, `Protobuf`).
+- **High-Level Abstractions**: `ServerApp` with routing and middleware, plus `WebTransportClient` utilities for fleet management.
+- **Protocol Completeness**: Implementation of bidirectional streams, unidirectional streams, and unreliable datagrams.
+- **Resource Safety**: Async context managers for automatic connection, session, and stream lifecycle management.
+- **Type-Safe & Tested**: Fully type-annotated API with comprehensive unit, integration, end-to-end, and benchmark coverage.
 
 ## Installation
 
@@ -137,6 +137,13 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
 ```
+
+## Interoperability
+
+- **[Public Endpoint](https://interop.pywebtransport.org)**: `https://interop.pywebtransport.org`
+  - **/echo**: Bidirectional stream and datagram reflection.
+  - **/status**: Global server health and aggregate metrics.
+  - **/stats**: Current session statistics and negotiated parameters.
 
 ## Documentation
 

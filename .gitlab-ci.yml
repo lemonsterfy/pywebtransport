@@ -71,9 +71,12 @@ deploy:
   dependencies:
     - build
   before_script:
-    - apt-get update && apt-get install -y ca-certificates git
-    - cp $INTERNAL_CA_CERT /usr/local/share/ca-certificates/internal_ca.crt
+    - apt-get update && apt-get install -y ca-certificates git gnupg
+    - echo "$INTERNAL_CA_CERT" > /usr/local/share/ca-certificates/internal_ca.crt
     - update-ca-certificates
+    - gpg --batch --import "$GPG_PRIVATE_KEY"
+    - 'git config user.signingkey $(gpg --list-secret-keys --with-colons | grep "^sec:" | cut -d: -f5 | head -n1)'
+    - git config commit.gpgsign true
     - python -m pip install --upgrade pip
     - pip install hatch
     - pip install .
@@ -86,9 +89,9 @@ deploy:
       fi
     - hatch publish
     - git remote set-url origin "https://gitlab-ci-token:$GITLAB_DEPLOY_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git"
-    - git config user.name "GitLab CI"
-    - git config user.email "ci@gitlab.local"
-    - git tag "v$VERSION"
+    - git config user.name "PyWebTransport Bot"
+    - git config user.email "128564476+lemonsterfy@users.noreply.github.com"
+    - git tag -s -m "Release v$VERSION" "v$VERSION"
     - git push origin "v$VERSION"
     - git remote add github "https://$GITHUB_TOKEN@github.com/lemonsterfy/pywebtransport.git"
     - git push github $CI_COMMIT_SHA:refs/heads/$CI_COMMIT_BRANCH

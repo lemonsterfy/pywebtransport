@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(No planned changes for the next release yet.)_
 
+## [0.10.1] - 2025-12-14
+
+This is a maintenance release that hardens the network transport layer, strengthens supply chain security, and synchronizes the documentation infrastructure. It resolves a socket compatibility issue for client-side connections and enforces strict GPG signing for all release artifacts.
+
+### Added
+
+- **Documentation**: Added an `Interoperability` section to `README.md` and `docs/index.md` specifying the public test endpoint contracts.
+
+### Changed
+
+- **Documentation**: Standardized the technical terminology in the `Features` list to align with strict architectural definitions.
+
+### Fixed
+
+- **Socket Transmission Mode**: Corrected the `WebTransportCommonProtocol.transmit` logic to strictly differentiate between connected (client) and unconnected (server) socket states. The client now invokes `transport.sendto` without an address argument, aligning with the behavior of connected UDP sockets.
+- **Release Security**: Configured the CI/CD pipeline to enforce GPG signing for all git tags and standardized the deployment committer identity to `PyWebTransport Bot`.
+
 ## [0.10.0] - 2025-12-11
 
 This release implements a definitive architectural purification and core refactoring. It flattens the package structure, enforces strict API boundaries via state caching, and achieves zero-copy data transmission in the hot path. Non-core features have been pruned to reduce the library footprint and improve maintainability.
@@ -571,7 +588,8 @@ This is a major release focused on enhancing runtime safety and modernizing the 
 - cryptography (>=45.0.4,<46.0.0) for SSL/TLS operations
 - typing-extensions (>=4.14.0,<5.0.0) for Python <3.10 support
 
-[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/lemonsterfy/pywebtransport/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/lemonsterfy/pywebtransport/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/lemonsterfy/pywebtransport/compare/v0.8.1...v0.9.0
